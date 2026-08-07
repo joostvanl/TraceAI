@@ -89,7 +89,14 @@ export type TicketFields = {
   ticket_key?: string;
   /** Numeric portion of ticket_key within the project */
   ticket_number?: number;
+  /** ISO datetime when the ticket entered its current stage */
+  stage_entered_at?: string;
+  /** ISO datetime when auto-archived off the board; unset = visible */
+  archived_at?: string;
 };
+
+/** Max visible tickets in the last workflow stage column. */
+export const LAST_STAGE_VISIBLE_LIMIT = 20;
 
 export type CommentFields = {
   ticket: string;
@@ -355,6 +362,40 @@ export function canTransition(
 
 export function firstStageKey(stages: WorkflowStage[]): string | null {
   return stages[0]?.key ?? null;
+}
+
+/** Last stage in the workflow definition (typically Done). */
+export function lastStageKey(stages: WorkflowStage[]): string | null {
+  return stages[stages.length - 1]?.key ?? null;
+}
+
+export type ArchiveCandidate = {
+  slug: string;
+  stage_entered_at?: string | null;
+  archived_at?: string | null;
+  /** Fallback when stage_entered_at is missing (e.g. legacy tickets). */
+  updated_at?: string | null;
+};
+
+/**
+ * Among non-archived candidates, return the slugs that exceed `limit`
+ * when sorted by most recent stage entry first (those should be archived).
+ */
+export function selectTicketsToArchive(
+  candidates: ArchiveCandidate[],
+  limit: number = LAST_STAGE_VISIBLE_LIMIT,
+): string[] {
+  const active = candidates.filter((c) => !c.archived_at);
+  const enteredAt = (c: ArchiveCandidate) =>
+    new Date(c.stage_entered_at || c.updated_at || 0).getTime();
+  const newestFirst = [...active].sort((a, b) => enteredAt(b) - enteredAt(a));
+  return newestFirst.slice(limit).map((c) => c.slug);
+}
+
+export function isTicketArchived(
+  ticket: { fields: { archived_at?: string | null } },
+): boolean {
+  return Boolean(ticket.fields.archived_at);
 }
 
 function normalizeHeading(value: string): string {

@@ -8,7 +8,7 @@ const token = readFileSync(resolve("data/bootstrap-token.txt"), "utf8")
   .slice("token=".length)
   .trim();
 
-const api = "http://127.0.0.1:3847";
+const api = "https://traceai.joostvanleeuwaarden.com";
 const project = "traceai";
 
 const esUrl = `${api}/events?project=${project}`;
@@ -73,8 +73,8 @@ SSE verify ticket was in progress for live-board check.
 Moving to review to emit ticket.transitioned for SSE client.
 
 ## Testverslag
-- SSE connect to /events?project=traceai — PASS (script connected)
-- Expect ticket.transitioned after this call — pending
+- SSE connect to /events?project=traceai â€” PASS (script connected)
+- Expect ticket.transitioned after this call â€” pending
 
 ## Uitslag
 PASS`,

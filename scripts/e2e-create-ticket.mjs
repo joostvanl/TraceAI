@@ -1,5 +1,5 @@
 /**
- * E2E checks for the New ticket MVP against the public TraceAI stack.
+ * E2E checks for the login-gated New ticket flow against the public TraceAI stack.
  */
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -9,7 +9,7 @@ const mcp = JSON.parse(
   readFileSync(join(homedir(), ".cursor", "mcp.json"), "utf8").replace(/^\uFEFF/, ""),
 );
 const token = mcp.mcpServers.traceai.env.TRACEAI_TOKEN;
-const secret = readFileSync(join("scripts", ".create-secret.local"), "utf8").trim();
+const login = JSON.parse(readFileSync(join("scripts", ".ui-login.local"), "utf8"));
 const web = "https://traceai.joostvanleeuwaarden.com";
 const api = "https://traceai.joostvanleeuwaarden.com";
 
@@ -36,45 +36,73 @@ async function apiJson(path, init = {}) {
   return { res, body };
 }
 
-const html = await (await fetch(`${web}/projects/traceai`)).text();
-assert(
-  html.includes("New ticket") || html.includes("create-ticket"),
-  "board missing New ticket UI",
-);
-console.log("PASS board shows create UI");
+async function postTicket(payload, cookie) {
+  return fetch(`${web}/api/tickets`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(cookie ? { Cookie: cookie } : {}),
+    },
+    body: JSON.stringify(payload),
+  });
+}
 
-const bad = await fetch(`${web}/api/tickets`, {
+const boardHtml = await (await fetch(`${web}/projects/traceai`)).text();
+assert(
+  boardHtml.includes("Sign in") || boardHtml.includes("New ticket"),
+  "board missing create/sign-in UI",
+);
+assert(
+  !boardHtml.includes("Create secret"),
+  "board still renders the create-secret field",
+);
+console.log("PASS board renders without a create-secret field");
+
+const anonymous = await postTicket({
+  project: "traceai",
+  title: "should fail",
+  description: "short wish",
+});
+assert(anonymous.status === 401, `expected 401 without session, got ${anonymous.status}`);
+console.log("PASS no session → 401");
+
+const badLogin = await fetch(`${web}/api/auth/login`, {
   method: "POST",
   headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    project: "traceai",
-    title: "should fail",
-    description: "short wish",
-    secret: "definitely-wrong",
-  }),
+  body: JSON.stringify({ username: login.user, password: "definitely-wrong" }),
 });
-assert(bad.status === 401, `expected 401 for bad secret, got ${bad.status}`);
-console.log("PASS bad secret → 401");
+assert(badLogin.status === 401, `expected 401 for bad password, got ${badLogin.status}`);
+console.log("PASS wrong password → 401");
+
+const goodLogin = await fetch(`${web}/api/auth/login`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ username: login.user, password: login.password }),
+});
+assert(goodLogin.ok, `login failed: ${goodLogin.status}`);
+const setCookie = goodLogin.headers.get("set-cookie") ?? "";
+assert(/HttpOnly/i.test(setCookie), `session cookie is not HttpOnly: ${setCookie}`);
+const cookie = setCookie.split(";")[0];
+assert(cookie.startsWith("traceai_session="), `unexpected cookie: ${cookie}`);
+console.log("PASS login sets an HttpOnly session cookie");
 
 const title = `Wish E2E ${new Date().toISOString().slice(11, 19)}`;
-const createdRes = await fetch(`${web}/api/tickets`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
+const createdRes = await postTicket(
+  {
     project: "traceai",
     title,
     description: "Ik wil een lichte wens vastleggen zonder playbook-secties.",
     priority: "low",
-    secret,
-  }),
-});
+  },
+  cookie,
+);
 const createdBody = await createdRes.json();
 assert(
   createdRes.status === 201,
   `create failed: ${createdRes.status} ${JSON.stringify(createdBody)}`,
 );
 assert(createdBody.stage === "backlog", `expected backlog, got ${createdBody.stage}`);
-console.log("PASS light create → backlog", createdBody.slug);
+console.log("PASS light create → backlog", createdBody.ticket_key ?? createdBody.slug);
 
 const comment = `## Vorige stap
 Wish captured in backlog without refinement.
@@ -124,5 +152,21 @@ const moved = await apiJson(
 );
 assert(moved.res.ok, `transition after refine failed: ${moved.res.status} ${JSON.stringify(moved.body)}`);
 console.log("PASS refined ticket moved to todo");
+
+const loggedOut = await fetch(`${web}/api/auth/logout`, {
+  method: "POST",
+  headers: { Cookie: cookie },
+});
+assert(loggedOut.ok, `logout failed: ${loggedOut.status}`);
+const clearedCookie = (loggedOut.headers.get("set-cookie") ?? "").split(";")[0];
+const afterLogout = await postTicket(
+  { project: "traceai", title: "after logout", description: "should fail" },
+  clearedCookie,
+);
+assert(
+  afterLogout.status === 401,
+  `expected 401 after logout, got ${afterLogout.status}`,
+);
+console.log("PASS logout revokes create rights");
 
 console.log("ALL E2E CHECKS PASSED");

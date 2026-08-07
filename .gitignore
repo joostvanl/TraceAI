@@ -14,6 +14,7 @@ dist/
 !apps/api/.env.example
 !deploy/**/.env.example
 scripts/.create-secret.local
+scripts/.ui-login.local
 .DS_Store
 *.tsbuildinfo
 data/

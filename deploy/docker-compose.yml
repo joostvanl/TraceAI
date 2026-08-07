@@ -46,7 +46,9 @@ services:
       # Server-only write proxy for the New ticket form (not NEXT_PUBLIC).
       TRACEAI_API_URL: ${TRACEAI_API_URL:-http://api:3847}
       TRACEAI_TOKEN: ${TRACEAI_TOKEN:-}
-      TRACEAI_CREATE_SECRET: ${TRACEAI_CREATE_SECRET:-}
+      TRACEAI_UI_USER: ${TRACEAI_UI_USER:-}
+      TRACEAI_UI_PASSWORD: ${TRACEAI_UI_PASSWORD:-}
+      TRACEAI_SESSION_SECRET: ${TRACEAI_SESSION_SECRET:-}
     depends_on:
       api:
         condition: service_healthy

@@ -1,19 +1,19 @@
 /**
- * Upserts TRACEAI_TOKEN / TRACEAI_CREATE_SECRET / TRACEAI_API_URL on the Pi
- * env file used by deploy-traceai.sh, without echoing the token.
+ * Upserts TRACEAI_TOKEN / TRACEAI_API_URL and the UI login credentials on the
+ * Pi env file used by deploy-traceai.sh, without echoing the token.
  *
- * Writes the create secret to scripts/.create-secret.local (gitignored) so
- * you can use it in the New ticket form.
+ * Writes the login to scripts/.ui-login.local (gitignored) so you can sign in
+ * on the board and so the e2e script can reuse it.
  */
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { readFileSync, writeFileSync, appendFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 const HOST = process.env.TRACEAI_PI_HOST ?? "joostvl@192.168.1.91";
 const ENV_REMOTE = process.env.TRACEAI_ENV_FILE ?? "~/.config/traceai/traceai.env";
-const secretPath = join("scripts", ".create-secret.local");
+const loginPath = join("scripts", ".ui-login.local");
 
 const mcp = JSON.parse(
   readFileSync(join(homedir(), ".cursor", "mcp.json"), "utf8").replace(/^\uFEFF/, ""),
@@ -24,13 +24,19 @@ if (!token?.startsWith("trc_")) {
   process.exit(1);
 }
 
-const secret =
-  process.env.TRACEAI_CREATE_SECRET ??
-  (existsSync(secretPath)
-    ? readFileSync(secretPath, "utf8").trim()
-    : `trc_create_${randomBytes(12).toString("base64url")}`);
+const existing = existsSync(loginPath)
+  ? JSON.parse(readFileSync(loginPath, "utf8"))
+  : {};
 
-writeFileSync(secretPath, `${secret}\n`, { mode: 0o600 });
+const user = process.env.TRACEAI_UI_USER ?? existing.user ?? "joost";
+const password =
+  process.env.TRACEAI_UI_PASSWORD ??
+  existing.password ??
+  randomBytes(12).toString("base64url");
+
+writeFileSync(loginPath, `${JSON.stringify({ user, password }, null, 2)}\n`, {
+  mode: 0o600,
+});
 
 const remoteScript = `
 set -euo pipefail
@@ -51,8 +57,10 @@ upsert() {
 }
 upsert TRACEAI_API_URL "http://api:3847"
 upsert TRACEAI_TOKEN ${JSON.stringify(token)}
-upsert TRACEAI_CREATE_SECRET ${JSON.stringify(secret)}
-echo "Pi env updated for New ticket form"
+upsert TRACEAI_UI_USER ${JSON.stringify(user)}
+upsert TRACEAI_UI_PASSWORD ${JSON.stringify(password)}
+sed -i '/^TRACEAI_CREATE_SECRET=/d' "$ENV_FILE"
+echo "Pi env updated for the UI login"
 `;
 
 execFileSync("ssh", ["-o", "BatchMode=yes", HOST, "bash", "-s"], {
@@ -60,5 +68,5 @@ execFileSync("ssh", ["-o", "BatchMode=yes", HOST, "bash", "-s"], {
   stdio: ["pipe", "inherit", "inherit"],
 });
 
-console.log(`Create secret saved to ${secretPath}`);
-console.log("Use that value in the New ticket form on the board.");
+console.log(`UI login saved to ${loginPath} (user: ${user})`);
+console.log("Sign in at /login on the board with those credentials.");

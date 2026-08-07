@@ -6,7 +6,10 @@
 import { TraceApiClient } from "@traceai/core";
 
 async function main() {
-  const apiUrl = process.env.TRACEAI_API_URL ?? "http://127.0.0.1:3847";
+  const apiUrl = process.env.TRACEAI_API_URL?.replace(/\/$/, "");
+  if (!apiUrl) {
+    throw new Error("Set TRACEAI_API_URL (required; no localhost default)");
+  }
   const token = process.env.TRACEAI_TOKEN;
   if (!token) {
     console.error("Set TRACEAI_TOKEN");

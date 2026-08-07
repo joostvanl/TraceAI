@@ -1,4 +1,4 @@
-const url = "http://127.0.0.1:3010/projects/traceai";
+const url = "https://traceai.joostvanleeuwaarden.com/projects/traceai";
 const titles = {
   sortDone: "Sort Done lane by completion time",
   fixMcp: "Fix stale TraceAI MCP 404",
@@ -23,7 +23,7 @@ for (let attempt = 1; attempt <= 8; attempt++) {
     console.log(
       "order sortDone-first:",
       ok,
-      "(sortDone completed last → should be top of Done)",
+      "(sortDone completed last â†’ should be top of Done)",
     );
     if (ok) break;
   }

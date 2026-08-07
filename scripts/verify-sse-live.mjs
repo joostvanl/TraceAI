@@ -7,7 +7,7 @@ const token = readFileSync(resolve("data/bootstrap-token.txt"), "utf8")
   ?.slice("token=".length)
   .trim();
 
-const api = "http://127.0.0.1:3847";
+const api = "https://traceai.joostvanleeuwaarden.com";
 const project = "traceai";
 const targetSlug = "verify-live-board-sse-through-api";
 
@@ -65,9 +65,9 @@ Ticket stond in **in_progress**. SSE endpoint + web EventSource opnieuw geverifi
 Transitie naar **review** om live \`ticket.transitioned\` te bewijzen via \`/events?project=traceai\`.
 
 ## Testverslag
-- SSE connect op /events?project=traceai — PASS
-- API transition publiceert ticket.transitioned — PASS (dit event)
-- Web build gebruikt NEXT_PUBLIC_TRACEAI_EVENTS_URL — PASS
+- SSE connect op /events?project=traceai â€” PASS
+- API transition publiceert ticket.transitioned â€” PASS (dit event)
+- Web build gebruikt NEXT_PUBLIC_TRACEAI_EVENTS_URL â€” PASS
 
 ## Uitslag
 PASS`,

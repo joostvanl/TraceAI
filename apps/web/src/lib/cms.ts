@@ -59,6 +59,7 @@ export async function listTicketsForProject(
   });
   return result.items
     .filter((t) => t.fields.project === projectSlug)
+    .filter((t) => !t.fields.archived_at)
     .sort((a, b) => (a.fields.sort_order ?? 0) - (b.fields.sort_order ?? 0));
 }
 

@@ -1,22 +1,27 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 type Props = {
   projectSlug: string;
+  authenticated: boolean;
 };
 
 type Priority = "low" | "medium" | "high";
 
-export function CreateTicketForm({ projectSlug }: Props) {
+export function CreateTicketForm({ projectSlug, authenticated }: Props) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<Priority>("medium");
-  const [secret, setSecret] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  const loginHref = `/login?next=${encodeURIComponent(`/projects/${projectSlug}`)}`;
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -32,7 +37,6 @@ export function CreateTicketForm({ projectSlug }: Props) {
           title,
           description,
           priority,
-          secret,
         }),
       });
       const body = (await res.json().catch(() => ({}))) as {
@@ -40,6 +44,10 @@ export function CreateTicketForm({ projectSlug }: Props) {
         slug?: string;
         ticket_key?: string;
       };
+      if (res.status === 401) {
+        router.push(loginHref);
+        return;
+      }
       if (!res.ok) {
         setError(body.message ?? `Create failed (${res.status})`);
         return;
@@ -55,13 +63,28 @@ export function CreateTicketForm({ projectSlug }: Props) {
       setTitle("");
       setDescription("");
       setPriority("medium");
-      setSecret("");
       setOpen(false);
+      router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (!authenticated) {
+    return (
+      <div className="create-ticket">
+        <div className="create-ticket-bar">
+          <Link href={loginHref} className="btn">
+            Sign in to add a ticket
+          </Link>
+          <p className="muted create-ticket-hint">
+            Boards zijn openbaar; aanmaken vraagt een login.
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -124,19 +147,6 @@ export function CreateTicketForm({ projectSlug }: Props) {
                 <option value="medium">medium</option>
                 <option value="high">high</option>
               </select>
-            </label>
-
-            <label>
-              <span>Create secret</span>
-              <input
-                type="password"
-                value={secret}
-                onChange={(e) => setSecret(e.target.value)}
-                required
-                autoComplete="off"
-                placeholder="Gedeeld wachtwoord"
-                disabled={submitting}
-              />
             </label>
           </div>
 

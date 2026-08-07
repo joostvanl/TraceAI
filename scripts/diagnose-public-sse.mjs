@@ -4,11 +4,11 @@
  * whether the event arrives.
  *
  * Because the ticket event bus lives in-process, LISTEN_BASE must be the exact
- * API instance that WRITE_BASE points at — a mismatch is silent, since every
+ * API instance that WRITE_BASE points at â€” a mismatch is silent, since every
  * instance shares one Aurora store and so a page refresh still looks correct.
  *
  *   node scripts/diagnose-public-sse.mjs
- *   LISTEN_BASE=http://127.0.0.1:3847 node scripts/diagnose-public-sse.mjs
+ *   LISTEN_BASE=https://traceai.joostvanleeuwaarden.com node scripts/diagnose-public-sse.mjs
  */
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -65,7 +65,7 @@ let sawConnected = false;
 let sawUpdate = false;
 
 const timeout = setTimeout(() => {
-  console.log("RESULT: TIMEOUT — no ticket.updated received in 20s");
+  console.log("RESULT: TIMEOUT â€” no ticket.updated received in 20s");
   console.log("sawConnected:", sawConnected);
   controller.abort();
   process.exit(sawUpdate ? 0 : 1);
@@ -101,7 +101,7 @@ try {
       if (event === "ticket.updated" || event === "ticket.transitioned") {
         sawUpdate = true;
         clearTimeout(timeout);
-        console.log("RESULT: LIVE_SSE_OK — event delivered through Cloudflare");
+        console.log("RESULT: LIVE_SSE_OK â€” event delivered through Cloudflare");
         controller.abort();
         process.exit(0);
       }

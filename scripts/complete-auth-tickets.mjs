@@ -8,7 +8,7 @@ const token = readFileSync(resolve("data/bootstrap-token.txt"), "utf8")
   .slice("token=".length)
   .trim();
 
-const api = "http://127.0.0.1:3847";
+const api = "https://traceai.joostvanleeuwaarden.com";
 const headers = {
   Authorization: `Bearer ${token}`,
   "Content-Type": "application/json",
@@ -24,8 +24,8 @@ Implementation for ${slug} completed in previous stage.
 Moving to review after auth feature work.
 
 ## Testverslag
-- Feature path exercised via TraceAI API — PASS
-- Actor attribution from token — PASS
+- Feature path exercised via TraceAI API â€” PASS
+- Actor attribution from token â€” PASS
 
 ## Uitslag
 PASS`

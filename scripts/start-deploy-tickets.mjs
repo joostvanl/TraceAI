@@ -6,7 +6,7 @@ const token = readFileSync(resolve("data/bootstrap-token.txt"), "utf8")
   .find((l) => l.startsWith("token="))
   ?.slice("token=".length)
   .trim();
-const api = "http://127.0.0.1:3847";
+const api = "https://traceai.joostvanleeuwaarden.com";
 const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
 async function transition(slug, to, comment) {

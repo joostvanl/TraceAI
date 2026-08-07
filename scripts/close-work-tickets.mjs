@@ -7,7 +7,7 @@ const token = readFileSync(resolve("data/bootstrap-token.txt"), "utf8")
   ?.slice("token=".length)
   .trim();
 
-const api = "http://127.0.0.1:3847";
+const api = "https://traceai.joostvanleeuwaarden.com";
 const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
 async function get(slug) {
@@ -54,9 +54,9 @@ async function toReviewIfNeeded(slug, testverslag) {
 // Order of completion determines Done ordering (last = top).
 await toReviewIfNeeded(
   "fix-traceai-mcp-404-stale-process",
-  `- Diagnostic script: health/me/projects/project-traceai met MCP-token — allemaal 200 (scripts/diag-mcp-token.mjs)
+  `- Diagnostic script: health/me/projects/project-traceai met MCP-token â€” allemaal 200 (scripts/diag-mcp-token.mjs)
 - packages/mcp herbouwd; fail() geeft nu een reload-hint bij 404
-- README/docs + Cursor-rule beschrijven "MCP 404 → reload MCP, niet Aurora-direct"`,
+- README/docs + Cursor-rule beschrijven "MCP 404 â†’ reload MCP, niet Aurora-direct"`,
 );
 await transition(
   "fix-traceai-mcp-404-stale-process",
@@ -75,7 +75,7 @@ await toReviewIfNeeded(
   `- LiveBoard: BoardTicket.stageChangedAt toegevoegd; done-kolom gesorteerd desc
 - Server render: stageChangedAt = ticket.updatedAt
 - SSE: transitie zet stageChangedAt = event.at (nieuw afgerond ticket bovenop)
-- pnpm --filter @traceai/web build — PASS; geen lint errors`,
+- pnpm --filter @traceai/web build â€” PASS; geen lint errors`,
 );
 await transition(
   "sort-done-lane-by-completion-time",

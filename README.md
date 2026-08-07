@@ -7,7 +7,7 @@ Agent-first issue tracker. Agents authenticate with **TraceAI tokens** (`trc_…
 ```
 Cursor/Claude  --TRACEAI_TOKEN-->  TraceAI MCP  --HTTP-->  TraceAI API  --Aurora token-->  Aurora CMS
 Human browser  --site key-->  Next.js UI  --public API-->  Aurora CMS (read)
-Human browser  --create secret-->  Next.js /api/tickets  --TRACEAI_TOKEN-->  TraceAI API (backlog create)
+Human browser  --session cookie-->  Next.js /api/tickets  --TRACEAI_TOKEN-->  TraceAI API (backlog create)
 ```
 
 See [docs/identity-and-tokens.md](docs/identity-and-tokens.md) and
@@ -29,7 +29,7 @@ Agents discover them via `get_project` (`agent_playbook`) / `get_workflow`
 | Package | Purpose |
 |---|---|
 | `apps/api` | TraceAI HTTP API + auth (users/tokens) |
-| `apps/web` | Read-only Next.js UI for humans |
+| `apps/web` | Next.js UI for humans — live boards + backlog wish capture |
 | `packages/auth` | Identity model, hashing, SQLite store |
 | `packages/core` | Domain service + Aurora + TraceAI API clients |
 | `packages/mcp` | MCP server for Cursor / Claude Code |
@@ -50,14 +50,14 @@ pnpm --filter @traceai/api bootstrap -- --email you@example.com --name "Your Nam
 # → prints a trc_… token once
 
 pnpm --filter @traceai/api start
-# API on http://127.0.0.1:3847
+# binds locally for development; agents/MCP use https://traceai.joostvanleeuwaarden.com
 
 pnpm --filter @traceai/web dev
 ```
 
 ## MCP (Cursor)
 
-Agents only need a TraceAI token:
+Agents only need a TraceAI token. **Always** point `TRACEAI_API_URL` at the public API — loopback is rejected by the MCP server:
 
 ```json
 {
@@ -75,8 +75,6 @@ Agents only need a TraceAI token:
 ```
 
 The API process holds `AURORA_USER_TOKEN` / `AURORA_MANAGEMENT_TOKEN` in its own env.
-
-For local development you may still point MCP at `http://127.0.0.1:3847`. Tokens are scoped to the auth DB of that API instance (Pi vs laptop). If you do switch, move the board's `NEXT_PUBLIC_TRACEAI_EVENTS_URL` with it — see [One writer](#one-writer-keep-mcp-and-the-board-on-the-same-api-instance).
 
 ### Agent tools
 
@@ -99,10 +97,15 @@ NEXT_PUBLIC_TRACEAI_EVENTS_URL=https://traceai.joostvanleeuwaarden.com/events
 # Server-only — New ticket form on the project board
 TRACEAI_API_URL=https://traceai.joostvanleeuwaarden.com
 TRACEAI_TOKEN=trc_YOUR_TOKEN
-TRACEAI_CREATE_SECRET=choose-a-shared-password
+
+# Server-only — UI login (one shared account)
+TRACEAI_UI_USER=joost
+TRACEAI_UI_PASSWORD=choose-a-password
+# Optional; defaults to the password, so rotating it also invalidates sessions
+TRACEAI_SESSION_SECRET=
 ```
 
-The form posts to `/api/tickets`, which checks `TRACEAI_CREATE_SECRET` and proxies to the TraceAI API. Tickets land in **Backlog** with a light wish description; agents must refine the playbook sections before transitioning to To do.
+Boards stay readable without logging in. Creating a ticket requires a session: `/login` verifies the credentials above and sets an HttpOnly, HMAC-signed cookie (`traceai_session`, 7 days). `/api/tickets` returns **401** without it and otherwise proxies to the TraceAI API with the server-side `trc_…` token. Tickets land in **Backlog** with a light wish description; agents must refine the playbook sections before transitioning to To do.
 
 ## Deploy on Raspberry Pi (Docker)
 
@@ -129,7 +132,7 @@ The board reads its initial state straight from Aurora, but live updates come fr
 
 Point them at different instances and nothing errors: every instance shares one Aurora store, so a refresh still shows the correct board while live updates silently never arrive. Both localhost origins are already allowed by the API's CORS defaults, so a local board can subscribe to the Pi instance.
 
-Cursor sometimes leaves orphan `node …/packages/mcp/dist/index.js` processes after an MCP reload. Those keep the old `TRACEAI_API_URL`. Every MCP tool result includes `api_base` — if it disagrees with the board events host, clean up and reload:
+Cursor sometimes leaves orphan `node …/packages/mcp/dist/index.js` processes after an MCP reload. Those keep the old `TRACEAI_API_URL` (historically localhost). The MCP server now **rejects** loopback URLs. Every tool result includes `api_base` — if it is not `https://traceai.joostvanleeuwaarden.com`, clean up and reload:
 
 ```bash
 node scripts/cleanup-traceai-mcp.mjs
@@ -142,8 +145,8 @@ To verify the full path, listen on one instance while writing to another:
 # same instance → expect LIVE_SSE_OK
 node scripts/diagnose-public-sse.mjs
 
-# deliberate mismatch → expect TIMEOUT
-LISTEN_BASE=http://127.0.0.1:3847 node scripts/diagnose-public-sse.mjs
+# deliberate mismatch (only if a local API is running) → expect TIMEOUT
+LISTEN_BASE=http://localhost:3847 node scripts/diagnose-public-sse.mjs
 ```
 
 ### Ticket keys (TRA-42)

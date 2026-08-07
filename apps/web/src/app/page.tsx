@@ -46,13 +46,13 @@ export default async function HomePage() {
         <ol className="steps">
           <li>
             <strong>Ensure the TraceAI API is reachable</strong>
-            <pre className="code-block">{`# Production (Pi / Cloudflare)
+            <pre className="code-block">{`# Production (required for agents / MCP)
 # ${API_URL}
 
-# Or locally:
+# Optional: run a local API only for API development.
+# Agents should still point TRACEAI_API_URL at ${API_URL}.
 cd ${REPO_ROOT}
-pnpm --filter @traceai/api start
-# listens on http://127.0.0.1:3847`}</pre>
+pnpm --filter @traceai/api start`}</pre>
           </li>
           <li>
             <strong>Create a user token</strong> (once per agent/user). Prefer an
@@ -129,7 +129,7 @@ pnpm --filter @traceai/api create-token -- --email agent@example.com --name "cur
               <li>Descriptions and comments are Markdown.</li>
               <li>
                 Humans can add light wish-tickets from a project board via{" "}
-                <strong>New ticket</strong> (shared create secret). They land in
+                <strong>New ticket</strong> after signing in. They land in
                 Backlog; agents refine the description before moving them to To
                 do. Other mutations still go through MCP / API.
               </li>

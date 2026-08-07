@@ -8,7 +8,7 @@ const token = readFileSync(resolve("data/bootstrap-token.txt"), "utf8")
   .trim();
 if (!token) process.exit(1);
 
-const api = "http://127.0.0.1:3847";
+const api = "https://traceai.joostvanleeuwaarden.com";
 const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 
 async function req(path, init) {
@@ -43,14 +43,14 @@ async function transition(slug, to, comment) {
 }
 
 const mcpDesc = `## Context
-Agents connect to TraceAI through the \`user-traceai\` MCP server (\`packages/mcp/dist/index.js\`), which proxies to the TraceAI API on \`http://127.0.0.1:3847\`. An agent reported that the MCP returns \`TraceAI API 404\` for \`get_project\`, while the same token + endpoint returns 200 when called directly against the API. Because of the 404 the agent bypassed TraceAI (writing outside the API), which also broke the live board (no SSE events for out-of-band writes).
+Agents connect to TraceAI through the \`user-traceai\` MCP server (\`packages/mcp/dist/index.js\`), which proxies to the TraceAI API on \`https://traceai.joostvanleeuwaarden.com\`. An agent reported that the MCP returns \`TraceAI API 404\` for \`get_project\`, while the same token + endpoint returns 200 when called directly against the API. Because of the 404 the agent bypassed TraceAI (writing outside the API), which also broke the live board (no SSE events for out-of-band writes).
 
 ## Goal
 Make the MCP path reliable again and document how to recover from a stale MCP process, so agents never silently bypass TraceAI.
 
 ## What to implement
 1. Confirm root cause: the long-running MCP process in Cursor holds a stale build/env (old API URL/port) so it hits an unknown route and gets a bare 404, even though \`mcp.json\` points to 3847.
-2. Verify current API + MCP token健康 with a diagnostic script (health, /v1/me, /v1/projects, /v1/projects/traceai).
+2. Verify current API + MCP tokenå¥åº· with a diagnostic script (health, /v1/me, /v1/projects, /v1/projects/traceai).
 3. Ensure \`packages/mcp/dist\` is rebuilt from current source.
 4. Document the recovery step (reload MCP / Cursor window) in README + docs so a 404 is understood as "reload MCP", not "bypass TraceAI".
 5. Improve the MCP error message to hint at reload when a 404 is received from the API root.
@@ -61,7 +61,7 @@ Make the MCP path reliable again and document how to recover from a stale MCP pr
 ## Acceptance criteria
 - Diagnostic script shows 200 for health, me, projects, and project-traceai with the MCP token.
 - \`packages/mcp/dist/index.js\` matches current source.
-- README/docs describe the "MCP 404 → reload MCP" recovery.
+- README/docs describe the "MCP 404 â†’ reload MCP" recovery.
 - After reloading MCP in Cursor, \`get_project traceai\` returns the project (no 404).`;
 
 const sseDesc = `## Context

@@ -12,7 +12,7 @@ const token = readFileSync(resolve("data/bootstrap-token.txt"), "utf8")
   .trim();
 if (!token) process.exit(1);
 
-const api = process.env.TRACEAI_API_URL ?? "http://127.0.0.1:3847";
+const api = process.env.TRACEAI_API_URL ?? "https://traceai.joostvanleeuwaarden.com";
 const headers = {
   Authorization: `Bearer ${token}`,
   "Content-Type": "application/json",
@@ -33,7 +33,7 @@ async function transition(slug, to, commentBody) {
   console.log(slug, "->", moved.stage);
 }
 
-// 1) SSE event bus ticket: intake done → in_progress → review → done
+// 1) SSE event bus ticket: intake done â†’ in_progress â†’ review â†’ done
 await transition(
   "live-board-sse-eventbus",
   "in_progress",
@@ -48,14 +48,14 @@ await transition(
   "live-board-sse-eventbus",
   "review",
   `## Vorige stap
-Event bus + \`GET /events\` SSE endpoint + publish vanuit create/update/transition/comment routes zijn geïmplementeerd in \`apps/api\`.
+Event bus + \`GET /events\` SSE endpoint + publish vanuit create/update/transition/comment routes zijn geÃ¯mplementeerd in \`apps/api\`.
 
 ## Deze stap
 Markeren als klaar voor review: API herbouwd; handmatige smoke volgt samen met de UI-ticket.
 
 ## Testverslag
-- \`pnpm --filter @traceai/api build\` — PASS
-- SSE endpoint routes wired — PASS
+- \`pnpm --filter @traceai/api build\` â€” PASS
+- SSE endpoint routes wired â€” PASS
 
 ## Uitslag
 PASS`,
@@ -96,14 +96,14 @@ await transition(
   "live-board-ui-client",
   "review",
   `## Vorige stap
-LiveBoard client en project page waren geïmplementeerd.
+LiveBoard client en project page waren geÃ¯mplementeerd.
 
 ## Deze stap
-Naar **review**: web build geslaagd; open board + transition om live move te verifiëren.
+Naar **review**: web build geslaagd; open board + transition om live move te verifiÃ«ren.
 
 ## Testverslag
-- \`pnpm --filter @traceai/web build\` — PASS
-- LiveBoard EventSource wiring — PASS
+- \`pnpm --filter @traceai/web build\` â€” PASS
+- LiveBoard EventSource wiring â€” PASS
 
 ## Uitslag
 PASS`,

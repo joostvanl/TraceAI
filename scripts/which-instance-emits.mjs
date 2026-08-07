@@ -1,15 +1,18 @@
 /**
- * Listens to several TraceAI API instances at once and reports which one emits
- * ticket events. Use it to find out where an agent's MCP writes actually land:
- * every instance shares one Aurora store, so the data alone cannot tell you.
+ * Listens to TraceAI API instances and reports which one emits ticket events.
  *
  *   node scripts/which-instance-emits.mjs
  *   ...then perform an MCP write (transition/comment) while it runs.
+ *
+ * Optional: also listen on a local API if one is running:
+ *   LOCAL_API=http://localhost:3847 node scripts/which-instance-emits.mjs
  */
 const targets = [
-  ["local ", "http://127.0.0.1:3847"],
   ["public", "https://traceai.joostvanleeuwaarden.com"],
 ];
+if (process.env.LOCAL_API) {
+  targets.unshift(["local ", process.env.LOCAL_API.replace(/\/$/, "")]);
+}
 const project = process.env.TRACEAI_PROJECT ?? "traceai";
 const windowMs = Number(process.env.WINDOW_MS ?? 45000);
 const started = Date.now();

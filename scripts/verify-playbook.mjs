@@ -9,7 +9,7 @@ const token = readFileSync(resolve("data/bootstrap-token.txt"), "utf8")
   .trim();
 if (!token) process.exit(1);
 
-const api = "http://127.0.0.1:3847";
+const api = "https://traceai.joostvanleeuwaarden.com";
 const headers = {
   Authorization: `Bearer ${token}`,
   "Content-Type": "application/json",
@@ -65,12 +65,12 @@ Playbook model, API enforcement, MCP tool docs, homepage rules, Cursor rule, and
 Ready for review of agent_policy in stages_json and validation behaviour.
 
 ## Testverslag
-- pnpm --filter @traceai/core build — PASS
-- pnpm --filter @traceai/api build — PASS
-- pnpm --filter @traceai/mcp build — PASS
-- Upgrade script wrote v2 document — PASS
-- Short description rejected by API — PASS
-- Transition without comment rejected — PASS
+- pnpm --filter @traceai/core build â€” PASS
+- pnpm --filter @traceai/api build â€” PASS
+- pnpm --filter @traceai/mcp build â€” PASS
+- Upgrade script wrote v2 document â€” PASS
+- Short description rejected by API â€” PASS
+- Transition without comment rejected â€” PASS
 
 ## Uitslag
 PASS`,

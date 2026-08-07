@@ -11,7 +11,16 @@ function resolveApiUrl(): string {
       "Set TRACEAI_API_URL in the TraceAI MCP env (e.g. https://traceai.joostvanleeuwaarden.com). Refusing to default to localhost — that silently breaks the live board when Cursor keeps a stale MCP process.",
     );
   }
-  return raw.replace(/\/+$/, "");
+  const apiUrl = raw.replace(/\/+$/, "");
+  // Hard reject loopback: Cursor sometimes keeps orphan MCP processes that were
+  // started with an old TRACEAI_API_URL. Fail loudly instead of writing to the
+  // wrong instance.
+  if (/^(https?:\/\/)?(127\.0\.0\.1|localhost)([:/]|$)/i.test(apiUrl)) {
+    throw new Error(
+      `TRACEAI_API_URL must not be loopback (${apiUrl}). Point MCP at the public TraceAI API (https://traceai.joostvanleeuwaarden.com), run node scripts/cleanup-traceai-mcp.mjs, and reload the MCP server.`,
+    );
+  }
+  return apiUrl;
 }
 
 function createClient(): TraceApiClient {

@@ -5,13 +5,17 @@ import {
 import {
   DEFAULT_STAGES,
   DEFAULT_WORKFLOW_DOCUMENT,
+  LAST_STAGE_VISIBLE_LIMIT,
   canTransition,
   deriveProjectKeyFromSlug,
   firstStageKey,
   formatTicketKey,
+  isTicketArchived,
   isTicketKeyPattern,
+  lastStageKey,
   normalizeProjectKey,
   parseWorkflowDocument,
+  selectTicketsToArchive,
   serializeWorkflowDocument,
   slugify,
   validateTicketDescription,
@@ -257,6 +261,7 @@ export class TraceService {
   async listTickets(input: {
     project: string;
     stage?: string;
+    include_archived?: boolean;
   }): Promise<Ticket[]> {
     await this.ensureReady();
     const result = await this.client.listEntries<Ticket>("ticket", {
@@ -266,6 +271,7 @@ export class TraceService {
     return result.items
       .filter((t) => t.fields.project === input.project)
       .filter((t) => (input.stage ? t.fields.stage === input.stage : true))
+      .filter((t) => (input.include_archived ? true : !isTicketArchived(t)))
       .sort((a, b) => (a.fields.sort_order ?? 0) - (b.fields.sort_order ?? 0));
   }
 
@@ -524,6 +530,7 @@ export class TraceService {
     );
 
     const identity = await this.allocateTicketIdentity(input.project);
+    const now = new Date().toISOString();
 
     const ticket = await this.client.createEntry<Ticket>("ticket", {
       slug,
@@ -540,9 +547,16 @@ export class TraceService {
           .length,
         ticket_key: identity.ticketKey,
         ticket_number: identity.ticketNumber,
+        stage_entered_at: now,
       },
     });
     await this.ensurePublished("ticket", ticket);
+
+    const last = lastStageKey(stages);
+    if (last && stage === last) {
+      await this.pruneLastStageTickets(input.project, workflowSlug, last);
+    }
+
     return ticket;
   }
 
@@ -591,7 +605,7 @@ export class TraceService {
       comment?: string;
       author?: string;
     },
-  ): Promise<Ticket> {
+  ): Promise<{ ticket: Ticket; archived: Ticket[] }> {
     await this.ensureReady();
     const ticket = await this.resolveTicket(slug);
     if (!ticket) throw new Error(`Ticket not found: ${slug}`);
@@ -637,11 +651,145 @@ export class TraceService {
       });
     }
 
+    const now = new Date().toISOString();
     const updated = await this.client.updateEntry<Ticket>("ticket", ticket.id, {
-      fields: { stage: toStage },
+      fields: { stage: toStage, stage_entered_at: now },
     });
     await this.ensurePublished("ticket", updated);
-    return updated;
+
+    let archived: Ticket[] = [];
+    const last = lastStageKey(stages);
+    if (last && toStage === last) {
+      archived = await this.pruneLastStageTickets(
+        updated.fields.project,
+        updated.fields.workflow,
+        last,
+      );
+    }
+
+    return { ticket: updated, archived };
+  }
+
+  /**
+   * Keep at most LAST_STAGE_VISIBLE_LIMIT non-archived tickets in the last
+   * stage. Older tickets (by stage_entered_at) get archived_at set.
+   */
+  async pruneLastStageTickets(
+    project: string,
+    workflowSlug: string,
+    lastStage: string,
+    limit: number = LAST_STAGE_VISIBLE_LIMIT,
+  ): Promise<Ticket[]> {
+    await this.ensureReady();
+    const result = await this.client.listEntries<Ticket>("ticket", {
+      status: "published",
+      limit: 100,
+    });
+    const inLastStage = result.items.filter(
+      (t) =>
+        t.fields.project === project &&
+        t.fields.workflow === workflowSlug &&
+        t.fields.stage === lastStage,
+    );
+    const toArchiveSlugs = new Set(
+      selectTicketsToArchive(
+        inLastStage.map((t) => ({
+          slug: t.slug,
+          stage_entered_at: t.fields.stage_entered_at,
+          archived_at: t.fields.archived_at,
+          updated_at: t.updatedAt,
+        })),
+        limit,
+      ),
+    );
+    if (toArchiveSlugs.size === 0) return [];
+
+    const now = new Date().toISOString();
+    const archived: Ticket[] = [];
+    for (const ticket of inLastStage) {
+      if (!toArchiveSlugs.has(ticket.slug)) continue;
+      const updated = await this.client.updateEntry<Ticket>("ticket", ticket.id, {
+        fields: { archived_at: now },
+      });
+      await this.ensurePublished("ticket", updated);
+      archived.push(updated);
+    }
+    return archived;
+  }
+
+  /**
+   * Backfill stage_entered_at from updatedAt when missing, then prune each
+   * workflow's last stage to LAST_STAGE_VISIBLE_LIMIT.
+   */
+  async backfillLastStageArchive(projectSlug?: string): Promise<{
+    stageEnteredBackfilled: number;
+    archived: number;
+    projects: string[];
+  }> {
+    await this.ensureReady();
+    const projects = projectSlug
+      ? ([
+          await this.client.getEntryBySlug<Project>("project", projectSlug),
+        ].filter(Boolean) as Project[])
+      : (
+          await this.client.listEntries<Project>("project", {
+            status: "published",
+            limit: 100,
+          })
+        ).items;
+
+    const allTickets = (
+      await this.client.listEntries<Ticket>("ticket", {
+        status: "published",
+        limit: 100,
+      })
+    ).items;
+
+    let stageEnteredBackfilled = 0;
+    for (const ticket of allTickets) {
+      if (ticket.fields.stage_entered_at) continue;
+      if (projectSlug && ticket.fields.project !== projectSlug) continue;
+      const updated = await this.client.updateEntry<Ticket>("ticket", ticket.id, {
+        fields: { stage_entered_at: ticket.updatedAt },
+      });
+      await this.ensurePublished("ticket", updated);
+      stageEnteredBackfilled += 1;
+    }
+
+    let archived = 0;
+    const touchedProjects: string[] = [];
+    for (const project of projects) {
+      const workflows = (
+        await this.client.listEntries<Workflow>("workflow", {
+          status: "published",
+          limit: 100,
+        })
+      ).items.filter((w) => w.fields.project === project.slug);
+
+      for (const workflow of workflows) {
+        const last = lastStageKey(
+          parseWorkflowDocument(workflow.fields.stages_json).stages,
+        );
+        if (!last) continue;
+        const pruned = await this.pruneLastStageTickets(
+          project.slug,
+          workflow.slug,
+          last,
+        );
+        if (pruned.length > 0) {
+          archived += pruned.length;
+          if (!touchedProjects.includes(project.slug)) {
+            touchedProjects.push(project.slug);
+          }
+        }
+      }
+    }
+
+    return {
+      stageEnteredBackfilled,
+      archived,
+      projects: touchedProjects,
+    };
   }
 
   async addComment(input: {

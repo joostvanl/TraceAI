@@ -10,7 +10,7 @@ export type BoardTicket = {
   title: string;
   stage: string;
   priority: string;
-  /** When the ticket last entered its current stage (ISO). Used to sort Done newest-first. */
+  /** When the ticket last entered its current stage (ISO). Used to sort last stage newest-first. */
   stageChangedAt?: string;
 };
 
@@ -18,9 +18,6 @@ export type BoardStage = {
   key: string;
   name: string;
 };
-
-/** Stages whose column is ordered by most recent stage entry (newest on top). */
-const NEWEST_FIRST_STAGES = new Set(["done"]);
 
 type TicketEvent = {
   type: string;
@@ -41,6 +38,8 @@ type TicketEvent = {
 type Props = {
   projectSlug: string;
   stages: BoardStage[];
+  /** Last workflow stage key — column ordered newest-first. */
+  lastStageKey?: string;
   initialTickets: BoardTicket[];
   eventsUrl: string;
 };
@@ -48,6 +47,7 @@ type Props = {
 function groupByStage(
   stages: BoardStage[],
   tickets: BoardTicket[],
+  lastStageKey?: string,
 ): Record<string, BoardTicket[]> {
   const map: Record<string, BoardTicket[]> = {};
   for (const stage of stages) map[stage.key] = [];
@@ -55,14 +55,12 @@ function groupByStage(
     if (!map[ticket.stage]) map[ticket.stage] = [];
     map[ticket.stage].push(ticket);
   }
-  for (const key of Object.keys(map)) {
-    if (NEWEST_FIRST_STAGES.has(key)) {
-      map[key].sort(
-        (a, b) =>
-          new Date(b.stageChangedAt ?? 0).getTime() -
-          new Date(a.stageChangedAt ?? 0).getTime(),
-      );
-    }
+  if (lastStageKey && map[lastStageKey]) {
+    map[lastStageKey].sort(
+      (a, b) =>
+        new Date(b.stageChangedAt ?? 0).getTime() -
+        new Date(a.stageChangedAt ?? 0).getTime(),
+    );
   }
   return map;
 }
@@ -70,6 +68,7 @@ function groupByStage(
 export function LiveBoard({
   projectSlug,
   stages,
+  lastStageKey,
   initialTickets,
   eventsUrl,
 }: Props) {
@@ -81,8 +80,8 @@ export function LiveBoard({
   const [lastEventAt, setLastEventAt] = useState<string | null>(null);
 
   const ticketsByStage = useMemo(
-    () => groupByStage(stages, tickets),
-    [stages, tickets],
+    () => groupByStage(stages, tickets, lastStageKey),
+    [stages, tickets, lastStageKey],
   );
 
   // Surfaced next to the status: writes to a different API instance are
@@ -124,6 +123,9 @@ export function LiveBoard({
       setLiveState("live");
 
       setTickets((prev) => {
+        if (event.type === "ticket.archived") {
+          return prev.filter((t) => t.slug !== event.ticket.slug);
+        }
         const without = prev.filter((t) => t.slug !== event.ticket.slug);
         if (event.type === "ticket.commented") {
           // Keep placement; optional highlight only.
@@ -144,9 +146,11 @@ export function LiveBoard({
         return [...without, next];
       });
 
-      setFlashSlug(event.ticket.slug);
-      if (flashTimer) clearTimeout(flashTimer);
-      flashTimer = setTimeout(() => setFlashSlug(null), 1600);
+      if (event.type !== "ticket.archived") {
+        setFlashSlug(event.ticket.slug);
+        if (flashTimer) clearTimeout(flashTimer);
+        flashTimer = setTimeout(() => setFlashSlug(null), 1600);
+      }
     };
 
     source.addEventListener("connected", () => setLiveState("live"));
@@ -154,6 +158,7 @@ export function LiveBoard({
     source.addEventListener("ticket.updated", applyEvent);
     source.addEventListener("ticket.transitioned", applyEvent);
     source.addEventListener("ticket.commented", applyEvent);
+    source.addEventListener("ticket.archived", applyEvent);
 
     source.onopen = () => setLiveState("live");
     source.onerror = () => setLiveState("offline");

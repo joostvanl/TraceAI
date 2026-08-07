@@ -1,6 +1,6 @@
-import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { TraceApiClient, TraceApiError } from "@traceai/core";
+import { getSessionUser, isLoginConfigured } from "@/lib/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,15 +10,7 @@ type CreateBody = {
   title?: string;
   description?: string;
   priority?: string;
-  secret?: string;
 };
-
-function secretsMatch(provided: string, expected: string): boolean {
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
-}
 
 function createClient(): TraceApiClient {
   const apiUrl = process.env.TRACEAI_API_URL?.replace(/\/$/, "");
@@ -35,11 +27,22 @@ function createClient(): TraceApiClient {
 }
 
 export async function POST(request: Request) {
-  const expectedSecret = process.env.TRACEAI_CREATE_SECRET;
-  if (!expectedSecret) {
+  if (!isLoginConfigured()) {
     return NextResponse.json(
-      { message: "Ticket creation is not configured", code: "NOT_CONFIGURED" },
+      {
+        message:
+          "UI login is not configured. Set TRACEAI_UI_USER and TRACEAI_UI_PASSWORD on the web server.",
+        code: "NOT_CONFIGURED",
+      },
       { status: 503 },
+    );
+  }
+
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) {
+    return NextResponse.json(
+      { message: "Sign in to create tickets", code: "UNAUTHORIZED" },
+      { status: 401 },
     );
   }
 
@@ -50,14 +53,6 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { message: "Invalid JSON body", code: "VALIDATION" },
       { status: 400 },
-    );
-  }
-
-  const secret = body.secret ?? "";
-  if (!secretsMatch(secret, expectedSecret)) {
-    return NextResponse.json(
-      { message: "Invalid create secret", code: "UNAUTHORIZED" },
-      { status: 401 },
     );
   }
 

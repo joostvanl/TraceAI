@@ -22,8 +22,8 @@ Canonical working agreements live in each workflow's `stages_json` as:
 
 ## How agents discover rules
 
-1. Call `get_project` — response includes `agent_playbook`.
-2. Call `get_workflow` — response includes `agent_policy` + per-stage `agent` rules.
+1. Call `get_project` â€” response includes `agent_playbook`.
+2. Call `get_workflow` â€” response includes `agent_policy` + per-stage `agent` rules.
 3. The API **enforces** these rules:
    - Ticket descriptions must meet `min_description_chars` and required `##` headings.
    - Every `transition` requires a Markdown `comment`.
@@ -42,16 +42,16 @@ See `DEFAULT_WORKFLOW_DOCUMENT` in `@traceai/core`.
 ### Recovering from an MCP `404`
 
 A bare `TraceAI API 404` from an MCP tool almost always means the running MCP process is
-**stale** (old build/env, e.g. an old `TRACEAI_API_URL` port) — not that the resource is
+**stale** (old build/env, e.g. an old `TRACEAI_API_URL` port) â€” not that the resource is
 missing. The same token usually works when called directly against the API.
 
 Fix it, do not bypass it:
 
-1. Confirm the API is up: `GET http://127.0.0.1:3847/health` → `{ "status": "ok" }`.
+1. Confirm the API is up: `GET https://traceai.joostvanleeuwaarden.com/health` â†’ `{ "status": "ok" }`.
 2. Rebuild the MCP if needed: `pnpm --filter @traceai/mcp build`.
 3. Reload the `traceai` MCP server in Cursor (toggle it off/on in MCP settings, or reload
    the window) so it picks up the current build and `mcp.json` env.
-4. Retry `get_project` — it should return the project, no 404.
+4. Retry `get_project` â€” it should return the project, no 404.
 
 ## Live board
 

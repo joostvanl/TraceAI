@@ -16,7 +16,7 @@ if (!token) {
   process.exit(1);
 }
 
-const api = process.env.TRACEAI_API_URL ?? "http://127.0.0.1:3847";
+const api = process.env.TRACEAI_API_URL ?? "https://traceai.joostvanleeuwaarden.com";
 const headers = {
   Authorization: `Bearer ${token}`,
   "Content-Type": "application/json",

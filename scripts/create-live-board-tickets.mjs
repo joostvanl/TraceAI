@@ -16,7 +16,7 @@ if (!token) {
   process.exit(1);
 }
 
-const api = process.env.TRACEAI_API_URL ?? "http://127.0.0.1:3847";
+const api = process.env.TRACEAI_API_URL ?? "https://traceai.joostvanleeuwaarden.com";
 const headers = {
   Authorization: `Bearer ${token}`,
   "Content-Type": "application/json",
@@ -52,7 +52,7 @@ const tickets = [
     priority: "high",
     stage: "todo",
     description: `## Context
-TraceAI humans watch a read-only kanban board in the Next.js UI. Agents change ticket stages via the TraceAI API/MCP. Today the board only updates on a full page reload. We need **server push** so cards move live when an agent transitions a ticket — without polling or continuous refresh.
+TraceAI humans watch a read-only kanban board in the Next.js UI. Agents change ticket stages via the TraceAI API/MCP. Today the board only updates on a full page reload. We need **server push** so cards move live when an agent transitions a ticket â€” without polling or continuous refresh.
 
 ## Goal
 Add a Server-Sent Events (SSE) event bus to \`apps/api\` that broadcasts ticket domain events whenever the API mutates tickets.
@@ -66,8 +66,8 @@ Add a Server-Sent Events (SSE) event bus to \`apps/api\` that broadcasts ticket 
    - \`from_stage\` / \`to_stage\` when type is \`ticket.transitioned\`
    - \`at\`: ISO timestamp
 3. Call \`publish\` after successful ticket create, update, transition, and comment in \`apps/api/src/app.ts\`.
-4. Expose **public** SSE endpoint \`GET /events?project={slug}\` (no TraceAI bearer required — board is read-only). Filter stream by project when query present.
-5. Enable CORS for browser origins used by the UI (\`http://localhost:3000\`, \`http://127.0.0.1:3010\`, and configurable list).
+4. Expose **public** SSE endpoint \`GET /events?project={slug}\` (no TraceAI bearer required â€” board is read-only). Filter stream by project when query present.
+5. Enable CORS for browser origins used by the UI (\`http://localhost:3000\`, \`https://traceai.joostvanleeuwaarden.com\`, and configurable list).
 6. Document the endpoint in README briefly.
 
 ## Out of scope
@@ -95,7 +95,7 @@ Depends on ticket \`live-board-sse-eventbus\`. The project board page (\`apps/we
 When an agent transitions a ticket, the card animates/moves from the old workflow column to the new one on an open board page.
 
 ## What to implement
-1. Add env \`NEXT_PUBLIC_TRACEAI_EVENTS_URL\` (default \`http://127.0.0.1:3847/events\`).
+1. Add env \`NEXT_PUBLIC_TRACEAI_EVENTS_URL\` (default \`https://traceai.joostvanleeuwaarden.com/events\`).
 2. Split the board into:
    - Server component: load initial board data via Aurora public API (existing \`getProjectBoard\`).
    - Client component \`LiveBoard\`: receives initial stages + tickets, opens \`EventSource\` to \`{EVENTS_URL}?project={slug}\`.
@@ -150,7 +150,7 @@ for (const t of tickets) {
       "## Intake",
       "",
       "Ticket aangemaakt in **backlog/todo** als startpunt voor de live-board feature.",
-      "Nog geen implementatie gedaan in deze stap — alleen scope en acceptatiecriteria vastgelegd zodat een agent zonder eerdere chatcontext zelfstandig kan starten.",
+      "Nog geen implementatie gedaan in deze stap â€” alleen scope en acceptatiecriteria vastgelegd zodat een agent zonder eerdere chatcontext zelfstandig kan starten.",
       "",
       `Volgende toegestane stap: trek dit ticket naar \`in_progress\` wanneer je eraan begint, en documenteer in een comment wat de vorige stap opleverde.`,
     ].join("\n"),
