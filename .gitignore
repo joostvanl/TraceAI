@@ -1,0 +1,22 @@
+# TraceAI monorepo
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.next/
+**/.next/
+.turbo
+*.log
+.env
+.env.local
+.env.*.local
+!.env.example
+!apps/api/.env.example
+!deploy/**/.env.example
+.DS_Store
+*.tsbuildinfo
+data/
+*.sqlite
+*.sqlite-*
+bootstrap-token.txt
+.cursor/
