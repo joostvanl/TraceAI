@@ -11,13 +11,17 @@ website/project as local development.
 
 ## Setup
 
-```bash
-cd ~/TraceAI/deploy
-cp .env.example .env
-# edit .env — set AURORA_USER_TOKEN and NEXT_PUBLIC_CMS_SITE_KEY
+Install the trigger script once as `~/deploy-traceai.sh`. It clones/updates this
+repository over public HTTPS, builds both containers and runs health checks.
 
-docker compose up -d --build
+```bash
+chmod +x ~/deploy-traceai.sh
+~/deploy-traceai.sh
 ```
+
+On its first run it creates `~/.config/traceai/traceai.env` and stops. Fill
+`AURORA_USER_TOKEN` and `NEXT_PUBLIC_CMS_SITE_KEY`, then run the same command
+again. Secrets remain outside the git checkout.
 
 ## URLs
 
@@ -39,8 +43,5 @@ after exposing it, or copy a bootstrap script into the container.)
 ## Update
 
 ```bash
-cd ~/TraceAI
-git pull
-cd deploy
-docker compose up -d --build
+~/deploy-traceai.sh
 ```

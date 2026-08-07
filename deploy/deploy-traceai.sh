@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+REPO_URL="${TRACEAI_REPO_URL:-https://github.com/joostvanl/TraceAI.git}"
+APP_DIR="${TRACEAI_APP_DIR:-$HOME/TraceAI}"
+ENV_FILE="${TRACEAI_ENV_FILE:-$HOME/.config/traceai/traceai.env}"
+BRANCH="${TRACEAI_BRANCH:-main}"
+
+log() {
+  printf '[TraceAI deploy] %s\n' "$*"
+}
+
+fail() {
+  printf '[TraceAI deploy] ERROR: %s\n' "$*" >&2
+  exit 1
+}
+
+command -v git >/dev/null || fail "git is not installed"
+command -v docker >/dev/null || fail "Docker is not installed"
+docker compose version >/dev/null || fail "Docker Compose is not available"
+
+if [[ ! -f "$ENV_FILE" ]]; then
+  mkdir -p "$(dirname "$ENV_FILE")"
+  cat >"$ENV_FILE" <<'EOF'
+AURORA_API_URL=https://aurora-api.joostvanleeuwaarden.com
+AURORA_USER_TOKEN=
+AURORA_WEBSITE_ID=cmsiyy8oy00quoc01zzam3t6p
+AURORA_LOCALE=en-US
+TRACEAI_CORS_ORIGINS=http://192.168.1.91:3010,http://pi5:3010
+NEXT_PUBLIC_CMS_API_URL=https://aurora-api.joostvanleeuwaarden.com
+NEXT_PUBLIC_CMS_SITE_KEY=
+NEXT_PUBLIC_TRACEAI_EVENTS_URL=http://192.168.1.91:3847/events
+EOF
+  chmod 600 "$ENV_FILE"
+  fail "Created $ENV_FILE. Fill AURORA_USER_TOKEN and NEXT_PUBLIC_CMS_SITE_KEY, then run this script again."
+fi
+
+grep -Eq '^AURORA_USER_TOKEN=.+$' "$ENV_FILE" ||
+  fail "AURORA_USER_TOKEN is missing in $ENV_FILE"
+grep -Eq '^NEXT_PUBLIC_CMS_SITE_KEY=.+$' "$ENV_FILE" ||
+  fail "NEXT_PUBLIC_CMS_SITE_KEY is missing in $ENV_FILE"
+
+if [[ -d "$APP_DIR/.git" ]]; then
+  log "Updating $APP_DIR from $BRANCH"
+  git -C "$APP_DIR" fetch origin "$BRANCH"
+  git -C "$APP_DIR" checkout "$BRANCH"
+  git -C "$APP_DIR" pull --ff-only origin "$BRANCH"
+elif [[ -e "$APP_DIR" ]] && [[ -n "$(ls -A "$APP_DIR" 2>/dev/null)" ]]; then
+  fail "$APP_DIR exists but is not a git checkout. Move/remove it once, then retry."
+else
+  log "Cloning $REPO_URL"
+  rm -rf "$APP_DIR"
+  git clone --branch "$BRANCH" --single-branch "$REPO_URL" "$APP_DIR"
+fi
+
+install -m 600 "$ENV_FILE" "$APP_DIR/deploy/.env"
+
+log "Building and starting containers"
+docker compose \
+  --project-directory "$APP_DIR/deploy" \
+  --env-file "$ENV_FILE" \
+  up -d --build --remove-orphans
+
+log "Waiting for API health"
+for attempt in {1..30}; do
+  if curl --fail --silent http://127.0.0.1:3847/health >/dev/null; then
+    break
+  fi
+  if [[ "$attempt" == 30 ]]; then
+    docker compose --project-directory "$APP_DIR/deploy" ps
+    fail "API did not become healthy"
+  fi
+  sleep 2
+done
+
+curl --fail --silent http://127.0.0.1:3010/ >/dev/null ||
+  fail "Web UI health check failed"
+
+docker compose --project-directory "$APP_DIR/deploy" ps
+log "Deployment complete"
+log "UI:  http://192.168.1.91:3010"
+log "API: http://192.168.1.91:3847/health"
