@@ -26,7 +26,7 @@ AURORA_API_URL=https://aurora-api.joostvanleeuwaarden.com
 AURORA_USER_TOKEN=
 AURORA_WEBSITE_ID=cmsiyy8oy00quoc01zzam3t6p
 AURORA_LOCALE=en-US
-TRACEAI_CORS_ORIGINS=http://192.168.1.91:3010,http://pi5:3010
+TRACEAI_CORS_ORIGINS=http://192.168.1.91:3011,http://pi5:3011
 NEXT_PUBLIC_CMS_API_URL=https://aurora-api.joostvanleeuwaarden.com
 NEXT_PUBLIC_CMS_SITE_KEY=
 NEXT_PUBLIC_TRACEAI_EVENTS_URL=http://192.168.1.91:3847/events
@@ -56,10 +56,10 @@ fi
 install -m 600 "$ENV_FILE" "$APP_DIR/deploy/.env"
 
 log "Building and starting containers"
-docker compose \
+docker compose --project-name traceai \
   --project-directory "$APP_DIR/deploy" \
   --env-file "$ENV_FILE" \
-  up -d --build --remove-orphans
+  up -d --build
 
 log "Waiting for API health"
 for attempt in {1..30}; do
@@ -67,16 +67,25 @@ for attempt in {1..30}; do
     break
   fi
   if [[ "$attempt" == 30 ]]; then
-    docker compose --project-directory "$APP_DIR/deploy" ps
+    docker compose --project-name traceai --project-directory "$APP_DIR/deploy" ps
     fail "API did not become healthy"
   fi
   sleep 2
 done
 
-curl --fail --silent http://127.0.0.1:3010/ >/dev/null ||
-  fail "Web UI health check failed"
+log "Waiting for web UI"
+for attempt in {1..30}; do
+  if curl --fail --silent http://127.0.0.1:3011/ >/dev/null; then
+    break
+  fi
+  if [[ "$attempt" == 30 ]]; then
+    docker compose --project-name traceai --project-directory "$APP_DIR/deploy" ps
+    fail "Web UI did not become healthy"
+  fi
+  sleep 2
+done
 
-docker compose --project-directory "$APP_DIR/deploy" ps
+docker compose --project-name traceai --project-directory "$APP_DIR/deploy" ps
 log "Deployment complete"
-log "UI:  http://192.168.1.91:3010"
+log "UI:  http://192.168.1.91:3011"
 log "API: http://192.168.1.91:3847/health"

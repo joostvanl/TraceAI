@@ -27,14 +27,14 @@ again. Secrets remain outside the git checkout.
 
 | Service | URL |
 |---|---|
-| Web UI | http://192.168.1.91:3010 |
+| Web UI | http://192.168.1.91:3011 |
 | API health | http://192.168.1.91:3847/health |
 | SSE events | http://192.168.1.91:3847/events?project=traceai |
 
 Auth SQLite lives in the Docker volume `traceai-data`. Bootstrap a token once:
 
 ```bash
-docker compose exec api node apps/api/dist/cli/bootstrap.js --email you@example.com --name "You"
+docker compose -p traceai exec api node apps/api/dist/cli/bootstrap.js --email you@example.com --name "You"
 ```
 
 (If the CLI entry is not in the image, run bootstrap from a laptop against the Pi API

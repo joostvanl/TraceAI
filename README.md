@@ -99,10 +99,8 @@ NEXT_PUBLIC_TRACEAI_EVENTS_URL=http://127.0.0.1:3847/events
 See [deploy/README.md](deploy/README.md). Short version on the Pi:
 
 ```bash
-cd ~/TraceAI/deploy
-cp .env.example .env   # fill AURORA_USER_TOKEN + NEXT_PUBLIC_CMS_SITE_KEY
-docker compose up -d --build
-# UI: http://<pi-ip>:3010  API: http://<pi-ip>:3847/health
+~/deploy-traceai.sh
+# UI: http://<pi-ip>:3011  API: http://<pi-ip>:3847/health
 ```
 
 ## Live board (SSE)
