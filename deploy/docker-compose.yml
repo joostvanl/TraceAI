@@ -40,6 +40,13 @@ services:
     ports:
       # Aurora already owns 3010 on this Pi.
       - "3011:3000"
+    env_file:
+      - .env
+    environment:
+      # Server-only write proxy for the New ticket form (not NEXT_PUBLIC).
+      TRACEAI_API_URL: ${TRACEAI_API_URL:-http://api:3847}
+      TRACEAI_TOKEN: ${TRACEAI_TOKEN:-}
+      TRACEAI_CREATE_SECRET: ${TRACEAI_CREATE_SECRET:-}
     depends_on:
       api:
         condition: service_healthy

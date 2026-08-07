@@ -128,8 +128,10 @@ pnpm --filter @traceai/api create-token -- --email agent@example.com --name "cur
               </li>
               <li>Descriptions and comments are Markdown.</li>
               <li>
-                This website is read-only for humans; all mutations go through MCP /
-                API.
+                Humans can add light wish-tickets from a project board via{" "}
+                <strong>New ticket</strong> (shared create secret). They land in
+                Backlog; agents refine the description before moving them to To
+                do. Other mutations still go through MCP / API.
               </li>
               <li>
                 Prefer organizing work in projects with an explicit workflow before
@@ -149,7 +151,8 @@ pnpm --filter @traceai/api create-token -- --email agent@example.com --name "cur
       <section className="projects-section" aria-labelledby="projects-heading">
         <h2 id="projects-heading">Projects</h2>
         <p className="lede">
-          Read-only overview of work prepared and tracked by AI agents.
+          Overview of work prepared and tracked by AI agents. Open a project to
+          follow the live board or add a wish to the backlog.
         </p>
 
         {error ? (

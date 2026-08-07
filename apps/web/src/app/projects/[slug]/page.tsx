@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { CreateTicketForm } from "@/components/CreateTicketForm";
 import { LiveBoard } from "@/components/LiveBoard";
 import { getProjectBoard } from "@/lib/cms";
 
@@ -42,12 +43,15 @@ export default async function ProjectPage({ params }: Props) {
       {stages.length === 0 ? (
         <div className="empty">No workflow stages configured for this project.</div>
       ) : (
-        <LiveBoard
-          projectSlug={slug}
-          stages={stages.map((s) => ({ key: s.key, name: s.name }))}
-          initialTickets={initialTickets}
-          eventsUrl={eventsUrl}
-        />
+        <>
+          <CreateTicketForm projectSlug={slug} />
+          <LiveBoard
+            projectSlug={slug}
+            stages={stages.map((s) => ({ key: s.key, name: s.name }))}
+            initialTickets={initialTickets}
+            eventsUrl={eventsUrl}
+          />
+        </>
       )}
     </>
   );

@@ -17,7 +17,7 @@ const mono = IBM_Plex_Mono({
 
 export const metadata = {
   title: "TraceAI",
-  description: "Read-only issue tracker for AI agent work",
+  description: "Issue tracker for AI agent work — live boards plus backlog wish capture",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

@@ -305,14 +305,26 @@ export class TraceService {
         : (await this.getWorkflow(workflowSlug))?.workflow;
     if (!workflow) throw new Error(`Workflow not found: ${workflowSlug}`);
 
-    const stages = parseWorkflowDocument(workflow.fields.stages_json).stages;
+    const doc = parseWorkflowDocument(workflow.fields.stages_json);
+    const stages = doc.stages;
     const stage = input.stage ?? firstStageKey(stages);
     if (!stage) throw new Error("Workflow has no stages");
 
-    const policy = parseWorkflowDocument(workflow.fields.stages_json).agent_policy;
-    assertNoErrors(
-      validateTicketDescription(input.description, policy),
-    );
+    const title = input.title?.trim() ?? "";
+    if (!title) throw new Error("Ticket title is required");
+    const description = (input.description ?? "").trim();
+    if (!description) {
+      throw new Error(
+        "Ticket description is required (a short wish is enough for backlog)",
+      );
+    }
+
+    // Backlog (first stage) accepts light wishes; playbook sections are
+    // enforced when leaving backlog or when updating the description later.
+    const intakeStage = firstStageKey(stages);
+    if (stage !== intakeStage) {
+      assertNoErrors(validateTicketDescription(description, doc.agent_policy));
+    }
 
     const existing = (
       await this.client.listEntries<Ticket>("ticket", { limit: 100 })
@@ -326,8 +338,8 @@ export class TraceService {
       slug,
       status: "published",
       fields: {
-        title: input.title,
-        description: input.description ?? "",
+        title,
+        description,
         project: input.project,
         workflow: workflowSlug,
         stage,
@@ -410,6 +422,14 @@ export class TraceService {
         comment: options?.comment,
       }),
     );
+
+    // Leaving intake (backlog) requires a refined, playbook-complete description.
+    const intakeStage = firstStageKey(stages);
+    if (fromStage.key === intakeStage && toStage !== intakeStage) {
+      assertNoErrors(
+        validateTicketDescription(ticket.fields.description, doc.agent_policy),
+      );
+    }
 
     if (options?.comment?.trim()) {
       await this.addComment({

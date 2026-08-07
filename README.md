@@ -6,7 +6,8 @@ Agent-first issue tracker. Agents authenticate with **TraceAI tokens** (`trc_…
 
 ```
 Cursor/Claude  --TRACEAI_TOKEN-->  TraceAI MCP  --HTTP-->  TraceAI API  --Aurora token-->  Aurora CMS
-Human browser  --site key-->  Next.js UI  --public API-->  Aurora CMS (read-only)
+Human browser  --site key-->  Next.js UI  --public API-->  Aurora CMS (read)
+Human browser  --create secret-->  Next.js /api/tickets  --TRACEAI_TOKEN-->  TraceAI API (backlog create)
 ```
 
 See [docs/identity-and-tokens.md](docs/identity-and-tokens.md) and
@@ -94,7 +95,14 @@ For local development you may still point MCP at `http://127.0.0.1:3847`. Tokens
 NEXT_PUBLIC_CMS_API_URL=https://aurora-api.joostvanleeuwaarden.com
 NEXT_PUBLIC_CMS_SITE_KEY=your-site-key
 NEXT_PUBLIC_TRACEAI_EVENTS_URL=https://traceai.joostvanleeuwaarden.com/events
+
+# Server-only — New ticket form on the project board
+TRACEAI_API_URL=https://traceai.joostvanleeuwaarden.com
+TRACEAI_TOKEN=trc_YOUR_TOKEN
+TRACEAI_CREATE_SECRET=choose-a-shared-password
 ```
+
+The form posts to `/api/tickets`, which checks `TRACEAI_CREATE_SECRET` and proxies to the TraceAI API. Tickets land in **Backlog** with a light wish description; agents must refine the playbook sections before transitioning to To do.
 
 ## Deploy on Raspberry Pi (Docker)
 
