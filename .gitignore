@@ -13,6 +13,7 @@ dist/
 !.env.example
 !apps/api/.env.example
 !deploy/**/.env.example
+scripts/.create-secret.local
 .DS_Store
 *.tsbuildinfo
 data/
