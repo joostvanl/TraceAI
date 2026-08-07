@@ -26,10 +26,10 @@ AURORA_API_URL=https://aurora-api.joostvanleeuwaarden.com
 AURORA_USER_TOKEN=
 AURORA_WEBSITE_ID=cmsiyy8oy00quoc01zzam3t6p
 AURORA_LOCALE=en-US
-TRACEAI_CORS_ORIGINS=http://192.168.1.91:3011,http://pi5:3011
+TRACEAI_CORS_ORIGINS=https://traceai.joostvanleeuwaarden.com,http://192.168.1.91:3011
 NEXT_PUBLIC_CMS_API_URL=https://aurora-api.joostvanleeuwaarden.com
 NEXT_PUBLIC_CMS_SITE_KEY=
-NEXT_PUBLIC_TRACEAI_EVENTS_URL=http://192.168.1.91:3847/events
+NEXT_PUBLIC_TRACEAI_EVENTS_URL=https://traceai.joostvanleeuwaarden.com/events
 EOF
   chmod 600 "$ENV_FILE"
   fail "Created $ENV_FILE. Fill AURORA_USER_TOKEN and NEXT_PUBLIC_CMS_SITE_KEY, then run this script again."

@@ -27,9 +27,28 @@ again. Secrets remain outside the git checkout.
 
 | Service | URL |
 |---|---|
-| Web UI | http://192.168.1.91:3011 |
-| API health | http://192.168.1.91:3847/health |
-| SSE events | http://192.168.1.91:3847/events?project=traceai |
+| Public UI | https://traceai.joostvanleeuwaarden.com |
+| LAN Web UI | http://192.168.1.91:3011 |
+| LAN API health | http://192.168.1.91:3847/health |
+| Public SSE | https://traceai.joostvanleeuwaarden.com/events?project=traceai |
+
+## Cloudflare tunnel
+
+Hostname `traceai.joostvanleeuwaarden.com` is served by systemd unit
+`cloudflared-traceai` (config: `~/.config/traceai/cloudflared.yml`):
+
+- `/events*`, `/v1*`, `/health` → TraceAI API on `127.0.0.1:3847`
+- everything else → TraceAI web on `127.0.0.1:3011`
+
+Install/reinstall the unit (once):
+
+```bash
+~/TraceAI/deploy/install-cloudflared-traceai.sh
+```
+
+Keep `NEXT_PUBLIC_TRACEAI_EVENTS_URL=https://traceai.joostvanleeuwaarden.com/events`
+and CORS for that origin in `~/.config/traceai/traceai.env`, then redeploy so the
+web image is rebuilt with the public events URL.
 
 Auth SQLite lives in the Docker volume `traceai-data`. Bootstrap a token once:
 
