@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 
 const MCP_PATH =
   "C:/Users/joost.vanleeuwaarden/webroot/TraceAI/packages/mcp/dist/index.js";
-const API_URL = "http://127.0.0.1:3847";
+const API_URL = "https://traceai.joostvanleeuwaarden.com";
 const REPO_ROOT = "C:/Users/joost.vanleeuwaarden/webroot/TraceAI";
 
 const mcpConfig = `{
@@ -45,10 +45,14 @@ export default async function HomePage() {
 
         <ol className="steps">
           <li>
-            <strong>Ensure the TraceAI API is running</strong>
-            <pre className="code-block">{`cd ${REPO_ROOT}
+            <strong>Ensure the TraceAI API is reachable</strong>
+            <pre className="code-block">{`# Production (Pi / Cloudflare)
+# ${API_URL}
+
+# Or locally:
+cd ${REPO_ROOT}
 pnpm --filter @traceai/api start
-# listens on ${API_URL}`}</pre>
+# listens on http://127.0.0.1:3847`}</pre>
           </li>
           <li>
             <strong>Create a user token</strong> (once per agent/user). Prefer an
@@ -134,8 +138,8 @@ pnpm --filter @traceai/api create-token -- --email agent@example.com --name "cur
               <li>
                 Project boards are <strong>live</strong>: open a project board and
                 leave it open. Ticket create/transition events arrive via SSE from{" "}
-                <code>http://127.0.0.1:3847/events?project=…</code> — cards move
-                without refreshing the page.
+                <code>https://traceai.joostvanleeuwaarden.com/events?project=…</code>{" "}
+                — cards move without refreshing the page.
               </li>
             </ul>
           </div>

@@ -82,6 +82,16 @@ export function LiveBoard({
     [stages, tickets],
   );
 
+  // Surfaced next to the status: writes to a different API instance are
+  // published in-process there and never reach this stream.
+  const eventsHost = useMemo(() => {
+    try {
+      return new URL(eventsUrl).host;
+    } catch {
+      return null;
+    }
+  }, [eventsUrl]);
+
   useEffect(() => {
     setTickets(initialTickets);
   }, [initialTickets]);
@@ -162,6 +172,7 @@ export function LiveBoard({
             : liveState === "connecting"
               ? "Connecting…"
               : "Offline — open this page after the TraceAI API is running"}
+          {liveState === "live" && eventsHost ? ` · ${eventsHost}` : null}
           {lastEventAt
             ? ` · last update ${new Date(lastEventAt).toLocaleTimeString()}`
             : null}

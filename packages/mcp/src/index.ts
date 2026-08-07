@@ -4,8 +4,15 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { TraceApiClient } from "@traceai/core";
 import { z } from "zod";
 
+function resolveApiUrl(): string {
+  return (process.env.TRACEAI_API_URL ?? "http://127.0.0.1:3847").replace(
+    /\/+$/,
+    "",
+  );
+}
+
 function createClient(): TraceApiClient {
-  const apiUrl = process.env.TRACEAI_API_URL ?? "http://127.0.0.1:3847";
+  const apiUrl = resolveApiUrl();
   const token = process.env.TRACEAI_TOKEN;
   if (!token) {
     throw new Error(
@@ -22,6 +29,18 @@ function ok(data: unknown) {
   return {
     content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
   };
+}
+
+/**
+ * Reports the API instance a write landed on. Ticket events are published
+ * in-process, so a board subscribed to a different instance shows nothing until
+ * it is refreshed — a silent failure unless the writer names its target.
+ */
+function okWrite(data: unknown) {
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    return ok({ ...data, api_base: resolveApiUrl() });
+  }
+  return ok({ result: data, api_base: resolveApiUrl() });
 }
 
 function fail(error: unknown) {
@@ -98,7 +117,7 @@ async function main() {
     },
     async (input) => {
       try {
-        return ok(await client.createProject(input));
+        return okWrite(await client.createProject(input));
       } catch (error) {
         return fail(error);
       }
@@ -153,7 +172,7 @@ async function main() {
     },
     async (input) => {
       try {
-        return ok(await client.createTicket(input));
+        return okWrite(await client.createTicket(input));
       } catch (error) {
         return fail(error);
       }
@@ -171,7 +190,7 @@ async function main() {
     },
     async ({ slug, ...body }) => {
       try {
-        return ok(await client.updateTicket(slug, body));
+        return okWrite(await client.updateTicket(slug, body));
       } catch (error) {
         return fail(error);
       }
@@ -187,7 +206,7 @@ async function main() {
     },
     async (input) => {
       try {
-        return ok(await client.addComment(input));
+        return okWrite(await client.addComment(input));
       } catch (error) {
         return fail(error);
       }
@@ -209,7 +228,7 @@ async function main() {
     },
     async ({ slug, to_stage, comment }) => {
       try {
-        return ok(await client.transitionTicket(slug, to_stage, comment));
+        return okWrite(await client.transitionTicket(slug, to_stage, comment));
       } catch (error) {
         return fail(error);
       }
@@ -253,7 +272,7 @@ async function main() {
     },
     async (input) => {
       try {
-        return ok(await client.createWorkflow(input));
+        return okWrite(await client.createWorkflow(input));
       } catch (error) {
         return fail(error);
       }
@@ -278,7 +297,7 @@ async function main() {
     },
     async ({ slug, ...body }) => {
       try {
-        return ok(await client.updateWorkflow(slug, body));
+        return okWrite(await client.updateWorkflow(slug, body));
       } catch (error) {
         return fail(error);
       }

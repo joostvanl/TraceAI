@@ -65,7 +65,7 @@ Agents only need a TraceAI token:
       "command": "node",
       "args": ["C:/Users/joost.vanleeuwaarden/webroot/TraceAI/packages/mcp/dist/index.js"],
       "env": {
-        "TRACEAI_API_URL": "http://127.0.0.1:3847",
+        "TRACEAI_API_URL": "https://traceai.joostvanleeuwaarden.com",
         "TRACEAI_TOKEN": "trc_YOUR_TOKEN"
       }
     }
@@ -74,6 +74,8 @@ Agents only need a TraceAI token:
 ```
 
 The API process holds `AURORA_USER_TOKEN` / `AURORA_MANAGEMENT_TOKEN` in its own env.
+
+For local development you may still point MCP at `http://127.0.0.1:3847`. Tokens are scoped to the auth DB of that API instance (Pi vs laptop). If you do switch, move the board's `NEXT_PUBLIC_TRACEAI_EVENTS_URL` with it — see [One writer](#one-writer-keep-mcp-and-the-board-on-the-same-api-instance).
 
 ### Agent tools
 
@@ -91,7 +93,7 @@ The API process holds `AURORA_USER_TOKEN` / `AURORA_MANAGEMENT_TOKEN` in its own
 ```
 NEXT_PUBLIC_CMS_API_URL=https://aurora-api.joostvanleeuwaarden.com
 NEXT_PUBLIC_CMS_SITE_KEY=your-site-key
-NEXT_PUBLIC_TRACEAI_EVENTS_URL=http://127.0.0.1:3847/events
+NEXT_PUBLIC_TRACEAI_EVENTS_URL=https://traceai.joostvanleeuwaarden.com/events
 ```
 
 ## Deploy on Raspberry Pi (Docker)
@@ -108,12 +110,26 @@ See [deploy/README.md](deploy/README.md). Short version on the Pi:
 Project boards subscribe to:
 
 ```
-GET http://127.0.0.1:3847/events?project=<projectSlug>
+GET https://traceai.joostvanleeuwaarden.com/events?project=<projectSlug>
 ```
 
 No bearer token required. The API publishes `ticket.created`, `ticket.updated`, `ticket.transitioned`, and `ticket.commented` after successful writes. The Next.js board updates cards in place (no full refresh).
 
-Set `NEXT_PUBLIC_TRACEAI_EVENTS_URL` in `apps/web/.env.local` if the API is not on `3847`.
+### One writer: keep MCP and the board on the same API instance
+
+The board reads its initial state straight from Aurora, but live updates come from the SSE stream of one specific API process, and the ticket event bus is in-process. So `TRACEAI_API_URL` (what MCP writes to) and `NEXT_PUBLIC_TRACEAI_EVENTS_URL` (what the board listens to) must resolve to the **same** instance.
+
+Point them at different instances and nothing errors: every instance shares one Aurora store, so a refresh still shows the correct board while live updates silently never arrive. Both localhost origins are already allowed by the API's CORS defaults, so a local board can subscribe to the Pi instance.
+
+To verify the full path, listen on one instance while writing to another:
+
+```bash
+# same instance → expect LIVE_SSE_OK
+node scripts/diagnose-public-sse.mjs
+
+# deliberate mismatch → expect TIMEOUT
+LISTEN_BASE=http://127.0.0.1:3847 node scripts/diagnose-public-sse.mjs
+```
 
 ## Smoke
 
