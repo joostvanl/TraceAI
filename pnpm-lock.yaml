@@ -81,6 +81,12 @@ importers:
 
   packages/core:
     devDependencies:
+      '@types/node':
+        specifier: ^22.13.10
+        version: 22.20.1
+      tsx:
+        specifier: ^4.19.3
+        version: 4.23.9
       typescript:
         specifier: ^5.8.2
         version: 5.9.3

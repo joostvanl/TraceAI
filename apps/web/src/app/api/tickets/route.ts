@@ -94,6 +94,7 @@ export async function POST(request: Request) {
       stage: "backlog",
     })) as {
       slug: string;
+      ticket_key?: string | null;
       title: string;
       stage: string;
       project: string;
@@ -103,6 +104,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         slug: ticket.slug,
+        ticket_key: ticket.ticket_key ?? null,
         title: ticket.title,
         stage: ticket.stage,
         project: ticket.project,

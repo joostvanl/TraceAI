@@ -6,7 +6,11 @@ import {
   DEFAULT_STAGES,
   DEFAULT_WORKFLOW_DOCUMENT,
   canTransition,
+  deriveProjectKeyFromSlug,
   firstStageKey,
+  formatTicketKey,
+  isTicketKeyPattern,
+  normalizeProjectKey,
   parseWorkflowDocument,
   serializeWorkflowDocument,
   slugify,
@@ -38,6 +42,13 @@ function assertNoErrors(errors: string[]) {
   if (errors.length) {
     throw new Error(errors.join(" "));
   }
+}
+
+function resolveProjectKey(project: Project): string {
+  return (
+    normalizeProjectKey(project.fields.project_key) ??
+    deriveProjectKeyFromSlug(project.slug)
+  );
 }
 
 export class TraceService {
@@ -116,6 +127,8 @@ export class TraceService {
       fields: {
         name: input.name,
         description: input.description ?? "",
+        project_key: deriveProjectKeyFromSlug(slug),
+        next_ticket_number: 1,
       },
     });
     await this.ensurePublished("project", project);
@@ -256,12 +269,25 @@ export class TraceService {
       .sort((a, b) => (a.fields.sort_order ?? 0) - (b.fields.sort_order ?? 0));
   }
 
-  async getTicket(slug: string): Promise<{
+  async getTicket(slugOrKey: string): Promise<{
     ticket: Ticket;
     comments: Comment[];
   } | null> {
     await this.ensureReady();
-    const ticket = await this.client.getEntryBySlug<Ticket>("ticket", slug);
+    let ticket = await this.client.getEntryBySlug<Ticket>("ticket", slugOrKey);
+    if (!ticket && isTicketKeyPattern(slugOrKey)) {
+      const want = slugOrKey.trim().toUpperCase();
+      const all = (
+        await this.client.listEntries<Ticket>("ticket", {
+          status: "published",
+          limit: 100,
+        })
+      ).items;
+      ticket =
+        all.find(
+          (t) => (t.fields.ticket_key ?? "").toUpperCase() === want,
+        ) ?? null;
+    }
     if (!ticket) return null;
     const comments = (
       await this.client.listEntries<Comment>("comment", {
@@ -269,12 +295,175 @@ export class TraceService {
         limit: 100,
       })
     ).items
-      .filter((c) => c.fields.ticket === slug)
+      .filter((c) => c.fields.ticket === ticket!.slug)
       .sort(
         (a, b) =>
           new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
       );
     return { ticket, comments };
+  }
+
+  /**
+   * Reserve the next ticket number for a project. Updates the project counter
+   * before returning so concurrent creates are unlikely to collide; skips
+   * numbers already present on tickets (backfill / race safety).
+   */
+  private async allocateTicketIdentity(
+    projectSlug: string,
+  ): Promise<{ projectKey: string; ticketNumber: number; ticketKey: string }> {
+    const used = new Set(
+      (
+        await this.client.listEntries<Ticket>("ticket", {
+          status: "published",
+          limit: 100,
+        })
+      ).items
+        .filter((t) => t.fields.project === projectSlug)
+        .map((t) => Number(t.fields.ticket_number))
+        .filter((n) => Number.isFinite(n) && n > 0),
+    );
+
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const project = await this.client.getEntryBySlug<Project>(
+        "project",
+        projectSlug,
+      );
+      if (!project) throw new Error(`Project not found: ${projectSlug}`);
+
+      const projectKey = resolveProjectKey(project);
+      let candidate = Math.max(
+        1,
+        Number(project.fields.next_ticket_number) || 1,
+      );
+      while (used.has(candidate)) candidate += 1;
+
+      const patch: {
+        project_key?: string;
+        next_ticket_number: number;
+      } = {
+        next_ticket_number: candidate + 1,
+      };
+      if (!normalizeProjectKey(project.fields.project_key)) {
+        patch.project_key = projectKey;
+      }
+
+      await this.client.updateEntry<Project>("project", project.id, {
+        fields: patch,
+      });
+      await this.ensurePublished(
+        "project",
+        (await this.client.getEntryBySlug<Project>("project", projectSlug))!,
+      );
+
+      used.add(candidate);
+      return {
+        projectKey,
+        ticketNumber: candidate,
+        ticketKey: formatTicketKey(projectKey, candidate),
+      };
+    }
+
+    throw new Error(
+      `Could not allocate a ticket number for project ${projectSlug}`,
+    );
+  }
+
+  /**
+   * Idempotent backfill: assign ticket_key / ticket_number to tickets that
+   * lack them, oldest first per project, and advance next_ticket_number.
+   */
+  async backfillTicketKeys(projectSlug?: string): Promise<{
+    updated: number;
+    projects: string[];
+  }> {
+    await this.ensureReady();
+    const projects = projectSlug
+      ? ([
+          await this.client.getEntryBySlug<Project>("project", projectSlug),
+        ].filter(Boolean) as Project[])
+      : (
+          await this.client.listEntries<Project>("project", {
+            status: "published",
+            limit: 100,
+          })
+        ).items;
+
+    const allTickets = (
+      await this.client.listEntries<Ticket>("ticket", {
+        status: "published",
+        limit: 100,
+      })
+    ).items;
+
+    let updated = 0;
+    const touched: string[] = [];
+
+    for (const project of projects) {
+      const projectKey = resolveProjectKey(project);
+      const projectTickets = allTickets
+        .filter((t) => t.fields.project === project.slug)
+        .sort(
+          (a, b) =>
+            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+        );
+
+      let next = 1;
+      for (const ticket of projectTickets) {
+        const existingNumber = Number(ticket.fields.ticket_number);
+        const existingKey = ticket.fields.ticket_key?.trim();
+        if (
+          existingKey &&
+          Number.isFinite(existingNumber) &&
+          existingNumber > 0
+        ) {
+          next = Math.max(next, existingNumber + 1);
+          continue;
+        }
+
+        const ticketNumber =
+          Number.isFinite(existingNumber) && existingNumber > 0
+            ? existingNumber
+            : next;
+        const ticketKey =
+          existingKey || formatTicketKey(projectKey, ticketNumber);
+
+        await this.client.updateEntry<Ticket>("ticket", ticket.id, {
+          fields: {
+            ticket_key: ticketKey,
+            ticket_number: ticketNumber,
+          },
+        });
+        await this.ensurePublished(
+          "ticket",
+          (await this.client.getEntryBySlug<Ticket>("ticket", ticket.slug))!,
+        );
+        updated += 1;
+        next = Math.max(next, ticketNumber + 1);
+      }
+
+      const patch: {
+        project_key?: string;
+        next_ticket_number: number;
+      } = {
+        next_ticket_number: Math.max(
+          next,
+          Number(project.fields.next_ticket_number) || 1,
+        ),
+      };
+      if (!normalizeProjectKey(project.fields.project_key)) {
+        patch.project_key = projectKey;
+      }
+      await this.client.updateEntry<Project>("project", project.id, {
+        fields: patch,
+      });
+      await this.ensurePublished(
+        "project",
+        (await this.client.getEntryBySlug<Project>("project", project.slug))!,
+      );
+      touched.push(project.slug);
+    }
+
+    return { updated, projects: touched };
   }
 
   async createTicket(input: {
@@ -334,6 +523,8 @@ export class TraceService {
       new Set(existing.map((t) => t.slug)),
     );
 
+    const identity = await this.allocateTicketIdentity(input.project);
+
     const ticket = await this.client.createEntry<Ticket>("ticket", {
       slug,
       status: "published",
@@ -347,10 +538,17 @@ export class TraceService {
         created_by: input.created_by ?? "agent",
         sort_order: existing.filter((t) => t.fields.project === input.project)
           .length,
+        ticket_key: identity.ticketKey,
+        ticket_number: identity.ticketNumber,
       },
     });
     await this.ensurePublished("ticket", ticket);
     return ticket;
+  }
+
+  private async resolveTicket(slugOrKey: string): Promise<Ticket | null> {
+    const found = await this.getTicket(slugOrKey);
+    return found?.ticket ?? null;
   }
 
   async updateTicket(
@@ -362,7 +560,7 @@ export class TraceService {
     },
   ): Promise<Ticket> {
     await this.ensureReady();
-    const ticket = await this.client.getEntryBySlug<Ticket>("ticket", slug);
+    const ticket = await this.resolveTicket(slug);
     if (!ticket) throw new Error(`Ticket not found: ${slug}`);
     if (input.description != null) {
       const workflow = await this.client.getEntryBySlug<Workflow>(
@@ -395,7 +593,7 @@ export class TraceService {
     },
   ): Promise<Ticket> {
     await this.ensureReady();
-    const ticket = await this.client.getEntryBySlug<Ticket>("ticket", slug);
+    const ticket = await this.resolveTicket(slug);
     if (!ticket) throw new Error(`Ticket not found: ${slug}`);
     const workflow = await this.client.getEntryBySlug<Workflow>(
       "workflow",
@@ -433,7 +631,7 @@ export class TraceService {
 
     if (options?.comment?.trim()) {
       await this.addComment({
-        ticket: slug,
+        ticket: ticket.slug,
         body: options.comment,
         author: options.author ?? "agent",
       });
@@ -452,20 +650,20 @@ export class TraceService {
     author?: string;
   }): Promise<Comment> {
     await this.ensureReady();
-    const ticket = await this.client.getEntryBySlug<Ticket>("ticket", input.ticket);
+    const ticket = await this.resolveTicket(input.ticket);
     if (!ticket) throw new Error(`Ticket not found: ${input.ticket}`);
     const existing = (
       await this.client.listEntries<Comment>("comment", { limit: 100 })
     ).items;
     const slug = uniqueSlug(
-      `${input.ticket}-comment`,
+      `${ticket.slug}-comment`,
       new Set(existing.map((c) => c.slug)),
     );
     const comment = await this.client.createEntry<Comment>("comment", {
       slug,
       status: "published",
       fields: {
-        ticket: input.ticket,
+        ticket: ticket.slug,
         body: input.body,
         author: input.author ?? "agent",
       },

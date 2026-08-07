@@ -5,10 +5,13 @@ import { TraceApiClient } from "@traceai/core";
 import { z } from "zod";
 
 function resolveApiUrl(): string {
-  return (process.env.TRACEAI_API_URL ?? "http://127.0.0.1:3847").replace(
-    /\/+$/,
-    "",
-  );
+  const raw = process.env.TRACEAI_API_URL?.trim();
+  if (!raw) {
+    throw new Error(
+      "Set TRACEAI_API_URL in the TraceAI MCP env (e.g. https://traceai.joostvanleeuwaarden.com). Refusing to default to localhost — that silently breaks the live board when Cursor keeps a stale MCP process.",
+    );
+  }
+  return raw.replace(/\/+$/, "");
 }
 
 function createClient(): TraceApiClient {
@@ -26,21 +29,22 @@ function createClient(): TraceApiClient {
 }
 
 function ok(data: unknown) {
+  // Always surface the API instance this process is bound to. Cursor can keep
+  // multiple MCP processes alive after reload; api_base makes a mismatch obvious.
+  const payload =
+    data && typeof data === "object" && !Array.isArray(data)
+      ? { ...data, api_base: resolveApiUrl() }
+      : { result: data, api_base: resolveApiUrl() };
   return {
-    content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
+    content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }],
   };
 }
 
 /**
- * Reports the API instance a write landed on. Ticket events are published
- * in-process, so a board subscribed to a different instance shows nothing until
- * it is refreshed — a silent failure unless the writer names its target.
+ * Writes use the same envelope as reads; kept as an alias so call sites stay explicit.
  */
 function okWrite(data: unknown) {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    return ok({ ...data, api_base: resolveApiUrl() });
-  }
-  return ok({ result: data, api_base: resolveApiUrl() });
+  return ok(data);
 }
 
 function fail(error: unknown) {
@@ -142,8 +146,8 @@ async function main() {
 
   server.tool(
     "get_ticket",
-    "Get a ticket with its comments",
-    { slug: z.string().describe("Ticket slug") },
+    "Get a ticket by slug OR exact ticket_key (e.g. TRA-42), including comments",
+    { slug: z.string().describe("Ticket slug or ticket_key (TRA-42)") },
     async ({ slug }) => {
       try {
         return ok(await client.getTicket(slug));
@@ -302,6 +306,11 @@ async function main() {
         return fail(error);
       }
     },
+  );
+
+  // stderr only — stdout is the MCP JSON-RPC transport.
+  console.error(
+    `[traceai-mcp] bound to ${resolveApiUrl()} (pid ${process.pid})`,
   );
 
   const transport = new StdioServerTransport();

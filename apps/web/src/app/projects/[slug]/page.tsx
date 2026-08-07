@@ -20,6 +20,7 @@ export default async function ProjectPage({ params }: Props) {
     .flat()
     .map((ticket) => ({
       slug: ticket.slug,
+      ticketKey: ticket.fields.ticket_key ?? null,
       title: ticket.fields.title,
       stage: ticket.fields.stage,
       priority: ticket.fields.priority ?? "medium",

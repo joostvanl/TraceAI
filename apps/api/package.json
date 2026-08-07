@@ -10,7 +10,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "bootstrap": "tsx src/cli/bootstrap.ts",
     "create-user": "tsx src/cli/create-user.ts",
-    "create-token": "tsx src/cli/create-token.ts"
+    "create-token": "tsx src/cli/create-token.ts",
+    "backfill-ticket-keys": "tsx src/cli/backfill-ticket-keys.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.14.1",

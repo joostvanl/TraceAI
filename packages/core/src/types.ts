@@ -64,6 +64,10 @@ export type ProjectFields = {
   name: string;
   description?: string;
   default_workflow?: string;
+  /** Short uppercase project prefix for ticket keys, e.g. TRA */
+  project_key?: string;
+  /** Next number to allocate for this project (1-based). */
+  next_ticket_number?: number;
 };
 
 export type WorkflowFields = {
@@ -81,6 +85,10 @@ export type TicketFields = {
   priority?: string;
   created_by?: string;
   sort_order?: number;
+  /** Immutable display key, e.g. TRA-42 */
+  ticket_key?: string;
+  /** Numeric portion of ticket_key within the project */
+  ticket_number?: number;
 };
 
 export type CommentFields = {
@@ -427,4 +435,33 @@ export function slugify(input: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 80) || "item";
+}
+
+/** Jira-style project prefix: 2–10 uppercase A–Z / 0–9. */
+export function normalizeProjectKey(raw: string | undefined | null): string | null {
+  if (!raw) return null;
+  const key = raw.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (key.length < 2 || key.length > 10) return null;
+  return key;
+}
+
+/**
+ * Deterministic default when project_key is unset.
+ * Prefer first 3 letters of alphabetic slug chars; special-case known projects.
+ */
+export function deriveProjectKeyFromSlug(slug: string): string {
+  const known: Record<string, string> = { traceai: "TRA" };
+  if (known[slug]) return known[slug];
+  const letters = slug.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const key = (letters.slice(0, 3) || "PRJ").padEnd(2, "X");
+  return key.slice(0, 10);
+}
+
+export function formatTicketKey(projectKey: string, ticketNumber: number): string {
+  return `${projectKey}-${ticketNumber}`;
+}
+
+/** Matches TRA-42 style keys (not kebab slugs). */
+export function isTicketKeyPattern(value: string): boolean {
+  return /^[A-Z][A-Z0-9]{1,9}-\d+$/.test(value.trim().toUpperCase());
 }

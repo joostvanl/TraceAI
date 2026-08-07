@@ -29,6 +29,7 @@ function mapProject(p: Awaited<ReturnType<TraceService["listProjects"]>>[number]
     name: p.fields.name,
     description: p.fields.description ?? "",
     default_workflow: p.fields.default_workflow ?? null,
+    project_key: p.fields.project_key ?? null,
   };
 }
 
@@ -37,6 +38,8 @@ function mapTicket(t: NonNullable<
 >["ticket"]) {
   return {
     slug: t.slug,
+    ticket_key: t.fields.ticket_key ?? null,
+    ticket_number: t.fields.ticket_number ?? null,
     title: t.fields.title,
     description: t.fields.description ?? "",
     project: t.fields.project,
@@ -216,6 +219,8 @@ export function createApp(deps: {
     return c.json(
       tickets.map((t) => ({
         slug: t.slug,
+        ticket_key: t.fields.ticket_key ?? null,
+        ticket_number: t.fields.ticket_number ?? null,
         title: t.fields.title,
         stage: t.fields.stage,
         priority: t.fields.priority ?? "medium",
@@ -268,15 +273,7 @@ export function createApp(deps: {
       slug: body.slug,
       created_by: actor.name,
     });
-    const mapped = {
-      slug: ticket.slug,
-      title: ticket.fields.title,
-      stage: ticket.fields.stage,
-      project: ticket.fields.project,
-      workflow: ticket.fields.workflow,
-      created_by: ticket.fields.created_by ?? null,
-      priority: ticket.fields.priority ?? "medium",
-    };
+    const mapped = mapTicket(ticket);
     publishTicketEvent(ticketEventFromMapped("ticket.created", mapped));
     audit(c, {
       action: "ticket.create",
@@ -350,6 +347,7 @@ export function createApp(deps: {
       });
       return c.json({
         slug: ticket.slug,
+        ticket_key: ticket.fields.ticket_key ?? null,
         stage: ticket.fields.stage,
         title: ticket.fields.title,
         from_stage: fromStage,

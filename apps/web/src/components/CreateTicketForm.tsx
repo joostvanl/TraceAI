@@ -38,14 +38,18 @@ export function CreateTicketForm({ projectSlug }: Props) {
       const body = (await res.json().catch(() => ({}))) as {
         message?: string;
         slug?: string;
+        ticket_key?: string;
       };
       if (!res.ok) {
         setError(body.message ?? `Create failed (${res.status})`);
         return;
       }
+      const label = body.ticket_key
+        ? `${body.ticket_key} (${body.slug})`
+        : body.slug;
       setSuccess(
-        body.slug
-          ? `Ticket “${body.slug}” created in Backlog.`
+        label
+          ? `Ticket “${label}” created in Backlog.`
           : "Ticket created in Backlog.",
       );
       setTitle("");

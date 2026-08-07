@@ -40,6 +40,11 @@ export default async function TicketPage({ params }: Props) {
         <section className="panel">
           <div className="panel-header">
             <div>
+              {ticket.fields.ticket_key ? (
+                <div className="ticket-key ticket-key-lg">
+                  {ticket.fields.ticket_key}
+                </div>
+              ) : null}
               <h1>{ticket.fields.title}</h1>
               <div className="meta-row" style={{ marginTop: "0.75rem" }}>
                 <span className="badge">{ticket.fields.stage}</span>

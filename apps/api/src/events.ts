@@ -6,6 +6,7 @@ export type TicketEventType =
 
 export type TicketEventTicket = {
   slug: string;
+  ticket_key?: string | null;
   title: string;
   stage: string;
   priority: string;
@@ -48,6 +49,7 @@ export function ticketEventFromMapped(
   type: TicketEventType,
   ticket: {
     slug: string;
+    ticket_key?: string | null;
     title: string;
     stage: string;
     priority?: string | null;
@@ -62,6 +64,7 @@ export function ticketEventFromMapped(
     project: ticket.project,
     ticket: {
       slug: ticket.slug,
+      ticket_key: ticket.ticket_key ?? null,
       title: ticket.title,
       stage: ticket.stage,
       priority: ticket.priority ?? "medium",

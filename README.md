@@ -129,6 +129,13 @@ The board reads its initial state straight from Aurora, but live updates come fr
 
 Point them at different instances and nothing errors: every instance shares one Aurora store, so a refresh still shows the correct board while live updates silently never arrive. Both localhost origins are already allowed by the API's CORS defaults, so a local board can subscribe to the Pi instance.
 
+Cursor sometimes leaves orphan `node …/packages/mcp/dist/index.js` processes after an MCP reload. Those keep the old `TRACEAI_API_URL`. Every MCP tool result includes `api_base` — if it disagrees with the board events host, clean up and reload:
+
+```bash
+node scripts/cleanup-traceai-mcp.mjs
+# then reload the `traceai` MCP server in Cursor
+```
+
 To verify the full path, listen on one instance while writing to another:
 
 ```bash
@@ -139,9 +146,23 @@ node scripts/diagnose-public-sse.mjs
 LISTEN_BASE=http://127.0.0.1:3847 node scripts/diagnose-public-sse.mjs
 ```
 
+### Ticket keys (TRA-42)
+
+Every ticket gets an immutable display key `<PROJECT_KEY>-<NUMBER>` (e.g. `TRA-1`).
+
+- Allocated server-side on create; clients cannot choose or overwrite it.
+- `project.project_key` defaults to a derived prefix (`traceai` → `TRA`); `next_ticket_number` advances per project.
+- Existing tickets are filled with `pnpm --filter @traceai/api backfill-ticket-keys`.
+- Lookup works by slug **or** exact key via `GET /v1/tickets/:slug` / MCP `get_ticket`.
+- Slugs remain the URL/technical identifier.
+
 ## Smoke
 
 ```bash
 # with API running and TRACEAI_TOKEN set
 pnpm --filter @traceai/mcp smoke
+```
+
+```bash
+pnpm --filter @traceai/core test
 ```

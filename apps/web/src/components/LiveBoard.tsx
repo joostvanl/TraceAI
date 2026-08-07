@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 
 export type BoardTicket = {
   slug: string;
+  /** Immutable display key, e.g. TRA-42 */
+  ticketKey?: string | null;
   title: string;
   stage: string;
   priority: string;
@@ -25,6 +27,7 @@ type TicketEvent = {
   project: string;
   ticket: {
     slug: string;
+    ticket_key?: string | null;
     title: string;
     stage: string;
     priority?: string;
@@ -129,6 +132,7 @@ export function LiveBoard({
         const previous = prev.find((t) => t.slug === event.ticket.slug);
         const next: BoardTicket = {
           slug: event.ticket.slug,
+          ticketKey: event.ticket.ticket_key ?? previous?.ticketKey ?? null,
           title: event.ticket.title,
           stage: event.ticket.stage,
           priority: event.ticket.priority ?? "medium",
@@ -202,6 +206,9 @@ export function LiveBoard({
                     href={`/projects/${projectSlug}/tickets/${ticket.slug}`}
                     className={`ticket-card${flashSlug === ticket.slug ? " ticket-flash" : ""}`}
                   >
+                    {ticket.ticketKey ? (
+                      <div className="ticket-key">{ticket.ticketKey}</div>
+                    ) : null}
                     <h3>{ticket.title}</h3>
                     <div className="meta-row">
                       <span className={`badge ${ticket.priority}`}>
