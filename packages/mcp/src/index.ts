@@ -76,7 +76,9 @@ const stageAgentSchema = z
     require_comment_on_exit: z.boolean().optional(),
     require_comment_sections_on_enter: z.array(z.string()).optional(),
     comment_template: z.string().optional(),
+    require_tokens_estimate_on_exit: z.boolean().optional(),
   })
+  .passthrough()
   .optional();
 
 const stageSchema = z.object({
@@ -228,7 +230,7 @@ async function main() {
 
   server.tool(
     "transition_ticket",
-    "Move a ticket to another workflow stage. ALWAYS pass comment with ## Vorige stap and ## Deze stap. Entering review ALSO requires ## Testverslag and ## Uitslag (PASS/FAIL).",
+    "Move a ticket to another workflow stage. ALWAYS pass comment with ## Vorige stap and ## Deze stap. Entering review ALSO requires ## Testverslag and ## Uitslag (PASS/FAIL). Token fields are required only when the workflow playbook says so (see get_workflow): tokens_used when agent_policy.require_tokens_used_on_transition; tokens_estimate when leaving a stage with require_tokens_estimate_on_exit.",
     {
       slug: z.string(),
       to_stage: z.string().describe("Target stage key"),
@@ -238,10 +240,31 @@ async function main() {
         .describe(
           "Markdown transition comment. Required sections depend on workflow agent rules.",
         ),
+      tokens_used: z
+        .number()
+        .int()
+        .nonnegative()
+        .optional()
+        .describe(
+          "Self-reported LLM token delta for this step. Required when agent_policy.require_tokens_used_on_transition is true.",
+        ),
+      tokens_estimate: z
+        .number()
+        .int()
+        .nonnegative()
+        .optional()
+        .describe(
+          "LLM token estimate for the whole ticket. Required when leaving a stage with require_tokens_estimate_on_exit.",
+        ),
     },
-    async ({ slug, to_stage, comment }) => {
+    async ({ slug, to_stage, comment, tokens_used, tokens_estimate }) => {
       try {
-        return okWrite(await client.transitionTicket(slug, to_stage, comment));
+        return okWrite(
+          await client.transitionTicket(slug, to_stage, comment, {
+            tokens_used,
+            tokens_estimate,
+          }),
+        );
       } catch (error) {
         return fail(error);
       }

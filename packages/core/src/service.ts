@@ -17,6 +17,7 @@ import {
   slugify,
   validateTicketDescription,
   validateTransitionComment,
+  validateTransitionTokens,
   APP_LOGIN_CONTENT_TYPE,
   APP_LOGIN_ENTRY_SLUG,
   type AppLogin,
@@ -563,6 +564,7 @@ export class TraceService {
       title?: string;
       description?: string;
       priority?: Priority | string;
+      tokens_estimate?: number;
     },
   ): Promise<Ticket> {
     await this.ensureReady();
@@ -579,11 +581,20 @@ export class TraceService {
         assertNoErrors(validateTicketDescription(input.description, policy));
       }
     }
+    if (
+      input.tokens_estimate != null &&
+      (!Number.isInteger(input.tokens_estimate) || input.tokens_estimate < 0)
+    ) {
+      throw new Error("tokens_estimate must be a non-negative integer");
+    }
     const updated = await this.client.updateEntry<Ticket>("ticket", ticket.id, {
       fields: {
         ...(input.title != null ? { title: input.title } : {}),
         ...(input.description != null ? { description: input.description } : {}),
         ...(input.priority != null ? { priority: input.priority } : {}),
+        ...(input.tokens_estimate != null
+          ? { tokens_estimate: input.tokens_estimate }
+          : {}),
       },
     });
     await this.ensurePublished("ticket", updated);
@@ -596,6 +607,8 @@ export class TraceService {
     options?: {
       comment?: string;
       author?: string;
+      tokens_estimate?: number;
+      tokens_used?: number;
     },
   ): Promise<Ticket> {
     await this.ensureReady();
@@ -626,6 +639,15 @@ export class TraceService {
         comment: options?.comment,
       }),
     );
+    assertNoErrors(
+      validateTransitionTokens({
+        fromStage,
+        toStage: targetStage,
+        policy: doc.agent_policy,
+        tokens_estimate: options?.tokens_estimate,
+        tokens_used: options?.tokens_used,
+      }),
+    );
 
     // Leaving intake (backlog) requires a refined, playbook-complete description.
     const intakeStage = firstStageKey(stages);
@@ -644,8 +666,25 @@ export class TraceService {
     }
 
     const now = new Date().toISOString();
+    const fields: Record<string, unknown> = {
+      stage: toStage,
+      stage_entered_at: now,
+    };
+    if (
+      fromStage.key !== toStage &&
+      fromStage.agent?.require_tokens_estimate_on_exit === true &&
+      options?.tokens_estimate != null
+    ) {
+      fields.tokens_estimate = options.tokens_estimate;
+    }
+    if (options?.tokens_used != null) {
+      const previous = Number(ticket.fields.tokens_actual ?? 0);
+      fields.tokens_actual =
+        (Number.isFinite(previous) ? previous : 0) + options.tokens_used;
+    }
+
     const updated = await this.client.updateEntry<Ticket>("ticket", ticket.id, {
-      fields: { stage: toStage, stage_entered_at: now },
+      fields,
     });
     await this.ensurePublished("ticket", updated);
     return updated;

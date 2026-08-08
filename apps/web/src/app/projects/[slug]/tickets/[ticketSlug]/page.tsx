@@ -58,6 +58,19 @@ export default async function TicketPage({ params }: Props) {
                     by {ticket.fields.created_by}
                   </span>
                 ) : null}
+                {typeof ticket.fields.tokens_estimate === "number" ||
+                typeof ticket.fields.tokens_actual === "number" ? (
+                  <span className="muted" style={{ fontSize: "0.85rem" }}>
+                    tokens{" "}
+                    {typeof ticket.fields.tokens_estimate === "number"
+                      ? `~${ticket.fields.tokens_estimate.toLocaleString()}`
+                      : "—"}
+                    {" / "}
+                    {typeof ticket.fields.tokens_actual === "number"
+                      ? ticket.fields.tokens_actual.toLocaleString()
+                      : "—"}
+                  </span>
+                ) : null}
               </div>
             </div>
           </div>

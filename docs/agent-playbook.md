@@ -28,10 +28,18 @@ Canonical working agreements live in each workflow's `stages_json` as:
    - Ticket descriptions must meet `min_description_chars` and required `##` headings.
    - Every `transition` requires a Markdown `comment`.
    - Entering `review` requires `## Testverslag` and `## Uitslag` in that comment.
+   - When `agent_policy.require_tokens_used_on_transition` is true, pass `tokens_used`
+     (non-negative integer LLM token delta for that step).
+   - When leaving a stage with `require_tokens_estimate_on_exit`, pass `tokens_estimate`
+     for the whole ticket.
+   - Token counts are **self-reported** by agents; the workflow JSON is the source of
+     truth for when they are required (no hard-coded stage names in the API).
 
 ## Defaults shipped with TraceAI
 
-See `DEFAULT_WORKFLOW_DOCUMENT` in `@traceai/core`.
+See `DEFAULT_WORKFLOW_DOCUMENT` in `@traceai/core`. Product defaults enable token
+tracking (`require_tokens_used_on_transition` + backlog `require_tokens_estimate_on_exit`).
+Live Aurora workflows must carry the same flags — code defaults alone are not enough.
 
 ## Always go through MCP / the TraceAI API
 

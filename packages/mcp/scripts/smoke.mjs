@@ -57,6 +57,7 @@ Ticket just created in backlog/default stage.
 
 ## Deze stap
 Smoke transition to todo after auth check.`,
+    { tokens_estimate: 1000, tokens_used: 50 },
   );
   console.log("transitioned:", moved.stage);
   await client.addComment({

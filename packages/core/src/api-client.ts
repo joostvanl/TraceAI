@@ -114,12 +114,18 @@ export class TraceApiClient {
     slug: string,
     toStage: string,
     comment?: string,
+    tokens?: { tokens_estimate?: number; tokens_used?: number },
   ) {
     return this.request<unknown>(
       `/v1/tickets/${encodeURIComponent(slug)}/transition`,
       {
         method: "POST",
-        body: JSON.stringify({ to_stage: toStage, comment }),
+        body: JSON.stringify({
+          to_stage: toStage,
+          comment,
+          tokens_estimate: tokens?.tokens_estimate,
+          tokens_used: tokens?.tokens_used,
+        }),
       },
     );
   }

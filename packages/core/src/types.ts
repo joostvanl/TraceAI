@@ -19,6 +19,11 @@ export type WorkflowStageAgentRules = {
   require_comment_sections_on_enter?: string[];
   /** Suggested comment skeleton shown to agents */
   comment_template?: string;
+  /**
+   * When leaving this stage for another stage, the transition must include
+   * tokens_estimate (LLM token estimate for the whole ticket).
+   */
+  require_tokens_estimate_on_exit?: boolean;
 };
 
 export type WorkflowStage = {
@@ -40,6 +45,11 @@ export type WorkflowAgentPolicy = {
   min_description_chars?: number;
   /** Require Markdown ## headings in new ticket descriptions */
   require_description_headings?: string[];
+  /**
+   * When true, every transition must include tokens_used (non-negative integer
+   * delta for that step). Accumulated into ticket tokens_actual.
+   */
+  require_tokens_used_on_transition?: boolean;
 };
 
 export type WorkflowDocument = {
@@ -91,6 +101,10 @@ export type TicketFields = {
   ticket_number?: number;
   /** ISO datetime when the ticket entered its current stage */
   stage_entered_at?: string;
+  /** LLM token estimate for the whole ticket (set at refinement). */
+  tokens_estimate?: number;
+  /** Cumulative self-reported LLM tokens used across transitions. */
+  tokens_actual?: number;
 };
 
 /** Max visible tickets in the last workflow stage column. */
@@ -134,7 +148,7 @@ export type ListResult<T> = {
 
 export const DEFAULT_AGENT_POLICY: WorkflowAgentPolicy = {
   summary:
-    "TraceAI tickets must be self-contained for junior agents. Every workflow transition needs a Markdown comment describing completed work. Entering review always requires a short test report with results.",
+    "TraceAI tickets must be self-contained for junior agents. Every workflow transition needs a Markdown comment describing completed work, plus tokens_used (self-reported LLM token delta for that step). Entering review always requires a short test report with results.",
   ticket_description: [
     "Write descriptions that a junior agent with no chat history can execute alone.",
     "Include: Context, Goal, What to implement (concrete steps), Out of scope, Acceptance criteria.",
@@ -147,6 +161,7 @@ export const DEFAULT_AGENT_POLICY: WorkflowAgentPolicy = {
     "Start with '## Vorige stap' describing what was true / done in the stage you leave.",
     "Continue with '## Deze stap' describing what you completed and what the next stage should verify.",
     "List concrete artifacts (files, endpoints, commands) when relevant.",
+    "Pass tokens_used: a non-negative integer estimate of LLM tokens (prompt+completion) spent on this step.",
   ],
   min_description_chars: 280,
   require_description_headings: [
@@ -155,6 +170,7 @@ export const DEFAULT_AGENT_POLICY: WorkflowAgentPolicy = {
     "## What to implement",
     "## Acceptance criteria",
   ],
+  require_tokens_used_on_transition: true,
 };
 
 export const DEFAULT_STAGES: WorkflowStage[] = [
@@ -167,8 +183,10 @@ export const DEFAULT_STAGES: WorkflowStage[] = [
       on_exit: [
         "Confirm the description is complete enough for a junior agent.",
         "Add a comment summarizing why it is ready to pull into To do.",
+        "Pass tokens_estimate: your LLM token estimate for the whole ticket.",
       ],
       require_comment_on_exit: true,
+      require_tokens_estimate_on_exit: true,
     },
   },
   {
@@ -265,6 +283,10 @@ function parseStageAgent(raw: unknown): WorkflowStageAgentRules | undefined {
       : undefined,
     comment_template:
       item.comment_template != null ? String(item.comment_template) : undefined,
+    require_tokens_estimate_on_exit:
+      typeof item.require_tokens_estimate_on_exit === "boolean"
+        ? item.require_tokens_estimate_on_exit
+        : undefined,
   };
 }
 
@@ -311,6 +333,11 @@ function parseAgentPolicy(raw: unknown): WorkflowAgentPolicy {
     require_description_headings: Array.isArray(item.require_description_headings)
       ? item.require_description_headings.map((s) => String(s))
       : DEFAULT_AGENT_POLICY.require_description_headings,
+    // Do not fall back to DEFAULT — missing means "not required" (compat).
+    require_tokens_used_on_transition:
+      typeof item.require_tokens_used_on_transition === "boolean"
+        ? item.require_tokens_used_on_transition
+        : undefined,
   };
 }
 
@@ -467,6 +494,72 @@ export function validateTransitionComment(input: {
   }
 
   return errors;
+}
+
+/**
+ * Validate optional LLM token fields against workflow playbook flags.
+ * Does not hard-code stage keys — only reads require_* flags.
+ */
+export function validateTransitionTokens(input: {
+  fromStage: WorkflowStage;
+  toStage: WorkflowStage;
+  policy: WorkflowAgentPolicy;
+  tokens_estimate?: number | null;
+  tokens_used?: number | null;
+}): string[] {
+  const errors: string[] = [];
+  const leavingMarkedStage =
+    input.fromStage.key !== input.toStage.key &&
+    input.fromStage.agent?.require_tokens_estimate_on_exit === true;
+
+  if (leavingMarkedStage) {
+    const estimateErrors = validateTokenCount(
+      input.tokens_estimate,
+      "tokens_estimate",
+    );
+    if (estimateErrors.length) {
+      errors.push(
+        ...estimateErrors.map(
+          (e) =>
+            `${e} Required when leaving stage "${input.fromStage.key}" (require_tokens_estimate_on_exit).`,
+        ),
+      );
+    }
+  } else if (
+    input.tokens_estimate != null &&
+    input.tokens_estimate !== undefined
+  ) {
+    errors.push(...validateTokenCount(input.tokens_estimate, "tokens_estimate"));
+  }
+
+  if (input.policy.require_tokens_used_on_transition === true) {
+    const usedErrors = validateTokenCount(input.tokens_used, "tokens_used");
+    if (usedErrors.length) {
+      errors.push(
+        ...usedErrors.map(
+          (e) =>
+            `${e} Required on every transition (agent_policy.require_tokens_used_on_transition).`,
+        ),
+      );
+    }
+  } else if (input.tokens_used != null && input.tokens_used !== undefined) {
+    errors.push(...validateTokenCount(input.tokens_used, "tokens_used"));
+  }
+
+  return errors;
+}
+
+function validateTokenCount(
+  value: number | null | undefined,
+  field: string,
+): string[] {
+  if (value == null || Number.isNaN(value)) {
+    return [`${field} is required and must be a non-negative integer.`];
+  }
+  if (!Number.isInteger(value) || value < 0) {
+    return [`${field} must be a non-negative integer.`];
+  }
+  return [];
 }
 
 export function slugify(input: string): string {

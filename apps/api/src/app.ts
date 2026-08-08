@@ -48,6 +48,8 @@ function mapTicket(t: NonNullable<
     priority: t.fields.priority ?? "medium",
     created_by: t.fields.created_by ?? null,
     stage_entered_at: t.fields.stage_entered_at ?? null,
+    tokens_estimate: t.fields.tokens_estimate ?? null,
+    tokens_actual: t.fields.tokens_actual ?? null,
   };
 }
 
@@ -275,6 +277,8 @@ export function createApp(deps: {
         workflow: t.fields.workflow,
         created_by: t.fields.created_by ?? null,
         stage_entered_at: t.fields.stage_entered_at ?? null,
+        tokens_estimate: t.fields.tokens_estimate ?? null,
+        tokens_actual: t.fields.tokens_actual ?? null,
       })),
     );
   });
@@ -337,6 +341,7 @@ export function createApp(deps: {
       title?: string;
       description?: string;
       priority?: string;
+      tokens_estimate?: number;
     }>();
     const ticket = await deps.service.updateTicket(param(c, "slug"), body);
     const mapped = mapTicket(ticket);
@@ -353,7 +358,12 @@ export function createApp(deps: {
     "/v1/tickets/:slug/transition",
     requireScope("tickets:write"),
     async (c) => {
-      const body = await c.req.json<{ to_stage: string; comment?: string }>();
+      const body = await c.req.json<{
+        to_stage: string;
+        comment?: string;
+        tokens_estimate?: number;
+        tokens_used?: number;
+      }>();
       if (!body?.to_stage) {
         return c.json(
           { message: "to_stage is required", code: "VALIDATION" },
@@ -380,6 +390,8 @@ export function createApp(deps: {
       const ticket = await deps.service.transitionTicket(slug, body.to_stage, {
         comment: body.comment,
         author: actor.name,
+        tokens_estimate: body.tokens_estimate,
+        tokens_used: body.tokens_used,
       });
       publishTicketEvent(
         ticketEventFromMapped("ticket.transitioned", mapTicket(ticket), {
@@ -394,6 +406,9 @@ export function createApp(deps: {
         meta: {
           from_stage: fromStage,
           to_stage: body.to_stage,
+          tokens_estimate: body.tokens_estimate ?? null,
+          tokens_used: body.tokens_used ?? null,
+          tokens_actual: ticket.fields.tokens_actual ?? null,
         },
       });
       return c.json({
@@ -402,6 +417,8 @@ export function createApp(deps: {
         stage: ticket.fields.stage,
         title: ticket.fields.title,
         from_stage: fromStage,
+        tokens_estimate: ticket.fields.tokens_estimate ?? null,
+        tokens_actual: ticket.fields.tokens_actual ?? null,
       });
     },
   );

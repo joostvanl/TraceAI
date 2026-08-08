@@ -13,6 +13,8 @@ export type BoardTicket = {
   priority: string;
   /** When the ticket last entered its current stage (ISO). Used to sort last stage newest-first. */
   stageChangedAt?: string;
+  tokensEstimate?: number | null;
+  tokensActual?: number | null;
 };
 
 export type BoardStage = {
@@ -44,6 +46,25 @@ type Props = {
   initialTickets: BoardTicket[];
   eventsUrl: string;
 };
+
+function formatTokenCount(value: number): string {
+  if (value >= 1000) {
+    const k = value / 1000;
+    return `${k >= 10 ? Math.round(k) : Math.round(k * 10) / 10}k`;
+  }
+  return String(value);
+}
+
+function tokenLabel(ticket: BoardTicket): string | null {
+  const estimate =
+    typeof ticket.tokensEstimate === "number" ? ticket.tokensEstimate : null;
+  const actual =
+    typeof ticket.tokensActual === "number" ? ticket.tokensActual : null;
+  if (estimate == null && actual == null) return null;
+  const left = estimate != null ? `~${formatTokenCount(estimate)}` : "—";
+  const right = actual != null ? formatTokenCount(actual) : "—";
+  return `${left} / ${right}`;
+}
 
 function groupByStage(
   stages: BoardStage[],
@@ -199,7 +220,9 @@ export function LiveBoard({
                   Empty
                 </p>
               ) : (
-                columnTickets.map((ticket) => (
+                columnTickets.map((ticket) => {
+                  const tokens = tokenLabel(ticket);
+                  return (
                   <Link
                     key={ticket.slug}
                     href={`/projects/${projectSlug}/tickets/${ticket.slug}`}
@@ -213,9 +236,15 @@ export function LiveBoard({
                       <span className={`badge ${ticket.priority}`}>
                         {ticket.priority}
                       </span>
+                      {tokens ? (
+                        <span className="muted" style={{ fontSize: "0.75rem" }}>
+                          {tokens}
+                        </span>
+                      ) : null}
                     </div>
                   </Link>
-                ))
+                  );
+                })
               )}
             </section>
           );
