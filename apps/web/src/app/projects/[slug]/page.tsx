@@ -76,7 +76,12 @@ export default async function ProjectPage({ params }: Props) {
           />
           <LiveBoard
             projectSlug={slug}
-            stages={stages.map((s) => ({ key: s.key, name: s.name }))}
+            stages={stages.map((s) => ({
+              key: s.key,
+              name: s.name,
+              requiresHumanApproval:
+                s.agent?.require_human_approval_on_exit === true,
+            }))}
             lastStageKey={lastStageKey}
             initialTickets={initialTickets}
             eventsUrl={eventsUrl}

@@ -102,26 +102,6 @@ export default async function TicketPage({ params }: Props) {
             </div>
           </div>
           <Markdown content={ticket.fields.description ?? ""} />
-
-          {humanGated ? (
-            <HumanReviewActions
-              ticketSlug={ticket.slug}
-              projectSlug={slug}
-              stageName={currentStage?.name ?? ticket.fields.stage}
-              authenticated={Boolean(sessionUser)}
-              gate={{
-                approveTo,
-                rejectTo,
-                requireResolution:
-                  targetApprove?.agent?.require_resolution_on_enter === true,
-                requireWiki: Boolean(
-                  targetApprove?.agent?.require_comment_sections_on_enter?.some(
-                    (s) => s.toLowerCase().includes("wiki"),
-                  ),
-                ),
-              }}
-            />
-          ) : null}
         </section>
 
         <section className="panel">
@@ -143,6 +123,26 @@ export default async function TicketPage({ params }: Props) {
               ))}
             </div>
           )}
+
+          {humanGated ? (
+            <HumanReviewActions
+              ticketSlug={ticket.slug}
+              projectSlug={slug}
+              stageName={currentStage?.name ?? ticket.fields.stage}
+              authenticated={Boolean(sessionUser)}
+              gate={{
+                approveTo,
+                rejectTo,
+                requireResolution:
+                  targetApprove?.agent?.require_resolution_on_enter === true,
+                requireWiki: Boolean(
+                  targetApprove?.agent?.require_comment_sections_on_enter?.some(
+                    (s) => s.toLowerCase().includes("wiki"),
+                  ),
+                ),
+              }}
+            />
+          ) : null}
         </section>
       </div>
     </>

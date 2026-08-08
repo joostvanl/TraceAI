@@ -49,13 +49,14 @@ export function HumanReviewActions({
 
   if (!authenticated) {
     return (
-      <div className="human-review panel" style={{ marginTop: "1.25rem" }}>
-        <h2>Human approval required</h2>
+      <aside className="human-review">
+        <div className="human-review-kicker">Wacht op beoordeling</div>
+        <h3>Menselijke beslissing vereist</h3>
         <p className="muted">
           Stage <strong>{stageName}</strong> requires a human decision.{" "}
           <Link href={loginHref}>Sign in</Link> to approve or reject.
         </p>
-      </div>
+      </aside>
     );
   }
 
@@ -131,14 +132,19 @@ export function HumanReviewActions({
   }
 
   return (
-    <div className="human-review panel" style={{ marginTop: "1.25rem" }}>
-      <h2>Human approval</h2>
-      <p className="muted">
-        Stage <strong>{stageName}</strong> requires Goedkeuren or Afkeuren.
-      </p>
+    <aside className="human-review">
+      <div className="human-review-header">
+        <div>
+          <div className="human-review-kicker">Wacht op beoordeling</div>
+          <h3>Menselijke beslissing</h3>
+          <p className="muted">
+            Beoordeel de uitkomst van <strong>{stageName}</strong>.
+          </p>
+        </div>
+      </div>
 
       {mode === "idle" ? (
-        <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+        <div className="human-review-actions">
           {gate.approveTo ? (
             <button
               type="button"
@@ -161,7 +167,11 @@ export function HumanReviewActions({
       ) : null}
 
       {mode === "approve" ? (
-        <form onSubmit={(e) => submit(e, "approve")} className="stack">
+        <form
+          onSubmit={(e) => submit(e, "approve")}
+          className="human-review-form"
+        >
+          <div className="human-review-form-title">Goedkeuren</div>
           <label>
             Comment (optional extra note)
             <textarea
@@ -199,7 +209,7 @@ export function HumanReviewActions({
             </label>
           ) : null}
           {error ? <p className="error">{error}</p> : null}
-          <div style={{ display: "flex", gap: "0.75rem" }}>
+          <div className="human-review-actions">
             <button type="submit" className="btn primary" disabled={submitting}>
               {submitting ? "Bezig…" : "Bevestig goedkeuring"}
             </button>
@@ -216,7 +226,14 @@ export function HumanReviewActions({
       ) : null}
 
       {mode === "reject" ? (
-        <form onSubmit={(e) => submit(e, "reject")} className="stack">
+        <form
+          onSubmit={(e) => submit(e, "reject")}
+          className="human-review-form reject"
+        >
+          <div className="human-review-form-title">Afkeuren</div>
+          <p className="muted">
+            Dit ticket gaat terug naar <strong>{gate.rejectTo[0]}</strong>.
+          </p>
           <label>
             Reden van afkeuring (verplicht)
             <textarea
@@ -229,7 +246,7 @@ export function HumanReviewActions({
             />
           </label>
           {error ? <p className="error">{error}</p> : null}
-          <div style={{ display: "flex", gap: "0.75rem" }}>
+          <div className="human-review-actions">
             <button
               type="submit"
               className="btn"
@@ -248,6 +265,6 @@ export function HumanReviewActions({
           </div>
         </form>
       ) : null}
-    </div>
+    </aside>
   );
 }

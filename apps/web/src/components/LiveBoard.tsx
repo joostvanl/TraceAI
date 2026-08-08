@@ -22,6 +22,7 @@ export type BoardTicket = {
 export type BoardStage = {
   key: string;
   name: string;
+  requiresHumanApproval?: boolean;
 };
 
 type TicketEvent = {
@@ -223,7 +224,10 @@ export function LiveBoard({
         {stages.map((stage) => {
           const columnTickets = ticketsByStage[stage.key] ?? [];
           return (
-            <section key={stage.key} className="column">
+            <section
+              key={stage.key}
+              className={`column${stage.requiresHumanApproval ? " column-human-gate" : ""}`}
+            >
               <div className="column-header">
                 <h2>{stage.name}</h2>
                 <span className="count">{columnTickets.length}</span>
@@ -241,11 +245,12 @@ export function LiveBoard({
                   const showResolution =
                     Boolean(ticket.resolution) &&
                     (lastStageKey == null || stage.key === lastStageKey);
+                  const awaitingHuman = stage.requiresHumanApproval === true;
                   return (
                   <Link
                     key={ticket.slug}
                     href={`/projects/${projectSlug}/tickets/${ticket.slug}`}
-                    className={`ticket-card${flashSlug === ticket.slug ? " ticket-flash" : ""}`}
+                    className={`ticket-card${awaitingHuman ? " ticket-awaiting-human" : ""}${flashSlug === ticket.slug ? " ticket-flash" : ""}`}
                   >
                     {ticket.ticketKey ? (
                       <div className="ticket-key">{ticket.ticketKey}</div>
@@ -257,6 +262,11 @@ export function LiveBoard({
                       </span>
                       {showResolution ? (
                         <span className="badge">{ticket.resolution}</span>
+                      ) : null}
+                      {awaitingHuman ? (
+                        <span className="badge human-gate-badge">
+                          Wacht op beoordeling
+                        </span>
                       ) : null}
                       {tokens ? (
                         <span className="muted" style={{ fontSize: "0.75rem" }}>

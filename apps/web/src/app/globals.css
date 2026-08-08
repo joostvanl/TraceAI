@@ -332,6 +332,30 @@ h2 {
   color: inherit;
 }
 
+.column-human-gate {
+  border-color: rgba(201, 162, 39, 0.42);
+}
+
+.column-human-gate .column-header h2 {
+  color: var(--priority-medium);
+}
+
+.ticket-card.ticket-awaiting-human {
+  border-left: 3px solid var(--priority-medium);
+  background:
+    linear-gradient(90deg, rgba(201, 162, 39, 0.09), transparent 55%),
+    var(--bg-elevated);
+}
+
+.ticket-card.ticket-awaiting-human:hover {
+  border-color: var(--priority-medium);
+}
+
+.human-gate-badge {
+  background: rgba(201, 162, 39, 0.15);
+  color: var(--priority-medium);
+}
+
 .ticket-card h3 {
   margin: 0 0 0.45rem;
   font-size: 0.95rem;
@@ -425,6 +449,90 @@ h2 {
   font-size: 0.82rem;
   color: var(--muted);
   margin-bottom: 0.5rem;
+}
+
+.human-review {
+  margin-top: 1.25rem;
+  padding: 1rem;
+  border: 1px solid rgba(201, 162, 39, 0.45);
+  border-left: 3px solid var(--priority-medium);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(201, 162, 39, 0.08), transparent 60%),
+    var(--bg-column);
+}
+
+.human-review-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.9rem;
+}
+
+.human-review h3,
+.human-review p {
+  margin-top: 0;
+}
+
+.human-review-kicker,
+.human-review-form-title {
+  color: var(--priority-medium);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.human-review-kicker {
+  margin-bottom: 0.35rem;
+}
+
+.human-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.human-review-form {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 0.75rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.human-review-form.reject {
+  border-top-color: rgba(217, 119, 87, 0.45);
+}
+
+.human-review-form.reject .human-review-form-title {
+  color: var(--priority-high);
+}
+
+.human-review-form label {
+  display: grid;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.human-review-form textarea,
+.human-review-form select {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  padding: 0.7rem 0.8rem;
+}
+
+.human-review-form textarea:focus,
+.human-review-form select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
 .markdown {

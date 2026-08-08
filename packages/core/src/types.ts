@@ -295,7 +295,7 @@ export const DEFAULT_STAGES: WorkflowStage[] = [
   {
     key: "review",
     name: "Review",
-    transitions: ["done", "in_progress"],
+    transitions: ["done", "todo"],
     agent: {
       purpose: "Verification before Done — human approval required to leave.",
       on_enter: [
@@ -306,13 +306,13 @@ export const DEFAULT_STAGES: WorkflowStage[] = [
       require_comment_on_enter: true,
       require_comment_sections_on_enter: ["## Testverslag", "## Uitslag"],
       on_exit: [
-        "If returning to In progress, comment what failed and what to fix (## Reden).",
+        "If rejecting to To do, comment what failed and what to fix (## Reden).",
         "If moving to Done, confirm acceptance criteria are met and include ## Wiki.",
       ],
       require_comment_on_exit: true,
       require_human_approval_on_exit: true,
       human_approve_to: "done",
-      human_reject_to: ["in_progress"],
+      human_reject_to: ["todo"],
       comment_template:
         "## Vorige stap\nImplementation completed: ...\n\n## Deze stap\nReady for review.\n\n## Testverslag\n- `pnpm --filter @traceai/api build` — PASS\n- Manual check: ... — PASS\n\n## Uitslag\nPASS",
     },

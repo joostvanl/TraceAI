@@ -30,7 +30,7 @@ describe("in_refinement default stages", () => {
     assert.ok(review);
     assert.equal(review.agent?.require_human_approval_on_exit, true);
     assert.equal(humanApproveTarget(review), "done");
-    assert.deepEqual(humanRejectTargets(review), ["in_progress"]);
+    assert.deepEqual(humanRejectTargets(review), ["todo"]);
   });
 });
 
@@ -68,6 +68,7 @@ describe("parseStageAgent human gate flags", () => {
 describe("validateHumanGateExit", () => {
   const review = DEFAULT_STAGES.find((s) => s.key === "review")!;
   const done = DEFAULT_STAGES.find((s) => s.key === "done")!;
+  const todo = DEFAULT_STAGES.find((s) => s.key === "todo")!;
   const inProgress = DEFAULT_STAGES.find((s) => s.key === "in_progress")!;
 
   it("blocks agent exit from a gated stage", () => {
@@ -95,7 +96,7 @@ describe("validateHumanGateExit", () => {
   it("requires ## Reden on human reject", () => {
     const missing = validateHumanGateExit({
       fromStage: review,
-      toStage: inProgress,
+      toStage: todo,
       asHuman: true,
       comment: "## Vorige stap\nReady\n\n## Deze stap\nReject without reason",
     });
@@ -103,7 +104,7 @@ describe("validateHumanGateExit", () => {
 
     const ok = validateHumanGateExit({
       fromStage: review,
-      toStage: inProgress,
+      toStage: todo,
       asHuman: true,
       comment:
         "## Vorige stap\nReady\n\n## Deze stap\nReject\n\n## Reden\nTests failed",

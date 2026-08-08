@@ -20,11 +20,12 @@ function patchStages(stages) {
     if (stage.key !== "review") return stage;
     return {
       ...stage,
+      transitions: ["done", "todo"],
       agent: {
         ...(stage.agent ?? {}),
         require_human_approval_on_exit: true,
-        human_approve_to: stage.agent?.human_approve_to ?? "done",
-        human_reject_to: stage.agent?.human_reject_to ?? ["in_progress"],
+        human_approve_to: "done",
+        human_reject_to: ["todo"],
       },
     };
   });
