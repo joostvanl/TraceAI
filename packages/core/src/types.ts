@@ -34,6 +34,21 @@ export type WorkflowStageAgentRules = {
    * (closure reason) from TICKET_RESOLUTIONS.
    */
   require_resolution_on_enter?: boolean;
+  /**
+   * When true, only a human (web session → human-proxy API) may leave this
+   * stage. Agent/MCP tokens with tickets:write alone are rejected.
+   */
+  require_human_approval_on_exit?: boolean;
+  /**
+   * Target stage for the UI "Goedkeuren" action. Defaults to the first
+   * transition that is not listed in human_reject_to.
+   */
+  human_approve_to?: string;
+  /**
+   * Target stage key(s) for the UI "Afkeuren" action. Reject comments must
+   * include a "## Reden" section.
+   */
+  human_reject_to?: string[];
 };
 
 export type WorkflowStage = {
@@ -220,13 +235,29 @@ export const DEFAULT_STAGES: WorkflowStage[] = [
   {
     key: "backlog",
     name: "Backlog",
-    transitions: ["todo"],
+    transitions: ["in_refinement"],
     agent: {
-      purpose: "Parked ideas / not yet ready to pull.",
+      purpose: "Parked ideas / not yet ready to refine.",
       on_exit: [
-        "Confirm the description is complete enough for a junior agent.",
-        "Add a comment summarizing why it is ready to pull into To do.",
-        "Pass tokens_estimate: your LLM token estimate for the whole ticket.",
+        "Confirm the wish is clear enough to refine into a junior-agent playbook.",
+        "Add a comment summarizing why it is ready for In Refinement.",
+      ],
+      require_comment_on_exit: true,
+    },
+  },
+  {
+    key: "in_refinement",
+    name: "In Refinement",
+    transitions: ["todo", "backlog"],
+    agent: {
+      purpose: "Description is being sharpened into an executable playbook.",
+      on_enter: [
+        "Confirm the ticket is ready to be rewritten with Context/Goal/What to implement/Acceptance criteria.",
+      ],
+      on_exit: [
+        "When moving to To do, confirm the description is complete enough for a junior agent.",
+        "When returning to Backlog, explain why refinement stopped.",
+        "Pass tokens_estimate when leaving to To do.",
       ],
       require_comment_on_exit: true,
       require_tokens_estimate_on_exit: true,
@@ -235,12 +266,13 @@ export const DEFAULT_STAGES: WorkflowStage[] = [
   {
     key: "todo",
     name: "To do",
-    transitions: ["in_progress", "backlog"],
+    transitions: ["in_progress", "backlog", "in_refinement"],
     agent: {
       purpose: "Ready to start; next up for an agent.",
       on_enter: ["Confirm dependencies are clear in the description."],
       on_exit: [
-        "Comment what you will implement first when moving to In progress.",
+        "When moving to In progress, describe the first implementation step and confirm that work can start.",
+        "When returning to Backlog or In Refinement, explain why the ticket is no longer ready.",
       ],
       require_comment_on_exit: true,
     },
@@ -265,7 +297,7 @@ export const DEFAULT_STAGES: WorkflowStage[] = [
     name: "Review",
     transitions: ["done", "in_progress"],
     agent: {
-      purpose: "Verification before Done.",
+      purpose: "Verification before Done — human approval required to leave.",
       on_enter: [
         "Transition comment MUST include a short test report.",
         "List each test/check run and PASS/FAIL.",
@@ -274,10 +306,13 @@ export const DEFAULT_STAGES: WorkflowStage[] = [
       require_comment_on_enter: true,
       require_comment_sections_on_enter: ["## Testverslag", "## Uitslag"],
       on_exit: [
-        "If returning to In progress, comment what failed and what to fix.",
-        "If moving to Done, confirm acceptance criteria are met and document the outcome in the project wiki via TraceAI MCP (include ## Wiki when entering Done).",
+        "If returning to In progress, comment what failed and what to fix (## Reden).",
+        "If moving to Done, confirm acceptance criteria are met and include ## Wiki.",
       ],
       require_comment_on_exit: true,
+      require_human_approval_on_exit: true,
+      human_approve_to: "done",
+      human_reject_to: ["in_progress"],
       comment_template:
         "## Vorige stap\nImplementation completed: ...\n\n## Deze stap\nReady for review.\n\n## Testverslag\n- `pnpm --filter @traceai/api build` — PASS\n- Manual check: ... — PASS\n\n## Uitslag\nPASS",
     },
@@ -287,11 +322,12 @@ export const DEFAULT_STAGES: WorkflowStage[] = [
     name: "Done",
     transitions: [],
     agent: {
-      purpose: "Accepted and finished.",
+      purpose: "Closed with an explicit resolution and supporting evidence or rationale.",
       on_enter: [
-        "Comment final confirmation that acceptance criteria are met.",
-        "Pass resolution: completed | superseded | cancelled | duplicate | verification-only (Done ≠ always functionally shipped).",
-        "Include ## Wiki with the TraceAI wiki page slug(s) you created/updated for this ticket (Cursor → TraceAI MCP only).",
+        "For resolution completed: confirm every acceptance criterion separately and ## Uitslag PASS.",
+        "For other resolutions: document the reason and why unmet criteria are acceptable.",
+        "Pass resolution: completed | superseded | cancelled | duplicate | verification-only.",
+        "Include ## Wiki with page slug(s) or N/A + reason.",
       ],
       require_comment_on_enter: true,
       require_comment_sections_on_enter: ["## Wiki"],
@@ -345,6 +381,17 @@ function parseStageAgent(raw: unknown): WorkflowStageAgentRules | undefined {
       typeof item.require_resolution_on_enter === "boolean"
         ? item.require_resolution_on_enter
         : undefined,
+    require_human_approval_on_exit:
+      typeof item.require_human_approval_on_exit === "boolean"
+        ? item.require_human_approval_on_exit
+        : undefined,
+    human_approve_to:
+      item.human_approve_to != null && String(item.human_approve_to).trim()
+        ? String(item.human_approve_to).trim()
+        : undefined,
+    human_reject_to: Array.isArray(item.human_reject_to)
+      ? item.human_reject_to.map((s) => String(s))
+      : undefined,
   };
 }
 
@@ -463,6 +510,65 @@ export function canTransition(
 
 export function firstStageKey(stages: WorkflowStage[]): string | null {
   return stages[0]?.key ?? null;
+}
+
+/** Stage key for playbook refinement (defaults to `in_refinement` when present). */
+export function refinementStageKey(stages: WorkflowStage[]): string | null {
+  if (stages.some((s) => s.key === "in_refinement")) return "in_refinement";
+  return null;
+}
+
+/**
+ * Approve target for a human-gated stage. Prefer explicit `human_approve_to`,
+ * otherwise the first transition not listed in `human_reject_to`.
+ */
+export function humanApproveTarget(stage: WorkflowStage): string | null {
+  const explicit = stage.agent?.human_approve_to?.trim();
+  if (explicit && stage.transitions.includes(explicit)) return explicit;
+  const rejects = new Set(stage.agent?.human_reject_to ?? []);
+  return stage.transitions.find((t) => !rejects.has(t)) ?? null;
+}
+
+/** Reject target(s) for a human-gated stage. */
+export function humanRejectTargets(stage: WorkflowStage): string[] {
+  const configured = stage.agent?.human_reject_to ?? [];
+  const valid = configured.filter((t) => stage.transitions.includes(t));
+  if (valid.length) return valid;
+  const approve = humanApproveTarget(stage);
+  return stage.transitions.filter((t) => t !== approve);
+}
+
+/**
+ * Enforce human-approval gates. Agents must not leave a gated stage unless
+ * `asHuman` is true (set only by the human-proxy API path).
+ */
+export function validateHumanGateExit(input: {
+  fromStage: WorkflowStage;
+  toStage: WorkflowStage;
+  asHuman?: boolean;
+  comment?: string | null;
+}): string[] {
+  const errors: string[] = [];
+  if (input.fromStage.key === input.toStage.key) return errors;
+  if (input.fromStage.agent?.require_human_approval_on_exit !== true) {
+    return errors;
+  }
+  if (!input.asHuman) {
+    errors.push(
+      `Leaving stage "${input.fromStage.key}" requires human approval (require_human_approval_on_exit). Use the TraceAI UI Goedkeuren/Afkeuren actions — agents cannot complete this transition via MCP.`,
+    );
+    return errors;
+  }
+  const rejects = humanRejectTargets(input.fromStage);
+  if (rejects.includes(input.toStage.key)) {
+    const comment = input.comment?.trim() ?? "";
+    if (!normalizeHeading(comment).includes("## reden")) {
+      errors.push(
+        `Rejecting from "${input.fromStage.key}" requires comment section "## Reden" with the rejection reason.`,
+      );
+    }
+  }
+  return errors;
 }
 
 /** Last stage in the workflow definition (typically Done). */

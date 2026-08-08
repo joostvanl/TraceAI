@@ -79,6 +79,9 @@ const stageAgentSchema = z
     comment_template: z.string().optional(),
     require_tokens_estimate_on_exit: z.boolean().optional(),
     require_resolution_on_enter: z.boolean().optional(),
+    require_human_approval_on_exit: z.boolean().optional(),
+    human_approve_to: z.string().optional(),
+    human_reject_to: z.array(z.string()).optional(),
   })
   .passthrough()
   .optional();
@@ -307,7 +310,7 @@ async function main() {
 
   server.tool(
     "transition_ticket",
-    "Move a ticket to another workflow stage. ALWAYS pass comment with ## Vorige stap and ## Deze stap. Entering review ALSO requires ## Testverslag and ## Uitslag (PASS/FAIL). Token/resolution fields are required only when the workflow playbook says so (see get_workflow): tokens_used when agent_policy.require_tokens_used_on_transition; tokens_estimate when leaving a stage with require_tokens_estimate_on_exit; resolution when entering a stage with require_resolution_on_enter.",
+    "Move a ticket to another workflow stage. ALWAYS pass comment with ## Vorige stap and ## Deze stap. Entering review ALSO requires ## Testverslag and ## Uitslag (PASS/FAIL). Token/resolution fields are required only when the workflow playbook says so (see get_workflow): tokens_used when agent_policy.require_tokens_used_on_transition; tokens_estimate when leaving a stage with require_tokens_estimate_on_exit; resolution when entering a stage with require_resolution_on_enter. Stages with require_human_approval_on_exit cannot be left via MCP — use the TraceAI UI Goedkeuren/Afkeuren actions instead.",
     {
       slug: z.string(),
       to_stage: z.string().describe("Target stage key"),

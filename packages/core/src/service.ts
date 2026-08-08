@@ -13,8 +13,10 @@ import {
   isTicketKeyPattern,
   normalizeProjectKey,
   parseWorkflowDocument,
+  refinementStageKey,
   serializeWorkflowDocument,
   slugify,
+  validateHumanGateExit,
   validateTicketDescription,
   validateTransitionComment,
   validateTransitionResolution,
@@ -773,6 +775,8 @@ export class TraceService {
       tokens_estimate?: number;
       tokens_used?: number;
       resolution?: TicketResolution | string;
+      /** Set only by the human-proxy API path (web session). */
+      asHuman?: boolean;
     },
   ): Promise<Ticket> {
     await this.ensureReady();
@@ -795,6 +799,14 @@ export class TraceService {
     if (!fromStage || !targetStage) {
       throw new Error("Invalid workflow stage for transition");
     }
+    assertNoErrors(
+      validateHumanGateExit({
+        fromStage,
+        toStage: targetStage,
+        asHuman: options?.asHuman === true,
+        comment: options?.comment,
+      }),
+    );
     assertNoErrors(
       validateTransitionComment({
         fromStage,
@@ -820,9 +832,15 @@ export class TraceService {
       }),
     );
 
-    // Leaving intake (backlog) requires a refined, playbook-complete description.
+    // Leaving refinement (or legacy intake/backlog when no in_refinement stage)
+    // requires a refined, playbook-complete description.
+    const refineKey = refinementStageKey(stages);
     const intakeStage = firstStageKey(stages);
-    if (fromStage.key === intakeStage && toStage !== intakeStage) {
+    const leavingRefine =
+      refineKey != null
+        ? fromStage.key === refineKey && toStage !== refineKey
+        : fromStage.key === intakeStage && toStage !== intakeStage;
+    if (leavingRefine) {
       assertNoErrors(
         validateTicketDescription(ticket.fields.description, doc.agent_policy),
       );

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
+import { timingSafeEqual } from "node:crypto";
 import type { AuthStore } from "@traceai/auth";
 import { hasScope } from "@traceai/auth";
 import type { TraceService } from "@traceai/core";
@@ -19,6 +20,31 @@ import {
   requestIdMiddleware,
   type AppVariables,
 } from "./middleware.js";
+
+const HUMAN_PROXY_HEADER = "x-traceai-human-proxy";
+
+function humanProxySecret(): string | null {
+  const value = process.env.TRACEAI_HUMAN_PROXY_SECRET?.trim();
+  return value || null;
+}
+
+/** True when the web session proxy presents the shared human-gate secret. */
+function isHumanProxyRequest(c: {
+  req: { header: (name: string) => string | undefined };
+}): boolean {
+  const expected = humanProxySecret();
+  if (!expected) return false;
+  const provided = c.req.header(HUMAN_PROXY_HEADER)?.trim() ?? "";
+  if (!provided || provided.length !== expected.length) return false;
+  try {
+    return timingSafeEqual(
+      Buffer.from(provided, "utf8"),
+      Buffer.from(expected, "utf8"),
+    );
+  } catch {
+    return false;
+  }
+}
 
 function param(c: { req: { param: (k: string) => string | undefined } }, key: string): string {
   const value = c.req.param(key);
@@ -558,12 +584,14 @@ export function createApp(deps: {
       }
       const fromStage = before.ticket.fields.stage;
       const actor = c.get("actor");
+      const asHuman = isHumanProxyRequest(c);
       const ticket = await deps.service.transitionTicket(slug, body.to_stage, {
         comment: body.comment,
         author: actor.name,
         tokens_estimate: body.tokens_estimate,
         tokens_used: body.tokens_used,
         resolution: body.resolution,
+        asHuman,
       });
       publishTicketEvent(
         ticketEventFromMapped("ticket.transitioned", mapTicket(ticket), {
@@ -572,7 +600,7 @@ export function createApp(deps: {
         }),
       );
       audit(c, {
-        action: "ticket.transition",
+        action: asHuman ? "ticket.human_transition" : "ticket.transition",
         resourceType: "ticket",
         resourceId: ticket.slug,
         meta: {
@@ -582,6 +610,7 @@ export function createApp(deps: {
           tokens_used: body.tokens_used ?? null,
           tokens_actual: ticket.fields.tokens_actual ?? null,
           resolution: ticket.fields.resolution ?? null,
+          as_human: asHuman,
         },
       });
       return c.json({
@@ -872,7 +901,7 @@ export function createApp(deps: {
     const status =
       /not found/i.test(message)
         ? 404
-        : /not allowed|forbidden|disabled/i.test(message)
+        : /not allowed|forbidden|disabled|human approval/i.test(message)
           ? 403
           : 400;
     return c.json({ message, code: "TRACE_ERROR" }, status);

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { TraceApiClient, TraceApiError } from "@traceai/core";
+import { TraceApiError } from "@traceai/core";
 import { getSessionUser, isLoginConfigured } from "@/lib/session";
+import { createTraceServerClient } from "@/lib/traceai-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,20 +12,6 @@ type CreateBody = {
   description?: string;
   priority?: string;
 };
-
-function createClient(): TraceApiClient {
-  const apiUrl = process.env.TRACEAI_API_URL?.replace(/\/$/, "");
-  const token = process.env.TRACEAI_TOKEN;
-  if (!apiUrl || !token) {
-    throw new Error(
-      "TRACEAI_API_URL and TRACEAI_TOKEN must be set on the web server",
-    );
-  }
-  if (!token.startsWith("trc_")) {
-    throw new Error("TRACEAI_TOKEN must start with trc_");
-  }
-  return new TraceApiClient({ apiUrl, token });
-}
 
 export async function POST(request: Request) {
   if (!(await isLoginConfigured())) {
@@ -79,7 +66,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const client = createClient();
+    const client = createTraceServerClient();
     const ticket = (await client.createTicket({
       project,
       title,

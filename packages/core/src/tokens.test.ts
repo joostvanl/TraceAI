@@ -10,13 +10,14 @@ import {
 } from "./types.js";
 
 const backlog = DEFAULT_STAGES.find((s) => s.key === "backlog")!;
+const inRefinement = DEFAULT_STAGES.find((s) => s.key === "in_refinement")!;
 const todo = DEFAULT_STAGES.find((s) => s.key === "todo")!;
 const inProgress = DEFAULT_STAGES.find((s) => s.key === "in_progress")!;
 
 describe("validateTransitionTokens", () => {
   it("requires tokens_estimate when leaving a stage with the flag", () => {
     const errors = validateTransitionTokens({
-      fromStage: backlog,
+      fromStage: inRefinement,
       toStage: todo,
       policy: { ...DEFAULT_AGENT_POLICY, require_tokens_used_on_transition: false },
       tokens_used: 100,
@@ -26,7 +27,7 @@ describe("validateTransitionTokens", () => {
 
   it("accepts a valid estimate when leaving a flagged stage", () => {
     const errors = validateTransitionTokens({
-      fromStage: backlog,
+      fromStage: inRefinement,
       toStage: todo,
       policy: { ...DEFAULT_AGENT_POLICY, require_tokens_used_on_transition: false },
       tokens_estimate: 12000,
@@ -39,12 +40,12 @@ describe("validateTransitionTokens", () => {
     const plain: WorkflowStage = {
       key: "backlog",
       name: "Backlog",
-      transitions: ["todo"],
+      transitions: ["in_refinement"],
       agent: { require_tokens_estimate_on_exit: false },
     };
     const errors = validateTransitionTokens({
       fromStage: plain,
-      toStage: todo,
+      toStage: inRefinement,
       policy: { summary: "", ticket_description: [], on_every_transition: [] },
     });
     assert.deepEqual(errors, []);
@@ -61,7 +62,7 @@ describe("validateTransitionTokens", () => {
 
   it("rejects negative or non-integer token counts", () => {
     const errors = validateTransitionTokens({
-      fromStage: backlog,
+      fromStage: inRefinement,
       toStage: todo,
       policy: DEFAULT_AGENT_POLICY,
       tokens_estimate: 12.5,
@@ -122,7 +123,7 @@ describe("workflow token flags parsing", () => {
           {
             key: "backlog",
             name: "Backlog",
-            transitions: ["todo"],
+            transitions: ["in_refinement"],
             agent: { purpose: "parked" },
           },
           { key: "todo", name: "To do", transitions: [] },
@@ -138,6 +139,7 @@ describe("workflow token flags parsing", () => {
 
   it("defaults enable token tracking on the product workflow template", () => {
     assert.equal(DEFAULT_AGENT_POLICY.require_tokens_used_on_transition, true);
-    assert.equal(backlog.agent?.require_tokens_estimate_on_exit, true);
+    assert.equal(backlog.agent?.require_tokens_estimate_on_exit, undefined);
+    assert.equal(inRefinement.agent?.require_tokens_estimate_on_exit, true);
   });
 });

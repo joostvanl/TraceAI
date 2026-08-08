@@ -102,7 +102,7 @@ export function CreateTicketForm({ projectSlug, authenticated }: Props) {
           {open ? "Cancel" : "New ticket"}
         </button>
         <p className="muted create-ticket-hint">
-          Tickets landen in Backlog; een agent refined ze naar To do.
+          Tickets landen in Backlog; een agent refined ze via In Refinement naar To do.
         </p>
       </div>
 

@@ -1,6 +1,8 @@
 export type TraceApiClientOptions = {
   apiUrl: string;
   token: string;
+  /** When set, transition calls send X-TraceAI-Human-Proxy (web session only). */
+  humanProxySecret?: string;
 };
 
 export class TraceApiError extends Error {
@@ -18,20 +20,26 @@ export class TraceApiError extends Error {
 export class TraceApiClient {
   readonly apiUrl: string;
   private readonly token: string;
+  private readonly humanProxySecret?: string;
 
   constructor(options: TraceApiClientOptions) {
     this.apiUrl = options.apiUrl.replace(/\/$/, "");
     this.token = options.token;
+    this.humanProxySecret = options.humanProxySecret?.trim() || undefined;
   }
 
   private async request<T>(
     path: string,
     init: RequestInit = {},
+    options?: { asHuman?: boolean },
   ): Promise<T> {
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${this.token}`);
     if (init.body && !headers.has("Content-Type")) {
       headers.set("Content-Type", "application/json");
+    }
+    if (options?.asHuman && this.humanProxySecret) {
+      headers.set("X-TraceAI-Human-Proxy", this.humanProxySecret);
     }
 
     const res = await fetch(`${this.apiUrl}${path}`, { ...init, headers });
@@ -157,6 +165,7 @@ export class TraceApiClient {
       tokens_estimate?: number;
       tokens_used?: number;
       resolution?: string;
+      asHuman?: boolean;
     },
   ) {
     return this.request<unknown>(
@@ -171,6 +180,7 @@ export class TraceApiClient {
           resolution: tokens?.resolution,
         }),
       },
+      { asHuman: tokens?.asHuman === true },
     );
   }
 

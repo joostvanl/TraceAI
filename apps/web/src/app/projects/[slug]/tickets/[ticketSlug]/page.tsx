@@ -1,11 +1,19 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import {
+  humanApproveTarget,
+  humanRejectTargets,
+  parseWorkflowDocument,
+} from "@traceai/core";
+import { HumanReviewActions } from "@/components/HumanReviewActions";
 import { Markdown } from "@/components/Markdown";
 import {
   getProject,
   getTicket,
+  getWorkflow,
   listCommentsForTicket,
 } from "@/lib/cms";
+import { getSessionUser } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -15,16 +23,30 @@ type Props = {
 
 export default async function TicketPage({ params }: Props) {
   const { slug, ticketSlug } = await params;
-  const [project, ticket] = await Promise.all([
+  const [project, ticket, sessionUser] = await Promise.all([
     getProject(slug),
     getTicket(ticketSlug),
+    getSessionUser(),
   ]);
 
   if (!project || !ticket || ticket.fields.project !== slug) {
     notFound();
   }
 
-  const comments = await listCommentsForTicket(ticketSlug);
+  const [comments, workflow] = await Promise.all([
+    listCommentsForTicket(ticketSlug),
+    getWorkflow(ticket.fields.workflow),
+  ]);
+
+  const stages = parseWorkflowDocument(workflow?.fields.stages_json).stages;
+  const currentStage = stages.find((s) => s.key === ticket.fields.stage);
+  const humanGated =
+    currentStage?.agent?.require_human_approval_on_exit === true;
+  const approveTo = currentStage ? humanApproveTarget(currentStage) : null;
+  const rejectTo = currentStage ? humanRejectTargets(currentStage) : [];
+  const targetApprove = approveTo
+    ? stages.find((s) => s.key === approveTo)
+    : null;
 
   return (
     <>
@@ -47,7 +69,9 @@ export default async function TicketPage({ params }: Props) {
               ) : null}
               <h1>{ticket.fields.title}</h1>
               <div className="meta-row" style={{ marginTop: "0.75rem" }}>
-                <span className="badge">{ticket.fields.stage}</span>
+                <span className="badge">
+                  {currentStage?.name ?? ticket.fields.stage}
+                </span>
                 <span
                   className={`badge ${ticket.fields.priority ?? "medium"}`}
                 >
@@ -78,6 +102,26 @@ export default async function TicketPage({ params }: Props) {
             </div>
           </div>
           <Markdown content={ticket.fields.description ?? ""} />
+
+          {humanGated ? (
+            <HumanReviewActions
+              ticketSlug={ticket.slug}
+              projectSlug={slug}
+              stageName={currentStage?.name ?? ticket.fields.stage}
+              authenticated={Boolean(sessionUser)}
+              gate={{
+                approveTo,
+                rejectTo,
+                requireResolution:
+                  targetApprove?.agent?.require_resolution_on_enter === true,
+                requireWiki: Boolean(
+                  targetApprove?.agent?.require_comment_sections_on_enter?.some(
+                    (s) => s.toLowerCase().includes("wiki"),
+                  ),
+                ),
+              }}
+            />
+          ) : null}
         </section>
 
         <section className="panel">
