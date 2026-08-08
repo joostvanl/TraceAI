@@ -92,6 +92,45 @@ export class TraceApiClient {
     return this.request<unknown[]>(`/v1/tickets?${params}`);
   }
 
+  searchProject(
+    project: string,
+    query: Record<string, string | number | undefined> = {},
+  ) {
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value == null || value === "") continue;
+      params.set(key, String(value));
+    }
+    const q = params.toString();
+    return this.request<unknown>(
+      `/v1/projects/${encodeURIComponent(project)}/search${q ? `?${q}` : ""}`,
+    );
+  }
+
+  listProjectHistory(
+    project: string,
+    query: {
+      stage?: string;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ) {
+    const params = new URLSearchParams();
+    if (query.stage) params.set("stage", query.stage);
+    if (query.limit != null) params.set("limit", String(query.limit));
+    if (query.offset != null) params.set("offset", String(query.offset));
+    const q = params.toString();
+    return this.request<unknown>(
+      `/v1/projects/${encodeURIComponent(project)}/history${q ? `?${q}` : ""}`,
+    );
+  }
+
+  getProjectInsights(project: string) {
+    return this.request<unknown>(
+      `/v1/projects/${encodeURIComponent(project)}/insights`,
+    );
+  }
+
   getTicket(slug: string) {
     return this.request<unknown>(`/v1/tickets/${encodeURIComponent(slug)}`);
   }

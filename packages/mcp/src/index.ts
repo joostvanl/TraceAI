@@ -158,6 +158,71 @@ async function main() {
   );
 
   server.tool(
+    "search_project",
+    "Search tickets (key/title/description/comments) and wiki (title/body) within one project. Supports filters: stage, resolution, priority, created_by/actor, from/to dates, type.",
+    {
+      project: z.string().describe("Project slug"),
+      q: z.string().optional().describe("Free-text query"),
+      type: z
+        .enum(["all", "ticket", "wiki_page"])
+        .optional()
+        .describe("Result type filter"),
+      stage: z.string().optional(),
+      resolution: z.string().optional(),
+      priority: z.enum(["low", "medium", "high"]).optional(),
+      created_by: z
+        .string()
+        .optional()
+        .describe("Ticket created_by or comment author"),
+      from: z.string().optional().describe("ISO date lower bound"),
+      to: z.string().optional().describe("ISO date upper bound"),
+      limit: z.number().int().positive().max(100).optional(),
+      offset: z.number().int().nonnegative().optional(),
+    },
+    async (input) => {
+      try {
+        const { project, ...query } = input;
+        return ok(await client.searchProject(project, query));
+      } catch (error) {
+        return fail(error);
+      }
+    },
+  );
+
+  server.tool(
+    "list_project_history",
+    "Paginated ticket history for a project (no board Done ~20 display cap). Defaults to all stages; pass stage=done for full Done archive.",
+    {
+      project: z.string().describe("Project slug"),
+      stage: z.string().optional().describe("Stage key, e.g. done"),
+      limit: z.number().int().positive().max(100).optional(),
+      offset: z.number().int().nonnegative().optional(),
+    },
+    async ({ project, stage, limit, offset }) => {
+      try {
+        return ok(
+          await client.listProjectHistory(project, { stage, limit, offset }),
+        );
+      } catch (error) {
+        return fail(error);
+      }
+    },
+  );
+
+  server.tool(
+    "get_project_insights",
+    "Delivery metrics for a project: throughput/week, open WIP age, estimate vs actual, resolution mix. review_returns deferred until durable events (TRA-29).",
+    { project: z.string().describe("Project slug") },
+    async ({ project }) => {
+      try {
+        return ok(await client.getProjectInsights(project));
+      } catch (error) {
+        return fail(error);
+      }
+    },
+  );
+
+  server.tool(
     "get_ticket",
     "Get a ticket by slug OR exact ticket_key (e.g. TRA-42), including comments",
     { slug: z.string().describe("Ticket slug or ticket_key (TRA-42)") },

@@ -33,7 +33,18 @@ import {
   type WorkflowAgentPolicy,
   type WorkflowDocument,
   type WorkflowStage,
+  lastStageKey,
 } from "./types.js";
+import {
+  computeProjectInsights,
+  paginateItems,
+  searchProjectContent,
+  sortTicketsNewestFirst,
+  type Paginated,
+  type ProjectInsights,
+  type SearchFilters,
+  type SearchHit,
+} from "./insights.js";
 
 export type TraceServiceOptions = AuroraClientConfig & {
   websiteId?: string;
@@ -276,6 +287,138 @@ export class TraceService {
       .filter((t) => t.fields.project === input.project)
       .filter((t) => (input.stage ? t.fields.stage === input.stage : true))
       .sort((a, b) => (a.fields.sort_order ?? 0) - (b.fields.sort_order ?? 0));
+  }
+
+  /**
+   * Full ticket history for a project (no board Done display cap).
+   * Newest-first by stage_entered_at; paginated via limit/offset.
+   */
+  async listTicketHistory(input: {
+    project: string;
+    stage?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<
+    Paginated<{
+      ticket: Ticket;
+    }>
+  > {
+    const tickets = await this.listTickets({
+      project: input.project,
+      stage: input.stage,
+    });
+    const sorted = sortTicketsNewestFirst(
+      tickets.map((ticket) => ({
+        ticket,
+        slug: ticket.slug,
+        ticket_key: ticket.fields.ticket_key ?? null,
+        title: ticket.fields.title,
+        stage: ticket.fields.stage,
+        stage_entered_at: ticket.fields.stage_entered_at ?? null,
+      })),
+    );
+    const page = paginateItems(sorted, input.limit ?? 25, input.offset ?? 0);
+    return {
+      items: page.items.map((row) => ({ ticket: row.ticket })),
+      total: page.total,
+      limit: page.limit,
+      offset: page.offset,
+    };
+  }
+
+  async searchProject(input: {
+    project: string;
+    filters?: SearchFilters;
+    includeWiki?: boolean;
+    limit?: number;
+    offset?: number;
+  }): Promise<Paginated<SearchHit>> {
+    await this.ensureReady();
+    const project = await this.client.getEntryBySlug<Project>(
+      "project",
+      input.project,
+    );
+    if (!project) throw new Error(`Project not found: ${input.project}`);
+
+    const tickets = await this.listTickets({ project: input.project });
+    const comments = (
+      await this.client.listEntries<Comment>("comment", {
+        status: "published",
+        limit: 100,
+      })
+    ).items;
+    const commentsByTicket = new Map<string, Comment[]>();
+    for (const comment of comments) {
+      const key = comment.fields.ticket;
+      const list = commentsByTicket.get(key) ?? [];
+      list.push(comment);
+      commentsByTicket.set(key, list);
+    }
+
+    const ticketInputs = tickets.map((t) => {
+      const ticketComments = commentsByTicket.get(t.slug) ?? [];
+      return {
+        slug: t.slug,
+        ticket_key: t.fields.ticket_key ?? null,
+        title: t.fields.title,
+        description: t.fields.description ?? "",
+        stage: t.fields.stage,
+        priority: t.fields.priority ?? "medium",
+        created_by: t.fields.created_by ?? null,
+        resolution: t.fields.resolution ?? null,
+        stage_entered_at: t.fields.stage_entered_at ?? null,
+        createdAt: t.createdAt,
+        updatedAt: t.updatedAt,
+        commentBodies: ticketComments.map((c) => c.fields.body),
+        commentAuthors: ticketComments
+          .map((c) => c.fields.author)
+          .filter((a): a is string => Boolean(a)),
+      };
+    });
+
+    let wikiPages: Array<{
+      slug: string;
+      title: string;
+      body?: string | null;
+      updatedAt?: string | null;
+    }> = [];
+    if (input.includeWiki !== false) {
+      wikiPages = (await this.listWikiPages({ project: input.project })).map(
+        (p) => ({
+          slug: p.slug,
+          title: p.fields.title,
+          body: p.fields.body ?? "",
+          updatedAt: p.updatedAt,
+        }),
+      );
+    }
+
+    const hits = searchProjectContent({
+      tickets: ticketInputs,
+      wikiPages,
+      filters: input.filters,
+    });
+    return paginateItems(hits, input.limit ?? 25, input.offset ?? 0);
+  }
+
+  async getProjectInsights(projectSlug: string): Promise<ProjectInsights> {
+    const detail = await this.getProject(projectSlug);
+    if (!detail) throw new Error(`Project not found: ${projectSlug}`);
+    const tickets = await this.listTickets({ project: projectSlug });
+    const doneStage = lastStageKey(detail.stages) ?? "done";
+    return computeProjectInsights(
+      tickets.map((t) => ({
+        slug: t.slug,
+        ticket_key: t.fields.ticket_key ?? null,
+        title: t.fields.title,
+        stage: t.fields.stage,
+        stage_entered_at: t.fields.stage_entered_at ?? null,
+        tokens_estimate: t.fields.tokens_estimate ?? null,
+        tokens_actual: t.fields.tokens_actual ?? null,
+        resolution: t.fields.resolution ?? null,
+      })),
+      { doneStageKey: doneStage },
+    );
   }
 
   async getTicket(slugOrKey: string): Promise<{
