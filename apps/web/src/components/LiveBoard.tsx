@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { newestFirstCapped } from "@traceai/core";
 
 export type BoardTicket = {
   slug: string;
@@ -38,7 +39,7 @@ type TicketEvent = {
 type Props = {
   projectSlug: string;
   stages: BoardStage[];
-  /** Last workflow stage key — column ordered newest-first. */
+  /** Last workflow stage key — column shows only the newest tickets. */
   lastStageKey?: string;
   initialTickets: BoardTicket[];
   eventsUrl: string;
@@ -56,10 +57,9 @@ function groupByStage(
     map[ticket.stage].push(ticket);
   }
   if (lastStageKey && map[lastStageKey]) {
-    map[lastStageKey].sort(
-      (a, b) =>
-        new Date(b.stageChangedAt ?? 0).getTime() -
-        new Date(a.stageChangedAt ?? 0).getTime(),
+    map[lastStageKey] = newestFirstCapped(
+      map[lastStageKey],
+      (t) => t.stageChangedAt,
     );
   }
   return map;
@@ -123,9 +123,6 @@ export function LiveBoard({
       setLiveState("live");
 
       setTickets((prev) => {
-        if (event.type === "ticket.archived") {
-          return prev.filter((t) => t.slug !== event.ticket.slug);
-        }
         const without = prev.filter((t) => t.slug !== event.ticket.slug);
         if (event.type === "ticket.commented") {
           // Keep placement; optional highlight only.
@@ -146,11 +143,9 @@ export function LiveBoard({
         return [...without, next];
       });
 
-      if (event.type !== "ticket.archived") {
-        setFlashSlug(event.ticket.slug);
-        if (flashTimer) clearTimeout(flashTimer);
-        flashTimer = setTimeout(() => setFlashSlug(null), 1600);
-      }
+      setFlashSlug(event.ticket.slug);
+      if (flashTimer) clearTimeout(flashTimer);
+      flashTimer = setTimeout(() => setFlashSlug(null), 1600);
     };
 
     source.addEventListener("connected", () => setLiveState("live"));
@@ -158,7 +153,6 @@ export function LiveBoard({
     source.addEventListener("ticket.updated", applyEvent);
     source.addEventListener("ticket.transitioned", applyEvent);
     source.addEventListener("ticket.commented", applyEvent);
-    source.addEventListener("ticket.archived", applyEvent);
 
     source.onopen = () => setLiveState("live");
     source.onerror = () => setLiveState("offline");

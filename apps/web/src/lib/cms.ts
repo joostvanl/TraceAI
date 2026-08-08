@@ -1,5 +1,7 @@
 import {
   AuroraPublicClient,
+  lastStageKey,
+  newestFirstCapped,
   parseStages,
   type Comment,
   type Project,
@@ -59,7 +61,6 @@ export async function listTicketsForProject(
   });
   return result.items
     .filter((t) => t.fields.project === projectSlug)
-    .filter((t) => !t.fields.archived_at)
     .sort((a, b) => (a.fields.sort_order ?? 0) - (b.fields.sort_order ?? 0));
 }
 
@@ -111,6 +112,14 @@ export async function getProjectBoard(projectSlug: string): Promise<{
     const key = ticket.fields.stage;
     if (!ticketsByStage[key]) ticketsByStage[key] = [];
     ticketsByStage[key].push(ticket);
+  }
+
+  const last = lastStageKey(stages);
+  if (last && ticketsByStage[last]) {
+    ticketsByStage[last] = newestFirstCapped(
+      ticketsByStage[last],
+      (t) => t.fields.stage_entered_at,
+    );
   }
 
   return { project, workflow, stages, ticketsByStage };

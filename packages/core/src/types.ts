@@ -91,8 +91,6 @@ export type TicketFields = {
   ticket_number?: number;
   /** ISO datetime when the ticket entered its current stage */
   stage_entered_at?: string;
-  /** ISO datetime when auto-archived off the board; unset = visible */
-  archived_at?: string;
 };
 
 /** Max visible tickets in the last workflow stage column. */
@@ -387,33 +385,17 @@ export function lastStageKey(stages: WorkflowStage[]): string | null {
   return stages[stages.length - 1]?.key ?? null;
 }
 
-export type ArchiveCandidate = {
-  slug: string;
-  stage_entered_at?: string | null;
-  archived_at?: string | null;
-  /** Fallback when stage_entered_at is missing (e.g. legacy tickets). */
-  updated_at?: string | null;
-};
-
 /**
- * Among non-archived candidates, return the slugs that exceed `limit`
- * when sorted by most recent stage entry first (those should be archived).
+ * Newest-first, capped for display. Purely a view concern: items beyond the
+ * limit keep their stage and stay retrievable, they are just not shown.
  */
-export function selectTicketsToArchive(
-  candidates: ArchiveCandidate[],
+export function newestFirstCapped<T>(
+  items: T[],
+  enteredAt: (item: T) => string | null | undefined,
   limit: number = LAST_STAGE_VISIBLE_LIMIT,
-): string[] {
-  const active = candidates.filter((c) => !c.archived_at);
-  const enteredAt = (c: ArchiveCandidate) =>
-    new Date(c.stage_entered_at || c.updated_at || 0).getTime();
-  const newestFirst = [...active].sort((a, b) => enteredAt(b) - enteredAt(a));
-  return newestFirst.slice(limit).map((c) => c.slug);
-}
-
-export function isTicketArchived(
-  ticket: { fields: { archived_at?: string | null } },
-): boolean {
-  return Boolean(ticket.fields.archived_at);
+): T[] {
+  const time = (item: T) => new Date(enteredAt(item) ?? 0).getTime();
+  return [...items].sort((a, b) => time(b) - time(a)).slice(0, limit);
 }
 
 function normalizeHeading(value: string): string {

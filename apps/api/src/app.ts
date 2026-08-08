@@ -48,7 +48,6 @@ function mapTicket(t: NonNullable<
     priority: t.fields.priority ?? "medium",
     created_by: t.fields.created_by ?? null,
     stage_entered_at: t.fields.stage_entered_at ?? null,
-    archived_at: t.fields.archived_at ?? null,
   };
 }
 
@@ -264,12 +263,7 @@ export function createApp(deps: {
       );
     }
     const stage = c.req.query("stage") ?? undefined;
-    const includeArchived = c.req.query("include_archived") === "true";
-    const tickets = await deps.service.listTickets({
-      project,
-      stage,
-      include_archived: includeArchived,
-    });
+    const tickets = await deps.service.listTickets({ project, stage });
     return c.json(
       tickets.map((t) => ({
         slug: t.slug,
@@ -281,7 +275,6 @@ export function createApp(deps: {
         workflow: t.fields.workflow,
         created_by: t.fields.created_by ?? null,
         stage_entered_at: t.fields.stage_entered_at ?? null,
-        archived_at: t.fields.archived_at ?? null,
       })),
     );
   });
@@ -384,26 +377,16 @@ export function createApp(deps: {
       }
       const fromStage = before.ticket.fields.stage;
       const actor = c.get("actor");
-      const { ticket, archived } = await deps.service.transitionTicket(
-        slug,
-        body.to_stage,
-        {
-          comment: body.comment,
-          author: actor.name,
-        },
-      );
-      const mapped = mapTicket(ticket);
+      const ticket = await deps.service.transitionTicket(slug, body.to_stage, {
+        comment: body.comment,
+        author: actor.name,
+      });
       publishTicketEvent(
-        ticketEventFromMapped("ticket.transitioned", mapped, {
+        ticketEventFromMapped("ticket.transitioned", mapTicket(ticket), {
           from_stage: fromStage,
           to_stage: ticket.fields.stage,
         }),
       );
-      for (const archivedTicket of archived) {
-        publishTicketEvent(
-          ticketEventFromMapped("ticket.archived", mapTicket(archivedTicket)),
-        );
-      }
       audit(c, {
         action: "ticket.transition",
         resourceType: "ticket",
@@ -411,7 +394,6 @@ export function createApp(deps: {
         meta: {
           from_stage: fromStage,
           to_stage: body.to_stage,
-          archived: archived.map((t) => t.slug),
         },
       });
       return c.json({
@@ -420,7 +402,6 @@ export function createApp(deps: {
         stage: ticket.fields.stage,
         title: ticket.fields.title,
         from_stage: fromStage,
-        archived: archived.map((t) => t.slug),
       });
     },
   );

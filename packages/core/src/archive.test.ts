@@ -4,8 +4,10 @@ import {
   DEFAULT_STAGES,
   LAST_STAGE_VISIBLE_LIMIT,
   lastStageKey,
-  selectTicketsToArchive,
+  newestFirstCapped,
 } from "./types.js";
+
+const at = (day: number) => new Date(Date.UTC(2026, 0, day)).toISOString();
 
 describe("lastStageKey", () => {
   it("returns the last stage key from the workflow definition", () => {
@@ -27,50 +29,64 @@ describe("lastStageKey", () => {
   });
 });
 
-describe("selectTicketsToArchive", () => {
-  it("keeps the newest limit tickets and archives older ones", () => {
-    const candidates = Array.from({ length: 25 }, (_, i) => ({
+describe("newestFirstCapped", () => {
+  it("keeps only the newest tickets up to the limit", () => {
+    const tickets = Array.from({ length: 25 }, (_, i) => ({
       slug: `t-${i}`,
-      stage_entered_at: new Date(Date.UTC(2026, 0, i + 1)).toISOString(),
+      enteredAt: at(i + 1),
     }));
-    const archived = selectTicketsToArchive(candidates, 20);
-    assert.equal(archived.length, 5);
-    assert.deepEqual(archived, ["t-4", "t-3", "t-2", "t-1", "t-0"]);
+    const visible = newestFirstCapped(tickets, (t) => t.enteredAt, 20);
+    assert.equal(visible.length, 20);
+    assert.equal(visible[0]?.slug, "t-24");
+    assert.equal(visible.at(-1)?.slug, "t-5");
   });
 
-  it("ignores already-archived tickets when counting the visible limit", () => {
-    const candidates = [
-      { slug: "old", stage_entered_at: "2026-01-01T00:00:00.000Z", archived_at: "2026-02-01T00:00:00.000Z" },
-      ...Array.from({ length: 20 }, (_, i) => ({
-        slug: `keep-${i}`,
-        stage_entered_at: new Date(Date.UTC(2026, 2, i + 1)).toISOString(),
-      })),
-      {
-        slug: "overflow",
-        stage_entered_at: "2026-01-15T00:00:00.000Z",
-      },
-    ];
-    const archived = selectTicketsToArchive(candidates, 20);
-    assert.deepEqual(archived, ["overflow"]);
-  });
-
-  it("falls back to updated_at when stage_entered_at is missing", () => {
-    const archived = selectTicketsToArchive(
-      [
-        { slug: "a", updated_at: "2026-01-01T00:00:00.000Z" },
-        { slug: "b", updated_at: "2026-01-03T00:00:00.000Z" },
-        { slug: "c", updated_at: "2026-01-02T00:00:00.000Z" },
-      ],
-      2,
+  it("returns everything when at or under the limit", () => {
+    const tickets = Array.from({ length: LAST_STAGE_VISIBLE_LIMIT }, (_, i) => ({
+      slug: `t-${i}`,
+      enteredAt: at(i + 1),
+    }));
+    assert.equal(
+      newestFirstCapped(tickets, (t) => t.enteredAt).length,
+      LAST_STAGE_VISIBLE_LIMIT,
     );
-    assert.deepEqual(archived, ["a"]);
   });
 
-  it("archives nothing when at or under the limit", () => {
-    const candidates = Array.from({ length: LAST_STAGE_VISIBLE_LIMIT }, (_, i) => ({
-      slug: `t-${i}`,
-      stage_entered_at: new Date(Date.UTC(2026, 0, i + 1)).toISOString(),
-    }));
-    assert.deepEqual(selectTicketsToArchive(candidates), []);
+  it("sorts newest first regardless of input order", () => {
+    const visible = newestFirstCapped(
+      [
+        { slug: "b", enteredAt: at(3) },
+        { slug: "a", enteredAt: at(1) },
+        { slug: "c", enteredAt: at(2) },
+      ],
+      (t) => t.enteredAt,
+    );
+    assert.deepEqual(
+      visible.map((t) => t.slug),
+      ["b", "c", "a"],
+    );
+  });
+
+  it("treats a missing timestamp as oldest instead of dropping the ticket", () => {
+    const visible = newestFirstCapped(
+      [{ slug: "unknown" }, { slug: "known", enteredAt: at(1) }],
+      (t) => (t as { enteredAt?: string }).enteredAt,
+    );
+    assert.deepEqual(
+      visible.map((t) => t.slug),
+      ["known", "unknown"],
+    );
+  });
+
+  it("does not mutate the input array", () => {
+    const tickets = [
+      { slug: "a", enteredAt: at(1) },
+      { slug: "b", enteredAt: at(2) },
+    ];
+    newestFirstCapped(tickets, (t) => t.enteredAt, 1);
+    assert.deepEqual(
+      tickets.map((t) => t.slug),
+      ["a", "b"],
+    );
   });
 });

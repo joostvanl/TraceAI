@@ -2,8 +2,7 @@ export type TicketEventType =
   | "ticket.created"
   | "ticket.updated"
   | "ticket.transitioned"
-  | "ticket.commented"
-  | "ticket.archived";
+  | "ticket.commented";
 
 export type TicketEventTicket = {
   slug: string;
