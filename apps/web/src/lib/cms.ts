@@ -1,11 +1,17 @@
 import {
   AuroraPublicClient,
   TraceApiClient,
+  computeProjectInsights,
   lastStageKey,
   newestFirstCapped,
+  paginateItems,
   parseStages,
+  searchProjectContent,
+  sortTicketsNewestFirst,
   type Comment,
   type Project,
+  type ProjectInsights,
+  type SearchHit,
   type Ticket,
   type WikiPage,
   type Workflow,
@@ -234,4 +240,149 @@ export async function getProjectBoard(projectSlug: string): Promise<{
   }
 
   return { project, workflow, stages, ticketsByStage };
+}
+
+export async function searchProjectPublic(
+  projectSlug: string,
+  filters: {
+    q?: string;
+    type?: "all" | "ticket" | "wiki_page";
+    stage?: string;
+    resolution?: string;
+    priority?: string;
+    created_by?: string;
+    from?: string;
+    to?: string;
+    limit?: number;
+    offset?: number;
+  } = {},
+): Promise<{
+  items: SearchHit[];
+  total: number;
+  limit: number;
+  offset: number;
+}> {
+  const [tickets, comments, wiki] = await Promise.all([
+    listTicketsForProject(projectSlug),
+    getPublicClient().listEntries<Comment>("comment", { limit: 100 }),
+    listWikiPagesForProject(projectSlug),
+  ]);
+
+  const commentsByTicket = new Map<string, Comment[]>();
+  for (const comment of comments.items) {
+    const key = comment.fields.ticket;
+    const list = commentsByTicket.get(key) ?? [];
+    list.push(comment);
+    commentsByTicket.set(key, list);
+  }
+
+  const hits = searchProjectContent({
+    tickets: tickets.map((t) => {
+      const ticketComments = commentsByTicket.get(t.slug) ?? [];
+      return {
+        slug: t.slug,
+        ticket_key: t.fields.ticket_key ?? null,
+        title: t.fields.title,
+        description: t.fields.description ?? "",
+        stage: t.fields.stage,
+        priority: t.fields.priority ?? "medium",
+        created_by: t.fields.created_by ?? null,
+        resolution: t.fields.resolution ?? null,
+        stage_entered_at: t.fields.stage_entered_at ?? null,
+        createdAt: t.createdAt,
+        updatedAt: t.updatedAt,
+        commentBodies: ticketComments.map((c) => c.fields.body),
+        commentAuthors: ticketComments
+          .map((c) => c.fields.author)
+          .filter((a): a is string => Boolean(a)),
+      };
+    }),
+    wikiPages: wiki.pages.map((p) => ({
+      slug: p.slug,
+      title: p.fields.title,
+      body: p.fields.body ?? "",
+      updatedAt: p.updatedAt,
+    })),
+    filters: {
+      q: filters.q,
+      type: filters.type ?? "all",
+      stage: filters.stage,
+      resolution: filters.resolution,
+      priority: filters.priority,
+      created_by: filters.created_by,
+      from: filters.from,
+      to: filters.to,
+    },
+  });
+
+  return paginateItems(hits, filters.limit ?? 25, filters.offset ?? 0);
+}
+
+export async function listProjectHistoryPublic(
+  projectSlug: string,
+  options: {
+    stage?: string;
+    limit?: number;
+    offset?: number;
+  } = {},
+): Promise<{
+  items: Array<{
+    slug: string;
+    ticket_key: string | null;
+    title: string;
+    stage: string;
+    priority: string;
+    created_by: string | null;
+    stage_entered_at: string | null;
+    tokens_estimate: number | null;
+    tokens_actual: number | null;
+    resolution: string | null;
+  }>;
+  total: number;
+  limit: number;
+  offset: number;
+}> {
+  const tickets = await listTicketsForProject(projectSlug);
+  const filtered = options.stage
+    ? tickets.filter((t) => t.fields.stage === options.stage)
+    : tickets;
+  const sorted = sortTicketsNewestFirst(
+    filtered.map((t) => ({
+      slug: t.slug,
+      ticket_key: t.fields.ticket_key ?? null,
+      title: t.fields.title,
+      stage: t.fields.stage,
+      priority: t.fields.priority ?? "medium",
+      created_by: t.fields.created_by ?? null,
+      stage_entered_at: t.fields.stage_entered_at ?? null,
+      tokens_estimate: t.fields.tokens_estimate ?? null,
+      tokens_actual: t.fields.tokens_actual ?? null,
+      resolution: t.fields.resolution ?? null,
+    })),
+  );
+  return paginateItems(sorted, options.limit ?? 25, options.offset ?? 0);
+}
+
+export async function getProjectInsightsPublic(
+  projectSlug: string,
+): Promise<{ project: Project; insights: ProjectInsights } | null> {
+  const board = await getProjectBoard(projectSlug);
+  if (!board) return null;
+  // Board caps Done for display; insights must use the uncapped ticket list.
+  const tickets = await listTicketsForProject(projectSlug);
+  const doneStage = lastStageKey(board.stages) ?? "done";
+  const insights = computeProjectInsights(
+    tickets.map((t) => ({
+      slug: t.slug,
+      ticket_key: t.fields.ticket_key ?? null,
+      title: t.fields.title,
+      stage: t.fields.stage,
+      stage_entered_at: t.fields.stage_entered_at ?? null,
+      tokens_estimate: t.fields.tokens_estimate ?? null,
+      tokens_actual: t.fields.tokens_actual ?? null,
+      resolution: t.fields.resolution ?? null,
+    })),
+    { doneStageKey: doneStage },
+  );
+  return { project: board.project, insights };
 }

@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
 import type { AuthStore } from "@traceai/auth";
+import { hasScope } from "@traceai/auth";
 import type { TraceService } from "@traceai/core";
 import { parseWorkflowDocument } from "@traceai/core";
 import {
@@ -318,6 +319,110 @@ export function createApp(deps: {
       201,
     );
   });
+
+  app.get(
+    "/v1/projects/:slug/search",
+    requireScope("tickets:read"),
+    async (c) => {
+      const slug = param(c, "slug");
+      const actor = c.get("actor");
+      const includeWiki = hasScope(actor.scopes, "wiki:read");
+      const typeParam = c.req.query("type");
+      const type =
+        typeParam === "ticket" || typeParam === "wiki_page" || typeParam === "all"
+          ? typeParam
+          : "all";
+      const limit = Number(c.req.query("limit") ?? 25);
+      const offset = Number(c.req.query("offset") ?? 0);
+      try {
+        const page = await deps.service.searchProject({
+          project: slug,
+          includeWiki: includeWiki && type !== "ticket",
+          limit,
+          offset,
+          filters: {
+            q: c.req.query("q") ?? undefined,
+            type: includeWiki ? type : "ticket",
+            stage: c.req.query("stage") ?? undefined,
+            resolution: c.req.query("resolution") ?? undefined,
+            priority: c.req.query("priority") ?? undefined,
+            created_by:
+              c.req.query("created_by") ?? c.req.query("actor") ?? undefined,
+            from: c.req.query("from") ?? undefined,
+            to: c.req.query("to") ?? undefined,
+          },
+        });
+        return c.json(page);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/not found/i.test(message)) {
+          return c.json({ message, code: "NOT_FOUND" }, 404);
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.get(
+    "/v1/projects/:slug/history",
+    requireScope("tickets:read"),
+    async (c) => {
+      const slug = param(c, "slug");
+      const stage = c.req.query("stage") ?? undefined;
+      const limit = Number(c.req.query("limit") ?? 25);
+      const offset = Number(c.req.query("offset") ?? 0);
+      try {
+        const page = await deps.service.listTicketHistory({
+          project: slug,
+          stage,
+          limit,
+          offset,
+        });
+        return c.json({
+          items: page.items.map(({ ticket: t }) => ({
+            slug: t.slug,
+            ticket_key: t.fields.ticket_key ?? null,
+            ticket_number: t.fields.ticket_number ?? null,
+            title: t.fields.title,
+            stage: t.fields.stage,
+            priority: t.fields.priority ?? "medium",
+            created_by: t.fields.created_by ?? null,
+            stage_entered_at: t.fields.stage_entered_at ?? null,
+            tokens_estimate: t.fields.tokens_estimate ?? null,
+            tokens_actual: t.fields.tokens_actual ?? null,
+            resolution: t.fields.resolution ?? null,
+          })),
+          total: page.total,
+          limit: page.limit,
+          offset: page.offset,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/not found/i.test(message)) {
+          return c.json({ message, code: "NOT_FOUND" }, 404);
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.get(
+    "/v1/projects/:slug/insights",
+    requireScope("tickets:read"),
+    async (c) => {
+      const slug = param(c, "slug");
+      try {
+        const insights = await deps.service.getProjectInsights(slug);
+        return c.json({ project: slug, ...insights });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/not found/i.test(message)) {
+          return c.json({ message, code: "NOT_FOUND" }, 404);
+        }
+        throw error;
+      }
+    },
+  );
 
   app.get("/v1/tickets", requireScope("tickets:read"), async (c) => {
     const project = c.req.query("project");
