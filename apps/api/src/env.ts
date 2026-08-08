@@ -26,6 +26,8 @@ function loadDotEnv() {
 export type ApiEnv = {
   port: number;
   authDbPath: string;
+  eventsDbPath: string;
+  eventsPollMs: number;
   auroraApiUrl: string;
   auroraToken: string;
   auroraWebsiteId?: string;
@@ -51,6 +53,10 @@ export function loadEnv(): ApiEnv {
     authDbPath:
       process.env.TRACEAI_AUTH_DB ??
       resolve(root, "data", "traceai-auth.sqlite"),
+    eventsDbPath:
+      process.env.TRACEAI_EVENTS_DB ??
+      resolve(root, "data", "traceai-events.sqlite"),
+    eventsPollMs: Number(process.env.TRACEAI_EVENTS_POLL_MS ?? 750),
     auroraApiUrl:
       process.env.AURORA_API_URL ??
       "https://aurora-api.joostvanleeuwaarden.com",

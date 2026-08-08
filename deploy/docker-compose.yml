@@ -12,6 +12,9 @@ services:
     environment:
       PORT: "3847"
       TRACEAI_AUTH_DB: /data/traceai-auth.sqlite
+      # Durable, append-only ticket-event store (persisted + shared across
+      # workers on this volume so SSE replay/fan-out survives restarts).
+      TRACEAI_EVENTS_DB: /data/traceai-events.sqlite
     volumes:
       - traceai-data:/data
     healthcheck:

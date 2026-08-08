@@ -104,14 +104,16 @@ export function LiveBoard({
     "connecting",
   );
   const [lastEventAt, setLastEventAt] = useState<string | null>(null);
+  const [lastEventId, setLastEventId] = useState<string | null>(null);
 
   const ticketsByStage = useMemo(
     () => groupByStage(stages, tickets, lastStageKey),
     [stages, tickets, lastStageKey],
   );
 
-  // Surfaced next to the status: writes to a different API instance are
-  // published in-process there and never reach this stream.
+  // Events are now durable and cross-process: writes to any API instance land
+  // in the shared store, and this stream replays anything missed on reconnect
+  // via Last-Event-ID. Shown only as a diagnostic hint.
   const eventsHost = useMemo(() => {
     try {
       return new URL(eventsUrl).host;
@@ -145,6 +147,9 @@ export function LiveBoard({
       if (event.project && event.project !== projectSlug) return;
       if (!event.ticket?.slug) return;
 
+      // The browser resends this as `Last-Event-ID` on reconnect, so the API
+      // replays only events newer than this id — no full refresh needed.
+      if (raw.lastEventId) setLastEventId(raw.lastEventId);
       setLastEventAt(event.at ?? new Date().toISOString());
       setLiveState("live");
 
@@ -210,6 +215,7 @@ export function LiveBoard({
           {lastEventAt
             ? ` · last update ${new Date(lastEventAt).toLocaleTimeString()}`
             : null}
+          {lastEventId ? ` · #${lastEventId}` : null}
         </span>
       </div>
 

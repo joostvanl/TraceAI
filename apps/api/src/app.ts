@@ -5,6 +5,8 @@ import type { AuthStore } from "@traceai/auth";
 import type { TraceService } from "@traceai/core";
 import { parseWorkflowDocument } from "@traceai/core";
 import {
+  getEventsAfter,
+  latestEventId,
   publishTicketEvent,
   subscribeTicketEvents,
   ticketEventFromMapped,
@@ -113,16 +115,57 @@ export function createApp(deps: {
   app.get("/health", (c) => c.json({ status: "ok", service: "traceai-api" }));
 
   // Public SSE stream for read-only live boards (no bearer token).
+  // Supports resume via `Last-Event-ID` header or `?after=<event_id>`: on
+  // (re)connect the client replays every event it missed from the durable
+  // store, then follows live events. Each message carries a stable `id:` so
+  // the browser's EventSource resumes automatically after a drop.
   app.get("/events", (c) => {
     const projectFilter = c.req.query("project") ?? undefined;
+    const afterParam =
+      c.req.header("Last-Event-ID") ?? c.req.query("after") ?? undefined;
+    const parsedAfter = afterParam ? Number(afterParam) : NaN;
+
     return streamSSE(c, async (stream) => {
+      // No cursor supplied → start from "now" so a fresh board doesn't get a
+      // full backlog replay (initial ticket list is loaded separately).
+      let cursor = Number.isFinite(parsedAfter)
+        ? Math.max(0, parsedAfter)
+        : latestEventId();
       let closed = false;
-      const unsubscribe = subscribeTicketEvents((event) => {
-        if (projectFilter && event.project !== projectFilter) return;
-        void stream.writeSSE({
-          event: event.type,
-          data: JSON.stringify(event),
-        });
+      let draining = false;
+      let pending = false;
+
+      // Single ordered delivery path. Both the initial replay and live
+      // notifications call drain(), which reads the store from `cursor`
+      // onward, so events are never duplicated or delivered out of order —
+      // even when they originate from another API process.
+      async function drain() {
+        if (draining) {
+          pending = true;
+          return;
+        }
+        draining = true;
+        try {
+          do {
+            pending = false;
+            const records = getEventsAfter(cursor, projectFilter);
+            for (const record of records) {
+              if (closed) return;
+              await stream.writeSSE({
+                id: String(record.event_id),
+                event: record.event.type,
+                data: JSON.stringify(record.event),
+              });
+              cursor = record.event_id;
+            }
+          } while (pending && !closed);
+        } finally {
+          draining = false;
+        }
+      }
+
+      const unsubscribe = subscribeTicketEvents(() => {
+        void drain();
       });
 
       stream.onAbort(() => {
@@ -135,9 +178,13 @@ export function createApp(deps: {
         data: JSON.stringify({
           ok: true,
           project: projectFilter ?? null,
+          last_event_id: cursor,
           at: new Date().toISOString(),
         }),
       });
+
+      // Replay anything missed since `cursor` before going live.
+      await drain();
 
       while (!closed) {
         await stream.sleep(15000);

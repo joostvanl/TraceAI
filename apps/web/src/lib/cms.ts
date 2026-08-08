@@ -1,5 +1,6 @@
 import {
   AuroraPublicClient,
+  TraceApiClient,
   lastStageKey,
   newestFirstCapped,
   parseStages,
@@ -132,6 +133,65 @@ export async function listWikiPagesForProject(projectSlug: string): Promise<{
 export async function getWikiPage(slug: string): Promise<WikiPage | null> {
   try {
     return await getPublicClient().getEntry<WikiPage>("wiki_page", slug);
+  } catch {
+    return null;
+  }
+}
+
+/** Board card shape shared with `LiveBoard` (camelCase, source-agnostic). */
+export type BoardTicketSnapshot = {
+  slug: string;
+  ticketKey: string | null;
+  title: string;
+  stage: string;
+  priority: string;
+  stageChangedAt?: string;
+  tokensEstimate: number | null;
+  tokensActual: number | null;
+  resolution: string | null;
+};
+
+function getTraceClient(): TraceApiClient | null {
+  const traceApiUrl = process.env.TRACEAI_API_URL?.replace(/\/$/, "");
+  const token = process.env.TRACEAI_TOKEN;
+  if (!traceApiUrl || !token || !token.startsWith("trc_")) return null;
+  return new TraceApiClient({ apiUrl: traceApiUrl, token });
+}
+
+/**
+ * Initial board tickets via the TraceAI API (system of record proxy) instead
+ * of reading Aurora directly, so the live-board path has a single source of
+ * truth that matches the SSE stream. Returns `null` when TraceAI is not
+ * configured on the web server, so callers can fall back to Aurora.
+ */
+export async function listBoardTicketsViaTraceAI(
+  projectSlug: string,
+): Promise<BoardTicketSnapshot[] | null> {
+  const client = getTraceClient();
+  if (!client) return null;
+  try {
+    const rows = (await client.listTickets(projectSlug)) as Array<{
+      slug: string;
+      ticket_key?: string | null;
+      title: string;
+      stage: string;
+      priority?: string | null;
+      stage_entered_at?: string | null;
+      tokens_estimate?: number | null;
+      tokens_actual?: number | null;
+      resolution?: string | null;
+    }>;
+    return rows.map((t) => ({
+      slug: t.slug,
+      ticketKey: t.ticket_key ?? null,
+      title: t.title,
+      stage: t.stage,
+      priority: t.priority ?? "medium",
+      stageChangedAt: t.stage_entered_at ?? undefined,
+      tokensEstimate: t.tokens_estimate ?? null,
+      tokensActual: t.tokens_actual ?? null,
+      resolution: t.resolution ?? null,
+    }));
   } catch {
     return null;
   }

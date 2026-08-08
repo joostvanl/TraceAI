@@ -1,3 +1,7 @@
+import { DatabaseSync } from "node:sqlite";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+
 export type TicketEventType =
   | "ticket.created"
   | "ticket.updated"
@@ -27,25 +31,218 @@ export type TicketEvent = {
   at: string;
 };
 
-type Listener = (event: TicketEvent) => void;
+/** A persisted event plus its monotonic store id (used as the SSE `id:`). */
+export type TicketEventRecord = {
+  event_id: number;
+  event: TicketEvent;
+};
 
-const listeners = new Set<Listener>();
+/**
+ * Append-only durable store for ticket events, backed by SQLite (`node:sqlite`,
+ * the same driver the auth store already uses — no new dependency). Every event
+ * gets a monotonic `event_id`, so clients can replay from any point via
+ * `Last-Event-ID` / `?after=`, and events survive API process restarts.
+ *
+ * A file-backed store shared between API workers (WAL mode) also gives us
+ * cross-process fan-out: each worker polls for rows written by any other
+ * worker, so an MCP write on one instance reaches SSE clients on all of them.
+ */
+export class TicketEventStore {
+  private readonly db: DatabaseSync;
 
-export function publishTicketEvent(event: TicketEvent) {
-  for (const listener of listeners) {
-    try {
-      listener(event);
-    } catch (error) {
-      console.error("ticket event listener failed", error);
+  constructor(dbPath: string) {
+    if (dbPath !== ":memory:") {
+      mkdirSync(dirname(dbPath), { recursive: true });
     }
+    this.db = new DatabaseSync(dbPath);
+    this.db.exec("PRAGMA journal_mode = WAL;");
+    this.db.exec("PRAGMA busy_timeout = 5000;");
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS ticket_events (
+        event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project TEXT NOT NULL,
+        type TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_ticket_events_project
+        ON ticket_events(project, event_id);
+    `);
+  }
+
+  append(event: TicketEvent): TicketEventRecord {
+    const result = this.db
+      .prepare(
+        `INSERT INTO ticket_events (project, type, payload, at)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(event.project, event.type, JSON.stringify(event), event.at);
+    return { event_id: Number(result.lastInsertRowid), event };
+  }
+
+  /** Events with `event_id` strictly greater than `afterId`, ascending. */
+  readAfter(
+    afterId: number,
+    options: { project?: string; limit?: number } = {},
+  ): TicketEventRecord[] {
+    const limit = options.limit ?? 500;
+    const rows = (
+      options.project
+        ? this.db
+            .prepare(
+              `SELECT event_id, payload FROM ticket_events
+               WHERE event_id > ? AND project = ?
+               ORDER BY event_id ASC LIMIT ?`,
+            )
+            .all(afterId, options.project, limit)
+        : this.db
+            .prepare(
+              `SELECT event_id, payload FROM ticket_events
+               WHERE event_id > ?
+               ORDER BY event_id ASC LIMIT ?`,
+            )
+            .all(afterId, limit)
+    ) as Array<{ event_id: number | bigint; payload: string }>;
+
+    return rows.map((row) => ({
+      event_id: Number(row.event_id),
+      event: JSON.parse(row.payload) as TicketEvent,
+    }));
+  }
+
+  latestId(): number {
+    const row = this.db
+      .prepare(`SELECT MAX(event_id) AS max_id FROM ticket_events`)
+      .get() as { max_id: number | bigint | null } | undefined;
+    return row?.max_id == null ? 0 : Number(row.max_id);
+  }
+
+  close() {
+    this.db.close();
   }
 }
 
-export function subscribeTicketEvents(listener: Listener): () => void {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
+type Notify = () => void;
+
+/**
+ * Backs `publishTicketEvent` with the durable store and a cross-process
+ * notification loop. Subscribers are told "something changed" and are expected
+ * to drain from the store (`getEventsAfter`) in id order, which keeps delivery
+ * gap-free and ordered even when events arrive from another process.
+ */
+export class TicketEventBus {
+  private readonly subscribers = new Set<Notify>();
+  private readonly pollTimer: ReturnType<typeof setInterval> | null;
+  private lastSeenId: number;
+
+  constructor(
+    private readonly store: TicketEventStore,
+    options: { pollMs?: number } = {},
+  ) {
+    this.lastSeenId = store.latestId();
+    const pollMs = options.pollMs ?? 0;
+    if (pollMs > 0) {
+      this.pollTimer = setInterval(() => this.pump(), pollMs);
+      // Don't keep the event loop alive just for polling.
+      (this.pollTimer as unknown as { unref?: () => void }).unref?.();
+    } else {
+      this.pollTimer = null;
+    }
+  }
+
+  publish(event: TicketEvent): TicketEventRecord {
+    const record = this.store.append(event);
+    // Local subscribers see it immediately; other processes catch up on poll.
+    this.notify();
+    return record;
+  }
+
+  subscribe(listener: Notify): () => void {
+    this.subscribers.add(listener);
+    return () => {
+      this.subscribers.delete(listener);
+    };
+  }
+
+  getEventsAfter(afterId: number, project?: string): TicketEventRecord[] {
+    return this.store.readAfter(afterId, { project });
+  }
+
+  latestId(): number {
+    return this.store.latestId();
+  }
+
+  /** Check the store for new rows (e.g. written by another process). */
+  pump() {
+    const latest = this.store.latestId();
+    if (latest > this.lastSeenId) {
+      this.lastSeenId = latest;
+      this.notify();
+    }
+  }
+
+  private notify() {
+    for (const listener of this.subscribers) {
+      try {
+        listener();
+      } catch (error) {
+        console.error("ticket event subscriber failed", error);
+      }
+    }
+  }
+
+  close() {
+    if (this.pollTimer) clearInterval(this.pollTimer);
+    this.subscribers.clear();
+  }
+}
+
+let defaultBus: TicketEventBus | null = null;
+
+/** Initialize the process-wide event bus (call once at startup). */
+export function configureEventBus(options: {
+  dbPath: string;
+  pollMs?: number;
+}): TicketEventBus {
+  defaultBus?.close();
+  defaultBus = new TicketEventBus(new TicketEventStore(options.dbPath), {
+    pollMs: options.pollMs,
+  });
+  return defaultBus;
+}
+
+function getBus(): TicketEventBus {
+  if (!defaultBus) {
+    // Fallback for tooling/tests that never called configureEventBus.
+    defaultBus = new TicketEventBus(
+      new TicketEventStore(process.env.TRACEAI_EVENTS_DB ?? ":memory:"),
+    );
+  }
+  return defaultBus;
+}
+
+export function publishTicketEvent(event: TicketEvent): TicketEventRecord {
+  return getBus().publish(event);
+}
+
+/**
+ * Subscribe to change notifications. The callback receives no payload on
+ * purpose: subscribers drain from the store via `getEventsAfter` to stay
+ * ordered and gap-free across processes.
+ */
+export function subscribeTicketEvents(listener: Notify): () => void {
+  return getBus().subscribe(listener);
+}
+
+export function getEventsAfter(
+  afterId: number,
+  project?: string,
+): TicketEventRecord[] {
+  return getBus().getEventsAfter(afterId, project);
+}
+
+export function latestEventId(): number {
+  return getBus().latestId();
 }
 
 export function ticketEventFromMapped(

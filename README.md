@@ -123,11 +123,19 @@ GET https://traceai.joostvanleeuwaarden.com/events?project=<projectSlug>
 
 No bearer token required. The API publishes `ticket.created`, `ticket.updated`, `ticket.transitioned`, and `ticket.commented` after successful writes. The Next.js board updates cards in place (no full refresh).
 
-### One writer: keep MCP and the board on the same API instance
+### Durable, cross-process events
 
-The board reads its initial state straight from Aurora, but live updates come from the SSE stream of one specific API process, and the ticket event bus is in-process. So `TRACEAI_API_URL` (what MCP writes to) and `NEXT_PUBLIC_TRACEAI_EVENTS_URL` (what the board listens to) must resolve to the **same** instance.
+Ticket events are persisted to an append-only SQLite store (`node:sqlite`, the same driver as the auth DB — no extra dependency) with a monotonic `event_id`. `publishTicketEvent` writes to that store and notifies local subscribers; every API worker also polls the shared WAL file, so a write on **any** instance reaches SSE clients on **all** of them. Events survive process restarts and can be replayed.
 
-Point them at different instances and nothing errors: every instance shares one Aurora store, so a refresh still shows the correct board while live updates silently never arrive. Both localhost origins are already allowed by the API's CORS defaults, so a local board can subscribe to the Pi instance.
+- `GET /events` emits stable `id:` fields. On reconnect the browser's `EventSource` resends the last id as `Last-Event-ID` (you can also pass `?after=<event_id>`), and the API replays only the events missed since then — no hard refresh required.
+- The web board loads its **initial** ticket list from the TraceAI API (`/v1/tickets`) when `TRACEAI_API_URL` + `TRACEAI_TOKEN` are set, so the live-board path has one source of truth (TraceAI → Aurora), matching the SSE stream. Without those env vars it falls back to reading Aurora directly.
+
+Because events are durable and shared, `TRACEAI_API_URL` and `NEXT_PUBLIC_TRACEAI_EVENTS_URL` no longer have to resolve to the same process — any instance backed by the same event store works. Both localhost origins are already allowed by the API's CORS defaults, so a local board can subscribe to the Pi instance.
+
+**API env for events:**
+
+- `TRACEAI_EVENTS_DB` — path to the SQLite event store (default `data/traceai-events.sqlite`). For multi-instance deploys, point every worker at the **same** file (shared volume).
+- `TRACEAI_EVENTS_POLL_MS` — how often each worker checks the store for events written by another process (default `750`).
 
 Cursor sometimes leaves orphan `node …/packages/mcp/dist/index.js` processes after an MCP reload. Those keep the old `TRACEAI_API_URL` (historically localhost). The MCP server now **rejects** loopback URLs. Every tool result includes `api_base` — if it is not `https://traceai.joostvanleeuwaarden.com`, clean up and reload:
 

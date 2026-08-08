@@ -8,6 +8,7 @@
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test src/**/*.test.ts",
     "bootstrap": "tsx src/cli/bootstrap.ts",
     "create-user": "tsx src/cli/create-user.ts",
     "create-token": "tsx src/cli/create-token.ts",
