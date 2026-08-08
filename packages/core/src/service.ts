@@ -22,11 +22,13 @@ import {
   type TicketResolution,
   APP_LOGIN_CONTENT_TYPE,
   APP_LOGIN_ENTRY_SLUG,
+  WIKI_PAGE_CONTENT_TYPE,
   type AppLogin,
   type Comment,
   type Priority,
   type Project,
   type Ticket,
+  type WikiPage,
   type Workflow,
   type WorkflowAgentPolicy,
   type WorkflowDocument,
@@ -749,6 +751,167 @@ export class TraceService {
     });
     await this.ensurePublished("comment", comment);
     return comment;
+  }
+
+  async listWikiPages(input: { project: string }): Promise<WikiPage[]> {
+    await this.ensureReady();
+    const project = await this.client.getEntryBySlug<Project>(
+      "project",
+      input.project,
+    );
+    if (!project) throw new Error(`Project not found: ${input.project}`);
+    const result = await this.client.listEntries<WikiPage>(
+      WIKI_PAGE_CONTENT_TYPE,
+      { status: "published", limit: 100 },
+    );
+    return result.items
+      .filter((p) => p.fields.project === input.project)
+      .sort((a, b) => {
+        const so = (a.fields.sort_order ?? 0) - (b.fields.sort_order ?? 0);
+        if (so !== 0) return so;
+        return a.fields.title.localeCompare(b.fields.title);
+      });
+  }
+
+  async getWikiPage(slug: string): Promise<WikiPage | null> {
+    await this.ensureReady();
+    return this.client.getEntryBySlug<WikiPage>(WIKI_PAGE_CONTENT_TYPE, slug);
+  }
+
+  private async assertWikiParent(
+    project: string,
+    parentSlug: string | null | undefined,
+    selfSlug?: string,
+  ): Promise<void> {
+    if (parentSlug == null || parentSlug === "") return;
+    const all = (
+      await this.client.listEntries<WikiPage>(WIKI_PAGE_CONTENT_TYPE, {
+        limit: 100,
+      })
+    ).items;
+    const bySlug = new Map(all.map((p) => [p.slug, p] as const));
+    const parent = bySlug.get(parentSlug);
+    if (!parent) throw new Error(`Parent wiki page not found: ${parentSlug}`);
+    if (parent.fields.project !== project) {
+      throw new Error(
+        `Parent wiki page "${parentSlug}" belongs to a different project.`,
+      );
+    }
+    if (selfSlug && parentSlug === selfSlug) {
+      throw new Error("A wiki page cannot be its own parent.");
+    }
+    if (!selfSlug) return;
+    const seen = new Set<string>([selfSlug]);
+    let cursor: string | null = parentSlug;
+    while (cursor) {
+      if (seen.has(cursor)) {
+        throw new Error(
+          `Setting parent "${parentSlug}" would create a cycle in the wiki tree.`,
+        );
+      }
+      seen.add(cursor);
+      const ancestor = bySlug.get(cursor);
+      const next = ancestor?.fields.parent;
+      cursor = typeof next === "string" && next.length > 0 ? next : null;
+    }
+  }
+
+  async createWikiPage(input: {
+    project: string;
+    title: string;
+    body?: string;
+    parent?: string | null;
+    sort_order?: number;
+    slug?: string;
+    updated_by?: string;
+  }): Promise<WikiPage> {
+    await this.ensureReady();
+    const title = input.title?.trim();
+    if (!title) throw new Error("title is required");
+    const project = await this.client.getEntryBySlug<Project>(
+      "project",
+      input.project,
+    );
+    if (!project) throw new Error(`Project not found: ${input.project}`);
+    await this.assertWikiParent(input.project, input.parent);
+    const existing = (
+      await this.client.listEntries<WikiPage>(WIKI_PAGE_CONTENT_TYPE, {
+        limit: 100,
+      })
+    ).items;
+    const slug =
+      input.slug?.trim() ||
+      uniqueSlug(title, new Set(existing.map((p) => p.slug)));
+    if (existing.some((p) => p.slug === slug)) {
+      throw new Error(`Wiki page slug already exists: ${slug}`);
+    }
+    const siblings = existing.filter(
+      (p) =>
+        p.fields.project === input.project &&
+        (p.fields.parent || null) === (input.parent || null),
+    );
+    const page = await this.client.createEntry<WikiPage>(
+      WIKI_PAGE_CONTENT_TYPE,
+      {
+        slug,
+        status: "published",
+        fields: {
+          title,
+          body: input.body ?? "",
+          project: input.project,
+          ...(input.parent ? { parent: input.parent } : {}),
+          sort_order:
+            input.sort_order ??
+            siblings.reduce(
+              (max, p) => Math.max(max, p.fields.sort_order ?? 0),
+              -1,
+            ) + 1,
+          updated_by: input.updated_by ?? "agent",
+        },
+      },
+    );
+    await this.ensurePublished(WIKI_PAGE_CONTENT_TYPE, page);
+    return page;
+  }
+
+  async updateWikiPage(
+    slug: string,
+    input: {
+      title?: string;
+      body?: string;
+      parent?: string | null;
+      sort_order?: number;
+      updated_by?: string;
+    },
+  ): Promise<WikiPage> {
+    await this.ensureReady();
+    const page = await this.client.getEntryBySlug<WikiPage>(
+      WIKI_PAGE_CONTENT_TYPE,
+      slug,
+    );
+    if (!page) throw new Error(`Wiki page not found: ${slug}`);
+    if (input.parent !== undefined) {
+      await this.assertWikiParent(page.fields.project, input.parent, slug);
+    }
+    const updated = await this.client.updateEntry<WikiPage>(
+      WIKI_PAGE_CONTENT_TYPE,
+      page.id,
+      {
+        fields: {
+          ...(input.title != null ? { title: input.title.trim() } : {}),
+          ...(input.body != null ? { body: input.body } : {}),
+          ...(input.parent !== undefined
+            ? { parent: input.parent || "" }
+            : {}),
+          ...(input.sort_order != null ? { sort_order: input.sort_order } : {}),
+          ...(input.updated_by != null
+            ? { updated_by: input.updated_by }
+            : {}),
+        },
+      },
+    );
+    await this.ensurePublished(WIKI_PAGE_CONTENT_TYPE, updated);
+    return updated;
   }
 
   /**

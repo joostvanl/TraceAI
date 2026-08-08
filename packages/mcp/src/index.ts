@@ -75,6 +75,7 @@ const stageAgentSchema = z
     require_comment_on_enter: z.boolean().optional(),
     require_comment_on_exit: z.boolean().optional(),
     require_comment_sections_on_enter: z.array(z.string()).optional(),
+    require_comment_sections_on_exit: z.array(z.string()).optional(),
     comment_template: z.string().optional(),
     require_tokens_estimate_on_exit: z.boolean().optional(),
     require_resolution_on_enter: z.boolean().optional(),
@@ -365,6 +366,74 @@ async function main() {
     async ({ slug, ...body }) => {
       try {
         return okWrite(await client.updateWorkflow(slug, body));
+      } catch (error) {
+        return fail(error);
+      }
+    },
+  );
+
+  server.tool(
+    "list_wiki_pages",
+    "List wiki pages for a project (read-only tree nodes). Cursor must use TraceAI MCP only — never Aurora MCP for wiki entries.",
+    { project: z.string().describe("Project slug") },
+    async ({ project }) => {
+      try {
+        return ok(await client.listWikiPages(project));
+      } catch (error) {
+        return fail(error);
+      }
+    },
+  );
+
+  server.tool(
+    "get_wiki_page",
+    "Get a wiki page by slug. Cursor → TraceAI only (never Aurora MCP).",
+    { slug: z.string() },
+    async ({ slug }) => {
+      try {
+        return ok(await client.getWikiPage(slug));
+      } catch (error) {
+        return fail(error);
+      }
+    },
+  );
+
+  server.tool(
+    "create_wiki_page",
+    "Create a Markdown wiki page under a project. UI is read-only — agents write here. Never use Aurora MCP for wiki entries (Cursor → TraceAI → Aurora).",
+    {
+      project: z.string(),
+      title: z.string().min(1),
+      body: z.string().optional().describe("Markdown body"),
+      parent: z
+        .string()
+        .optional()
+        .describe("Parent wiki page slug; omit for root"),
+      sort_order: z.number().int().optional(),
+      slug: z.string().optional(),
+    },
+    async (input) => {
+      try {
+        return okWrite(await client.createWikiPage(input));
+      } catch (error) {
+        return fail(error);
+      }
+    },
+  );
+
+  server.tool(
+    "update_wiki_page",
+    "Update a wiki page (title/body/parent/sort_order). Never use Aurora MCP for wiki entries.",
+    {
+      slug: z.string(),
+      title: z.string().min(1).optional(),
+      body: z.string().optional(),
+      parent: z.string().nullable().optional(),
+      sort_order: z.number().int().optional(),
+    },
+    async ({ slug, ...body }) => {
+      try {
+        return okWrite(await client.updateWikiPage(slug, body));
       } catch (error) {
         return fail(error);
       }

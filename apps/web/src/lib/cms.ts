@@ -6,6 +6,7 @@ import {
   type Comment,
   type Project,
   type Ticket,
+  type WikiPage,
   type Workflow,
   type WorkflowStage,
 } from "@traceai/core";
@@ -84,6 +85,56 @@ export async function listCommentsForTicket(
       (a, b) =>
         new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
     );
+}
+
+export type WikiTreeNode = {
+  slug: string;
+  title: string;
+  parent: string | null;
+  children: WikiTreeNode[];
+};
+
+export async function listWikiPagesForProject(projectSlug: string): Promise<{
+  pages: WikiPage[];
+  tree: WikiTreeNode[];
+}> {
+  const result = await getPublicClient().listEntries<WikiPage>("wiki_page", {
+    limit: 100,
+  });
+  const pages = result.items
+    .filter((p) => p.fields.project === projectSlug)
+    .sort((a, b) => {
+      const so = (a.fields.sort_order ?? 0) - (b.fields.sort_order ?? 0);
+      if (so !== 0) return so;
+      return a.fields.title.localeCompare(b.fields.title);
+    });
+
+  const bySlug = new Map<string, WikiTreeNode>();
+  for (const page of pages) {
+    bySlug.set(page.slug, {
+      slug: page.slug,
+      title: page.fields.title,
+      parent: page.fields.parent || null,
+      children: [],
+    });
+  }
+  const roots: WikiTreeNode[] = [];
+  for (const node of bySlug.values()) {
+    if (node.parent && bySlug.has(node.parent)) {
+      bySlug.get(node.parent)!.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+  return { pages, tree: roots };
+}
+
+export async function getWikiPage(slug: string): Promise<WikiPage | null> {
+  try {
+    return await getPublicClient().getEntry<WikiPage>("wiki_page", slug);
+  } catch {
+    return null;
+  }
 }
 
 export async function getProjectBoard(projectSlug: string): Promise<{

@@ -8,6 +8,8 @@ export const ALL_SCOPES = [
   "comments:write",
   "workflows:read",
   "workflows:write",
+  "wiki:read",
+  "wiki:write",
   "admin",
 ] as const;
 
@@ -21,6 +23,8 @@ export const DEFAULT_AGENT_SCOPES: Scope[] = [
   "comments:write",
   "workflows:read",
   "workflows:write",
+  "wiki:read",
+  "wiki:write",
 ];
 
 export type UserStatus = "active" | "disabled";

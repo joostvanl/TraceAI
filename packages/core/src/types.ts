@@ -17,6 +17,11 @@ export type WorkflowStageAgentRules = {
    * (case-insensitive), e.g. ["## Testverslag", "## Uitslag"].
    */
   require_comment_sections_on_enter?: string[];
+  /**
+   * When leaving this stage for another stage, the comment must include these
+   * Markdown headings (case-insensitive), e.g. ["## Wiki"].
+   */
+  require_comment_sections_on_exit?: string[];
   /** Suggested comment skeleton shown to agents */
   comment_template?: string;
   /**
@@ -140,6 +145,18 @@ export type CommentFields = {
   author?: string;
 };
 
+/** Per-project hierarchical Markdown wiki page (Aurora content type `wiki_page`). */
+export type WikiPageFields = {
+  title: string;
+  body?: string;
+  /** Project slug */
+  project: string;
+  /** Parent wiki page slug; omit/empty for root */
+  parent?: string | null;
+  sort_order?: number;
+  updated_by?: string;
+};
+
 /**
  * Shared TraceAI web UI login. Stored as Aurora content type `app_login`
  * (entry slug `default`) with Aurora field types `username` + `password`.
@@ -158,10 +175,12 @@ export type Project = AuroraEntry<ProjectFields>;
 export type Workflow = AuroraEntry<WorkflowFields>;
 export type Ticket = AuroraEntry<TicketFields>;
 export type Comment = AuroraEntry<CommentFields>;
+export type WikiPage = AuroraEntry<WikiPageFields>;
 export type AppLogin = AuroraEntry<AppLoginFields>;
 
 export const APP_LOGIN_CONTENT_TYPE = "app_login";
 export const APP_LOGIN_ENTRY_SLUG = "default";
+export const WIKI_PAGE_CONTENT_TYPE = "wiki_page";
 
 export type ListResult<T> = {
   items: T[];
@@ -256,7 +275,7 @@ export const DEFAULT_STAGES: WorkflowStage[] = [
       require_comment_sections_on_enter: ["## Testverslag", "## Uitslag"],
       on_exit: [
         "If returning to In progress, comment what failed and what to fix.",
-        "If moving to Done, confirm acceptance criteria are met.",
+        "If moving to Done, confirm acceptance criteria are met and document the outcome in the project wiki via TraceAI MCP (include ## Wiki when entering Done).",
       ],
       require_comment_on_exit: true,
       comment_template:
@@ -272,8 +291,10 @@ export const DEFAULT_STAGES: WorkflowStage[] = [
       on_enter: [
         "Comment final confirmation that acceptance criteria are met.",
         "Pass resolution: completed | superseded | cancelled | duplicate | verification-only (Done ≠ always functionally shipped).",
+        "Include ## Wiki with the TraceAI wiki page slug(s) you created/updated for this ticket (Cursor → TraceAI MCP only).",
       ],
       require_comment_on_enter: true,
+      require_comment_sections_on_enter: ["## Wiki"],
       require_resolution_on_enter: true,
     },
   },
@@ -308,6 +329,11 @@ function parseStageAgent(raw: unknown): WorkflowStageAgentRules | undefined {
       item.require_comment_sections_on_enter,
     )
       ? item.require_comment_sections_on_enter.map((s) => String(s))
+      : undefined,
+    require_comment_sections_on_exit: Array.isArray(
+      item.require_comment_sections_on_exit,
+    )
+      ? item.require_comment_sections_on_exit.map((s) => String(s))
       : undefined,
     comment_template:
       item.comment_template != null ? String(item.comment_template) : undefined,
@@ -522,6 +548,18 @@ export function validateTransitionComment(input: {
       errors.push(
         `Entering "${input.toStage.key}" requires comment section "${section}".`,
       );
+    }
+  }
+
+  if (input.fromStage.key !== input.toStage.key) {
+    const exitSections =
+      input.fromStage.agent?.require_comment_sections_on_exit ?? [];
+    for (const section of exitSections) {
+      if (!normalizeHeading(comment).includes(normalizeHeading(section))) {
+        errors.push(
+          `Leaving "${input.fromStage.key}" requires comment section "${section}".`,
+        );
+      }
     }
   }
 

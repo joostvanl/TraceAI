@@ -167,6 +167,32 @@ export class TraceApiClient {
     });
   }
 
+  listWikiPages(project: string) {
+    const params = new URLSearchParams({ project });
+    return this.request<unknown[]>(`/v1/wiki-pages?${params}`);
+  }
+
+  getWikiPage(slug: string) {
+    return this.request<unknown>(`/v1/wiki-pages/${encodeURIComponent(slug)}`);
+  }
+
+  createWikiPage(body: Record<string, unknown>) {
+    return this.request<unknown>("/v1/wiki-pages", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  updateWikiPage(slug: string, body: Record<string, unknown>) {
+    return this.request<unknown>(
+      `/v1/wiki-pages/${encodeURIComponent(slug)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      },
+    );
+  }
+
   me() {
     return this.request<unknown>("/v1/me");
   }

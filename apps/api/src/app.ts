@@ -62,6 +62,21 @@ function mapWorkflow(w: Awaited<ReturnType<TraceService["listWorkflows"]>>[numbe
   };
 }
 
+function mapWikiPage(
+  p: Awaited<ReturnType<TraceService["listWikiPages"]>>[number],
+) {
+  return {
+    slug: p.slug,
+    title: p.fields.title,
+    body: p.fields.body ?? "",
+    project: p.fields.project,
+    parent: p.fields.parent ?? null,
+    sort_order: p.fields.sort_order ?? null,
+    updated_by: p.fields.updated_by ?? null,
+    updatedAt: p.updatedAt,
+  };
+}
+
 function corsOrigins(): string[] {
   const fromEnv = (process.env.TRACEAI_CORS_ORIGINS ?? "")
     .split(",")
@@ -465,6 +480,76 @@ export function createApp(deps: {
       },
       201,
     );
+  });
+
+  app.get("/v1/wiki-pages", requireScope("wiki:read"), async (c) => {
+    const project = c.req.query("project");
+    if (!project) {
+      return c.json(
+        { message: "project query param is required", code: "VALIDATION" },
+        400,
+      );
+    }
+    const pages = await deps.service.listWikiPages({ project });
+    return c.json(pages.map(mapWikiPage));
+  });
+
+  app.get("/v1/wiki-pages/:slug", requireScope("wiki:read"), async (c) => {
+    const page = await deps.service.getWikiPage(param(c, "slug"));
+    if (!page) {
+      return c.json({ message: "Wiki page not found", code: "NOT_FOUND" }, 404);
+    }
+    return c.json(mapWikiPage(page));
+  });
+
+  app.post("/v1/wiki-pages", requireScope("wiki:write"), async (c) => {
+    const actor = c.get("actor");
+    const body = await c.req.json<{
+      project: string;
+      title: string;
+      body?: string;
+      parent?: string | null;
+      sort_order?: number;
+      slug?: string;
+    }>();
+    if (!body?.project || !body?.title?.trim()) {
+      return c.json(
+        { message: "project and title are required", code: "VALIDATION" },
+        400,
+      );
+    }
+    const page = await deps.service.createWikiPage({
+      ...body,
+      updated_by: actor.name,
+    });
+    audit(c, {
+      action: "wiki.create",
+      resourceType: "wiki_page",
+      resourceId: page.slug,
+      meta: { project: page.fields.project },
+    });
+    return c.json(mapWikiPage(page), 201);
+  });
+
+  app.patch("/v1/wiki-pages/:slug", requireScope("wiki:write"), async (c) => {
+    const actor = c.get("actor");
+    const body = await c.req.json<{
+      title?: string;
+      body?: string;
+      parent?: string | null;
+      sort_order?: number;
+    }>();
+    const page = await deps.service.updateWikiPage(param(c, "slug"), {
+      ...body,
+      updated_by: actor.name,
+    });
+    audit(c, {
+      action: "wiki.update",
+      resourceType: "wiki_page",
+      resourceId: page.slug,
+      meta: { project: page.fields.project },
+    });
+    return c.json(mapWikiPage(page));
   });
 
   app.get("/v1/workflows", requireScope("workflows:read"), async (c) => {

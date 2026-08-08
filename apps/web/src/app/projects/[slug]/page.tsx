@@ -45,7 +45,18 @@ export default async function ProjectPage({ params }: Props) {
         <span>/</span>
         <span>{project.fields.name}</span>
       </nav>
-      <h1>{project.fields.name}</h1>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "baseline",
+          gap: "1rem",
+          flexWrap: "wrap",
+        }}
+      >
+        <h1>{project.fields.name}</h1>
+        <Link href={`/projects/${slug}/wiki`}>Wiki</Link>
+      </div>
       <p className="lede">{project.fields.description || "No description."}</p>
 
       {stages.length === 0 ? (

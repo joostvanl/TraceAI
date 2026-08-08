@@ -35,21 +35,27 @@ Canonical working agreements live in each workflow's `stages_json` as:
    - When entering a stage with `require_resolution_on_enter`, pass `resolution`
      (`completed` | `superseded` | `cancelled` | `duplicate` | `verification-only`).
      Done ≠ always functionally shipped — pick the reason that matches reality.
+   - When entering a stage with `require_comment_sections_on_enter` including `## Wiki`
+     (product Done), include that section with wiki page slug(s) created/updated via
+     **TraceAI MCP** (`create_wiki_page` / `update_wiki_page`).
    - Token counts are **self-reported** by agents; the workflow JSON is the source of
      truth for when they are required (no hard-coded stage names in the API).
 
 ## Defaults shipped with TraceAI
 
 See `DEFAULT_WORKFLOW_DOCUMENT` in `@traceai/core`. Product defaults enable token
-tracking (`require_tokens_used_on_transition` + backlog `require_tokens_estimate_on_exit`)
-and Done closure reasons (`done.require_resolution_on_enter`).
+tracking (`require_tokens_used_on_transition` + backlog `require_tokens_estimate_on_exit`),
+Done closure reasons (`done.require_resolution_on_enter`), and wiki DoD
+(`done.require_comment_sections_on_enter: ["## Wiki"]`).
 Live Aurora workflows must carry the same flags — code defaults alone are not enough.
 
 ## Always go through MCP / the TraceAI API
 
-- Ticket writes MUST go through the `traceai` MCP server (or the TraceAI API it proxies).
-- Do **not** fall back to writing Aurora directly. Aurora-direct writes bypass the API,
-  so no SSE event is published and the live board only updates after a manual refresh.
+- Ticket **and wiki** writes MUST go through the `traceai` MCP server (or the TraceAI API
+  it proxies). **Cursor → TraceAI → Aurora** is the only allowed route.
+- Do **not** fall back to writing Aurora directly (including Aurora MCP). Aurora-direct
+  writes bypass the API, so no SSE event is published and the live board only updates
+  after a manual refresh.
 
 ### Recovering from an MCP `404`
 
