@@ -114,7 +114,11 @@ export class TraceApiClient {
     slug: string,
     toStage: string,
     comment?: string,
-    tokens?: { tokens_estimate?: number; tokens_used?: number },
+    tokens?: {
+      tokens_estimate?: number;
+      tokens_used?: number;
+      resolution?: string;
+    },
   ) {
     return this.request<unknown>(
       `/v1/tickets/${encodeURIComponent(slug)}/transition`,
@@ -125,6 +129,7 @@ export class TraceApiClient {
           comment,
           tokens_estimate: tokens?.tokens_estimate,
           tokens_used: tokens?.tokens_used,
+          resolution: tokens?.resolution,
         }),
       },
     );

@@ -77,6 +77,7 @@ const stageAgentSchema = z
     require_comment_sections_on_enter: z.array(z.string()).optional(),
     comment_template: z.string().optional(),
     require_tokens_estimate_on_exit: z.boolean().optional(),
+    require_resolution_on_enter: z.boolean().optional(),
   })
   .passthrough()
   .optional();
@@ -196,12 +197,22 @@ async function main() {
 
   server.tool(
     "update_ticket",
-    "Update ticket title, description, or priority",
+    "Update ticket title, description, priority, tokens_estimate, or resolution",
     {
       slug: z.string(),
       title: z.string().optional(),
       description: z.string().optional(),
       priority: z.enum(["low", "medium", "high"]).optional(),
+      tokens_estimate: z.number().int().nonnegative().optional(),
+      resolution: z
+        .enum([
+          "completed",
+          "superseded",
+          "cancelled",
+          "duplicate",
+          "verification-only",
+        ])
+        .optional(),
     },
     async ({ slug, ...body }) => {
       try {
@@ -230,7 +241,7 @@ async function main() {
 
   server.tool(
     "transition_ticket",
-    "Move a ticket to another workflow stage. ALWAYS pass comment with ## Vorige stap and ## Deze stap. Entering review ALSO requires ## Testverslag and ## Uitslag (PASS/FAIL). Token fields are required only when the workflow playbook says so (see get_workflow): tokens_used when agent_policy.require_tokens_used_on_transition; tokens_estimate when leaving a stage with require_tokens_estimate_on_exit.",
+    "Move a ticket to another workflow stage. ALWAYS pass comment with ## Vorige stap and ## Deze stap. Entering review ALSO requires ## Testverslag and ## Uitslag (PASS/FAIL). Token/resolution fields are required only when the workflow playbook says so (see get_workflow): tokens_used when agent_policy.require_tokens_used_on_transition; tokens_estimate when leaving a stage with require_tokens_estimate_on_exit; resolution when entering a stage with require_resolution_on_enter.",
     {
       slug: z.string(),
       to_stage: z.string().describe("Target stage key"),
@@ -256,13 +267,33 @@ async function main() {
         .describe(
           "LLM token estimate for the whole ticket. Required when leaving a stage with require_tokens_estimate_on_exit.",
         ),
+      resolution: z
+        .enum([
+          "completed",
+          "superseded",
+          "cancelled",
+          "duplicate",
+          "verification-only",
+        ])
+        .optional()
+        .describe(
+          "Closure reason. Required when entering a stage with require_resolution_on_enter.",
+        ),
     },
-    async ({ slug, to_stage, comment, tokens_used, tokens_estimate }) => {
+    async ({
+      slug,
+      to_stage,
+      comment,
+      tokens_used,
+      tokens_estimate,
+      resolution,
+    }) => {
       try {
         return okWrite(
           await client.transitionTicket(slug, to_stage, comment, {
             tokens_used,
             tokens_estimate,
+            resolution,
           }),
         );
       } catch (error) {

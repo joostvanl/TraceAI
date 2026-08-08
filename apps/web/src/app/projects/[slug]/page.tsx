@@ -31,6 +31,7 @@ export default async function ProjectPage({ params }: Props) {
         ticket.fields.stage_entered_at ?? ticket.updatedAt,
       tokensEstimate: ticket.fields.tokens_estimate ?? null,
       tokensActual: ticket.fields.tokens_actual ?? null,
+      resolution: ticket.fields.resolution ?? null,
     }));
 
   const eventsUrl =

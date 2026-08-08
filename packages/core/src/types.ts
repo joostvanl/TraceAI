@@ -24,6 +24,11 @@ export type WorkflowStageAgentRules = {
    * tokens_estimate (LLM token estimate for the whole ticket).
    */
   require_tokens_estimate_on_exit?: boolean;
+  /**
+   * When entering this stage, the transition must include a resolution
+   * (closure reason) from TICKET_RESOLUTIONS.
+   */
+  require_resolution_on_enter?: boolean;
 };
 
 export type WorkflowStage = {
@@ -105,7 +110,26 @@ export type TicketFields = {
   tokens_estimate?: number;
   /** Cumulative self-reported LLM tokens used across transitions. */
   tokens_actual?: number;
+  /** Closure reason when entering a resolution-required stage. */
+  resolution?: TicketResolution;
 };
+
+export const TICKET_RESOLUTIONS = [
+  "completed",
+  "superseded",
+  "cancelled",
+  "duplicate",
+  "verification-only",
+] as const;
+
+export type TicketResolution = (typeof TICKET_RESOLUTIONS)[number];
+
+export function isTicketResolution(value: unknown): value is TicketResolution {
+  return (
+    typeof value === "string" &&
+    (TICKET_RESOLUTIONS as readonly string[]).includes(value)
+  );
+}
 
 /** Max visible tickets in the last workflow stage column. */
 export const LAST_STAGE_VISIBLE_LIMIT = 20;
@@ -245,8 +269,12 @@ export const DEFAULT_STAGES: WorkflowStage[] = [
     transitions: [],
     agent: {
       purpose: "Accepted and finished.",
-      on_enter: ["Comment final confirmation that acceptance criteria are met."],
+      on_enter: [
+        "Comment final confirmation that acceptance criteria are met.",
+        "Pass resolution: completed | superseded | cancelled | duplicate | verification-only (Done ≠ always functionally shipped).",
+      ],
       require_comment_on_enter: true,
+      require_resolution_on_enter: true,
     },
   },
 ];
@@ -286,6 +314,10 @@ function parseStageAgent(raw: unknown): WorkflowStageAgentRules | undefined {
     require_tokens_estimate_on_exit:
       typeof item.require_tokens_estimate_on_exit === "boolean"
         ? item.require_tokens_estimate_on_exit
+        : undefined,
+    require_resolution_on_enter:
+      typeof item.require_resolution_on_enter === "boolean"
+        ? item.require_resolution_on_enter
         : undefined,
   };
 }
@@ -546,6 +578,45 @@ export function validateTransitionTokens(input: {
     errors.push(...validateTokenCount(input.tokens_used, "tokens_used"));
   }
 
+  return errors;
+}
+
+/**
+ * Validate resolution against workflow playbook flags.
+ * Does not hard-code stage keys — only reads require_resolution_on_enter.
+ */
+export function validateTransitionResolution(input: {
+  fromStage: WorkflowStage;
+  toStage: WorkflowStage;
+  resolution?: string | null;
+}): string[] {
+  const errors: string[] = [];
+  const required =
+    input.fromStage.key !== input.toStage.key &&
+    input.toStage.agent?.require_resolution_on_enter === true;
+
+  if (!required) {
+    if (input.resolution != null && input.resolution !== "") {
+      if (!isTicketResolution(input.resolution)) {
+        errors.push(
+          `resolution must be one of: ${TICKET_RESOLUTIONS.join(", ")}.`,
+        );
+      }
+    }
+    return errors;
+  }
+
+  if (input.resolution == null || input.resolution === "") {
+    errors.push(
+      `resolution is required when entering stage "${input.toStage.key}" (require_resolution_on_enter). Allowed: ${TICKET_RESOLUTIONS.join(", ")}.`,
+    );
+    return errors;
+  }
+  if (!isTicketResolution(input.resolution)) {
+    errors.push(
+      `resolution must be one of: ${TICKET_RESOLUTIONS.join(", ")}.`,
+    );
+  }
   return errors;
 }
 

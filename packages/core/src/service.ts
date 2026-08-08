@@ -17,7 +17,9 @@ import {
   slugify,
   validateTicketDescription,
   validateTransitionComment,
+  validateTransitionResolution,
   validateTransitionTokens,
+  type TicketResolution,
   APP_LOGIN_CONTENT_TYPE,
   APP_LOGIN_ENTRY_SLUG,
   type AppLogin,
@@ -565,6 +567,7 @@ export class TraceService {
       description?: string;
       priority?: Priority | string;
       tokens_estimate?: number;
+      resolution?: TicketResolution | string;
     },
   ): Promise<Ticket> {
     await this.ensureReady();
@@ -587,6 +590,20 @@ export class TraceService {
     ) {
       throw new Error("tokens_estimate must be a non-negative integer");
     }
+    if (input.resolution != null) {
+      assertNoErrors(
+        validateTransitionResolution({
+          fromStage: { key: "x", name: "x", transitions: ["y"] },
+          toStage: {
+            key: "y",
+            name: "y",
+            transitions: [],
+            agent: { require_resolution_on_enter: true },
+          },
+          resolution: input.resolution,
+        }),
+      );
+    }
     const updated = await this.client.updateEntry<Ticket>("ticket", ticket.id, {
       fields: {
         ...(input.title != null ? { title: input.title } : {}),
@@ -595,6 +612,7 @@ export class TraceService {
         ...(input.tokens_estimate != null
           ? { tokens_estimate: input.tokens_estimate }
           : {}),
+        ...(input.resolution != null ? { resolution: input.resolution } : {}),
       },
     });
     await this.ensurePublished("ticket", updated);
@@ -609,6 +627,7 @@ export class TraceService {
       author?: string;
       tokens_estimate?: number;
       tokens_used?: number;
+      resolution?: TicketResolution | string;
     },
   ): Promise<Ticket> {
     await this.ensureReady();
@@ -648,6 +667,13 @@ export class TraceService {
         tokens_used: options?.tokens_used,
       }),
     );
+    assertNoErrors(
+      validateTransitionResolution({
+        fromStage,
+        toStage: targetStage,
+        resolution: options?.resolution,
+      }),
+    );
 
     // Leaving intake (backlog) requires a refined, playbook-complete description.
     const intakeStage = firstStageKey(stages);
@@ -681,6 +707,13 @@ export class TraceService {
       const previous = Number(ticket.fields.tokens_actual ?? 0);
       fields.tokens_actual =
         (Number.isFinite(previous) ? previous : 0) + options.tokens_used;
+    }
+    if (
+      fromStage.key !== toStage &&
+      targetStage.agent?.require_resolution_on_enter === true &&
+      options?.resolution
+    ) {
+      fields.resolution = options.resolution;
     }
 
     const updated = await this.client.updateEntry<Ticket>("ticket", ticket.id, {

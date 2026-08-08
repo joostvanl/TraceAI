@@ -15,6 +15,8 @@ export type BoardTicket = {
   stageChangedAt?: string;
   tokensEstimate?: number | null;
   tokensActual?: number | null;
+  /** Closure reason when set (typically on last stage). */
+  resolution?: string | null;
 };
 
 export type BoardStage = {
@@ -32,6 +34,9 @@ type TicketEvent = {
     stage: string;
     priority?: string;
     project: string;
+    tokens_estimate?: number | null;
+    tokens_actual?: number | null;
+    resolution?: string | null;
   };
   from_stage?: string;
   to_stage?: string;
@@ -160,6 +165,11 @@ export function LiveBoard({
             event.type === "ticket.transitioned" || !previous
               ? (event.at ?? new Date().toISOString())
               : previous.stageChangedAt,
+          tokensEstimate:
+            event.ticket.tokens_estimate ?? previous?.tokensEstimate ?? null,
+          tokensActual:
+            event.ticket.tokens_actual ?? previous?.tokensActual ?? null,
+          resolution: event.ticket.resolution ?? previous?.resolution ?? null,
         };
         return [...without, next];
       });
@@ -222,6 +232,9 @@ export function LiveBoard({
               ) : (
                 columnTickets.map((ticket) => {
                   const tokens = tokenLabel(ticket);
+                  const showResolution =
+                    Boolean(ticket.resolution) &&
+                    (lastStageKey == null || stage.key === lastStageKey);
                   return (
                   <Link
                     key={ticket.slug}
@@ -236,6 +249,9 @@ export function LiveBoard({
                       <span className={`badge ${ticket.priority}`}>
                         {ticket.priority}
                       </span>
+                      {showResolution ? (
+                        <span className="badge">{ticket.resolution}</span>
+                      ) : null}
                       {tokens ? (
                         <span className="muted" style={{ fontSize: "0.75rem" }}>
                           {tokens}

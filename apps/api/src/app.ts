@@ -50,6 +50,7 @@ function mapTicket(t: NonNullable<
     stage_entered_at: t.fields.stage_entered_at ?? null,
     tokens_estimate: t.fields.tokens_estimate ?? null,
     tokens_actual: t.fields.tokens_actual ?? null,
+    resolution: t.fields.resolution ?? null,
   };
 }
 
@@ -279,6 +280,7 @@ export function createApp(deps: {
         stage_entered_at: t.fields.stage_entered_at ?? null,
         tokens_estimate: t.fields.tokens_estimate ?? null,
         tokens_actual: t.fields.tokens_actual ?? null,
+        resolution: t.fields.resolution ?? null,
       })),
     );
   });
@@ -342,6 +344,7 @@ export function createApp(deps: {
       description?: string;
       priority?: string;
       tokens_estimate?: number;
+      resolution?: string;
     }>();
     const ticket = await deps.service.updateTicket(param(c, "slug"), body);
     const mapped = mapTicket(ticket);
@@ -363,6 +366,7 @@ export function createApp(deps: {
         comment?: string;
         tokens_estimate?: number;
         tokens_used?: number;
+        resolution?: string;
       }>();
       if (!body?.to_stage) {
         return c.json(
@@ -392,6 +396,7 @@ export function createApp(deps: {
         author: actor.name,
         tokens_estimate: body.tokens_estimate,
         tokens_used: body.tokens_used,
+        resolution: body.resolution,
       });
       publishTicketEvent(
         ticketEventFromMapped("ticket.transitioned", mapTicket(ticket), {
@@ -409,6 +414,7 @@ export function createApp(deps: {
           tokens_estimate: body.tokens_estimate ?? null,
           tokens_used: body.tokens_used ?? null,
           tokens_actual: ticket.fields.tokens_actual ?? null,
+          resolution: ticket.fields.resolution ?? null,
         },
       });
       return c.json({
@@ -419,6 +425,7 @@ export function createApp(deps: {
         from_stage: fromStage,
         tokens_estimate: ticket.fields.tokens_estimate ?? null,
         tokens_actual: ticket.fields.tokens_actual ?? null,
+        resolution: ticket.fields.resolution ?? null,
       });
     },
   );

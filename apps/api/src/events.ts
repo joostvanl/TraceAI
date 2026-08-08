@@ -13,6 +13,9 @@ export type TicketEventTicket = {
   created_by: string | null;
   project: string;
   workflow?: string;
+  tokens_estimate?: number | null;
+  tokens_actual?: number | null;
+  resolution?: string | null;
 };
 
 export type TicketEvent = {
@@ -56,6 +59,9 @@ export function ticketEventFromMapped(
     created_by?: string | null;
     project: string;
     workflow?: string;
+    tokens_estimate?: number | null;
+    tokens_actual?: number | null;
+    resolution?: string | null;
   },
   extra: Partial<Pick<TicketEvent, "from_stage" | "to_stage">> = {},
 ): TicketEvent {
@@ -71,6 +77,9 @@ export function ticketEventFromMapped(
       created_by: ticket.created_by ?? null,
       project: ticket.project,
       workflow: ticket.workflow,
+      tokens_estimate: ticket.tokens_estimate ?? null,
+      tokens_actual: ticket.tokens_actual ?? null,
+      resolution: ticket.resolution ?? null,
     },
     ...extra,
     at: new Date().toISOString(),

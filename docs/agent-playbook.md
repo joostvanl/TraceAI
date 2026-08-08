@@ -32,13 +32,17 @@ Canonical working agreements live in each workflow's `stages_json` as:
      (non-negative integer LLM token delta for that step).
    - When leaving a stage with `require_tokens_estimate_on_exit`, pass `tokens_estimate`
      for the whole ticket.
+   - When entering a stage with `require_resolution_on_enter`, pass `resolution`
+     (`completed` | `superseded` | `cancelled` | `duplicate` | `verification-only`).
+     Done ≠ always functionally shipped — pick the reason that matches reality.
    - Token counts are **self-reported** by agents; the workflow JSON is the source of
      truth for when they are required (no hard-coded stage names in the API).
 
 ## Defaults shipped with TraceAI
 
 See `DEFAULT_WORKFLOW_DOCUMENT` in `@traceai/core`. Product defaults enable token
-tracking (`require_tokens_used_on_transition` + backlog `require_tokens_estimate_on_exit`).
+tracking (`require_tokens_used_on_transition` + backlog `require_tokens_estimate_on_exit`)
+and Done closure reasons (`done.require_resolution_on_enter`).
 Live Aurora workflows must carry the same flags — code defaults alone are not enough.
 
 ## Always go through MCP / the TraceAI API

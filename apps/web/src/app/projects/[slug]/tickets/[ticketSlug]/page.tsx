@@ -58,6 +58,9 @@ export default async function TicketPage({ params }: Props) {
                     by {ticket.fields.created_by}
                   </span>
                 ) : null}
+                {ticket.fields.resolution ? (
+                  <span className="badge">{ticket.fields.resolution}</span>
+                ) : null}
                 {typeof ticket.fields.tokens_estimate === "number" ||
                 typeof ticket.fields.tokens_actual === "number" ? (
                   <span className="muted" style={{ fontSize: "0.85rem" }}>
