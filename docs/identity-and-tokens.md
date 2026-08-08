@@ -7,8 +7,16 @@
 | Agents (Cursor / Claude) | TraceAI personal token `trc_…` | User / agent config |
 | TraceAI API | Validates `trc_…`, resolves actor + scopes | TraceAI server |
 | Aurora CMS | Website management token or user PAT | TraceAI server only |
+| Web UI humans | Username + password in Aurora `app_login` / `default` | Managed in Aurora Admin; password hashed; verified via TraceAI → Aurora `verify-credentials` |
 
 Agents never receive Aurora credentials. Aurora is an implementation detail of storage.
+
+### Web UI login
+
+- Content type: `app_login` with Aurora field types `username` and `password`.
+- Entry slug: `default`. Password reads as `{ "set": true }` (never plaintext/hash).
+- Web container holds `TRACEAI_TOKEN` + `TRACEAI_SESSION_SECRET` only; it never holds `AURORA_*` tokens.
+- Login flow: browser → `POST /api/auth/login` → TraceAI `POST /v1/ui/login/verify` → Aurora `POST .../verify-credentials` → HttpOnly session cookie.
 
 ## Entities
 

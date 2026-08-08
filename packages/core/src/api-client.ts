@@ -159,4 +159,15 @@ export class TraceApiClient {
   me() {
     return this.request<unknown>("/v1/me");
   }
+
+  uiLoginStatus() {
+    return this.request<{ configured: boolean }>("/v1/ui/login/status");
+  }
+
+  verifyUiLogin(body: { username: string; password: string }) {
+    return this.request<{ ok: true; user: string }>("/v1/ui/login/verify", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
 }

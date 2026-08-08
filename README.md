@@ -98,14 +98,11 @@ NEXT_PUBLIC_TRACEAI_EVENTS_URL=https://traceai.joostvanleeuwaarden.com/events
 TRACEAI_API_URL=https://traceai.joostvanleeuwaarden.com
 TRACEAI_TOKEN=trc_YOUR_TOKEN
 
-# Server-only — UI login (one shared account)
-TRACEAI_UI_USER=joost
-TRACEAI_UI_PASSWORD=choose-a-password
-# Optional; defaults to the password, so rotating it also invalidates sessions
-TRACEAI_SESSION_SECRET=
+# Server-only — HMAC secret for the HttpOnly session cookie
+TRACEAI_SESSION_SECRET=choose-a-long-random-secret
 ```
 
-Boards stay readable without logging in. Creating a ticket requires a session: `/login` verifies the credentials above and sets an HttpOnly, HMAC-signed cookie (`traceai_session`, 7 days). `/api/tickets` returns **401** without it and otherwise proxies to the TraceAI API with the server-side `trc_…` token. Tickets land in **Backlog** with a light wish description; agents must refine the playbook sections before transitioning to To do.
+Boards and pages require a session. `/login` verifies against Aurora CMS content type `app_login` (entry `default`, fields Username + Password). The Password field is hashed in Aurora; TraceAI never reads the hash — it calls Aurora management `verify-credentials`. The web server verifies via the TraceAI API (`POST /v1/ui/login/verify`) using the server-side `trc_…` token, then sets an HttpOnly, HMAC-signed cookie (`traceai_session`, 7 days). `/api/tickets` returns **401** without a session and otherwise proxies to the TraceAI API. Tickets land in **Backlog** with a light wish description; agents must refine the playbook sections before transitioning to To do.
 
 ## Deploy on Raspberry Pi (Docker)
 

@@ -148,6 +148,53 @@ export function createApp(deps: {
     });
   });
 
+  // Web UI login: credentials live in Aurora `app_login`/`default`
+  // (username + hashed password fields). Verify via Aurora management API.
+  app.get("/v1/ui/login/status", async (c) => {
+    const configured = await deps.service.isAppLoginConfigured();
+    return c.json({ configured });
+  });
+
+  app.post("/v1/ui/login/verify", async (c) => {
+    const body = await c.req.json<{
+      username?: string;
+      password?: string;
+    }>();
+    const username = body?.username?.trim() ?? "";
+    const password = body?.password ?? "";
+    if (!username || !password) {
+      return c.json(
+        { message: "username and password are required", code: "VALIDATION" },
+        400,
+      );
+    }
+
+    const result = await deps.service.verifyAppLogin(username, password);
+    if (!result.ok) {
+      if (result.reason === "not_configured") {
+        return c.json(
+          {
+            message:
+              "UI login is not configured in Aurora (app_login / default with Username + Password).",
+            code: "NOT_CONFIGURED",
+          },
+          503,
+        );
+      }
+      return c.json(
+        { message: "Invalid username or password", code: "UNAUTHORIZED" },
+        401,
+      );
+    }
+
+    audit(c, {
+      action: "ui.login.verify",
+      resourceType: "app_login",
+      resourceId: "default",
+    });
+    return c.json({ ok: true as const, user: result.user });
+  });
+
   app.get("/v1/projects", requireScope("projects:read"), async (c) => {
     const projects = await deps.service.listProjects();
     return c.json(projects.map(mapProject));

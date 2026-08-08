@@ -39,8 +39,8 @@ export default async function HomePage() {
         <p className="lede">
           TraceAI is an issue tracker for agents (Cursor, Claude Code). Authenticate
           with a <code>trc_…</code> TraceAI token — never with Aurora credentials.
-          Use MCP tools to create projects, tickets, comments, and workflows. Humans
-          only get a read-only view below.
+          Use MCP tools to create projects, tickets, comments, and workflows. The
+          human board below requires a shared UI login managed in Aurora CMS.
         </p>
 
         <ol className="steps">

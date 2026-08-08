@@ -27,11 +27,11 @@ function createClient(): TraceApiClient {
 }
 
 export async function POST(request: Request) {
-  if (!isLoginConfigured()) {
+  if (!(await isLoginConfigured())) {
     return NextResponse.json(
       {
         message:
-          "UI login is not configured. Set TRACEAI_UI_USER and TRACEAI_UI_PASSWORD on the web server.",
+          "UI login is not configured in Aurora. Set Username + Password on app_login / default.",
         code: "NOT_CONFIGURED",
       },
       { status: 503 },

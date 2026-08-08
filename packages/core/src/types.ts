@@ -104,10 +104,28 @@ export type CommentFields = {
   author?: string;
 };
 
+/**
+ * Shared TraceAI web UI login. Stored as Aurora content type `app_login`
+ * (entry slug `default`) with Aurora field types `username` + `password`.
+ *
+ * On read, `password` is never plaintext/hash — only `{ set: true }` or `null`.
+ * Verify via Aurora management `POST .../verify-credentials`.
+ */
+export type AppLoginPasswordMarker = { set: true };
+
+export type AppLoginFields = {
+  username: string;
+  password: AppLoginPasswordMarker | null;
+};
+
 export type Project = AuroraEntry<ProjectFields>;
 export type Workflow = AuroraEntry<WorkflowFields>;
 export type Ticket = AuroraEntry<TicketFields>;
 export type Comment = AuroraEntry<CommentFields>;
+export type AppLogin = AuroraEntry<AppLoginFields>;
+
+export const APP_LOGIN_CONTENT_TYPE = "app_login";
+export const APP_LOGIN_ENTRY_SLUG = "default";
 
 export type ListResult<T> = {
   items: T[];

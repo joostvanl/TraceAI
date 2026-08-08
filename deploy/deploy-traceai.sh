@@ -32,12 +32,10 @@ NEXT_PUBLIC_CMS_SITE_KEY=
 NEXT_PUBLIC_TRACEAI_EVENTS_URL=https://traceai.joostvanleeuwaarden.com/events
 TRACEAI_API_URL=http://api:3847
 TRACEAI_TOKEN=
-TRACEAI_UI_USER=joost
-TRACEAI_UI_PASSWORD=
 TRACEAI_SESSION_SECRET=
 EOF
   chmod 600 "$ENV_FILE"
-  fail "Created $ENV_FILE. Fill AURORA_USER_TOKEN, NEXT_PUBLIC_CMS_SITE_KEY, TRACEAI_TOKEN, and TRACEAI_UI_PASSWORD, then run this script again."
+  fail "Created $ENV_FILE. Fill AURORA_USER_TOKEN, NEXT_PUBLIC_CMS_SITE_KEY, TRACEAI_TOKEN, and TRACEAI_SESSION_SECRET, then run this script again."
 fi
 
 grep -Eq '^AURORA_USER_TOKEN=.+$' "$ENV_FILE" ||
@@ -46,10 +44,8 @@ grep -Eq '^NEXT_PUBLIC_CMS_SITE_KEY=.+$' "$ENV_FILE" ||
   fail "NEXT_PUBLIC_CMS_SITE_KEY is missing in $ENV_FILE"
 grep -Eq '^TRACEAI_TOKEN=trc_.+$' "$ENV_FILE" ||
   fail "TRACEAI_TOKEN (trc_…) is missing in $ENV_FILE — needed for the New ticket form"
-grep -Eq '^TRACEAI_UI_USER=.+$' "$ENV_FILE" ||
-  fail "TRACEAI_UI_USER is missing in $ENV_FILE — needed for the UI login"
-grep -Eq '^TRACEAI_UI_PASSWORD=.+$' "$ENV_FILE" ||
-  fail "TRACEAI_UI_PASSWORD is missing in $ENV_FILE — needed for the UI login"
+grep -Eq '^TRACEAI_SESSION_SECRET=.+$' "$ENV_FILE" ||
+  fail "TRACEAI_SESSION_SECRET is missing in $ENV_FILE — needed for the UI session cookie"
 
 # Ensure older env files still get the write-proxy defaults when absent.
 grep -q '^TRACEAI_API_URL=' "$ENV_FILE" ||

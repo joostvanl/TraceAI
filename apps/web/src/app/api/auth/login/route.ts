@@ -5,6 +5,7 @@ import {
   createSessionToken,
   isLoginConfigured,
   sessionCookieOptions,
+  sessionSecret,
   verifyCredentials,
 } from "@/lib/session";
 
@@ -17,11 +18,21 @@ type LoginBody = {
 };
 
 export async function POST(request: Request) {
-  if (!isLoginConfigured()) {
+  if (!sessionSecret()) {
+    return NextResponse.json(
+      {
+        message: "TRACEAI_SESSION_SECRET is not set on the web server.",
+        code: "NOT_CONFIGURED",
+      },
+      { status: 503 },
+    );
+  }
+
+  if (!(await isLoginConfigured())) {
     return NextResponse.json(
       {
         message:
-          "UI login is not configured. Set TRACEAI_UI_USER and TRACEAI_UI_PASSWORD on the web server.",
+          "UI login is not configured in Aurora. Set Username + Password on app_login / default.",
         code: "NOT_CONFIGURED",
       },
       { status: 503 },
@@ -41,17 +52,28 @@ export async function POST(request: Request) {
   const username = body.username?.trim() ?? "";
   const password = body.password ?? "";
 
-  if (!verifyCredentials(username, password)) {
+  const result = await verifyCredentials(username, password);
+  if (!result.ok) {
+    if (!result.configured) {
+      return NextResponse.json(
+        {
+          message:
+            "UI login is not configured in Aurora. Set Username + Password on app_login / default.",
+          code: "NOT_CONFIGURED",
+        },
+        { status: 503 },
+      );
+    }
     return NextResponse.json(
       { message: "Invalid username or password", code: "UNAUTHORIZED" },
       { status: 401 },
     );
   }
 
-  const response = NextResponse.json({ user: username });
+  const response = NextResponse.json({ user: result.user });
   response.cookies.set(
     SESSION_COOKIE,
-    createSessionToken(username),
+    createSessionToken(result.user),
     sessionCookieOptions(SESSION_MAX_AGE_SECONDS),
   );
   return response;

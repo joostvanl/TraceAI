@@ -1,4 +1,5 @@
 import {
+  AuroraApiError,
   AuroraManagementClient,
   type AuroraClientConfig,
 } from "./aurora.js";
@@ -20,6 +21,9 @@ import {
   slugify,
   validateTicketDescription,
   validateTransitionComment,
+  APP_LOGIN_CONTENT_TYPE,
+  APP_LOGIN_ENTRY_SLUG,
+  type AppLogin,
   type Comment,
   type Priority,
   type Project,
@@ -818,6 +822,82 @@ export class TraceService {
     });
     await this.ensurePublished("comment", comment);
     return comment;
+  }
+
+  /**
+   * True when Aurora `app_login`/`default` has a username and a set password
+   * marker (`{ set: true }`). The hash is never readable.
+   */
+  async isAppLoginConfigured(): Promise<boolean> {
+    await this.ensureReady();
+    const entry = await this.client.getEntryBySlug<AppLogin>(
+      APP_LOGIN_CONTENT_TYPE,
+      APP_LOGIN_ENTRY_SLUG,
+    );
+    if (!entry) return false;
+    const username =
+      typeof entry.fields.username === "string"
+        ? entry.fields.username.trim()
+        : "";
+    const passwordSet =
+      typeof entry.fields.password === "object" &&
+      entry.fields.password !== null &&
+      (entry.fields.password as { set?: unknown }).set === true;
+    return Boolean(username && passwordSet);
+  }
+
+  /**
+   * Verify UI login via Aurora management `verify-credentials`.
+   * Does not read or compare password hashes in TraceAI.
+   */
+  async verifyAppLogin(
+    username: string,
+    password: string,
+  ): Promise<
+    | { ok: true; user: string }
+    | { ok: false; reason: "not_configured" | "invalid" }
+  > {
+    await this.ensureReady();
+    if (!(await this.isAppLoginConfigured())) {
+      return { ok: false, reason: "not_configured" };
+    }
+    try {
+      const result = await this.client.verifyCredentials(
+        APP_LOGIN_CONTENT_TYPE,
+        {
+          slug: APP_LOGIN_ENTRY_SLUG,
+          username,
+          password,
+        },
+      );
+      const user =
+        typeof result.username === "string" && result.username.trim()
+          ? result.username.trim()
+          : username.trim();
+      return { ok: true, user };
+    } catch (error) {
+      if (error instanceof AuroraApiError) {
+        if (error.status === 401) {
+          return { ok: false, reason: "invalid" };
+        }
+        const code =
+          typeof error.body === "object" &&
+          error.body &&
+          "code" in error.body &&
+          typeof (error.body as { code: unknown }).code === "string"
+            ? (error.body as { code: string }).code
+            : "";
+        if (
+          error.status === 400 ||
+          error.status === 404 ||
+          code === "PASSWORD_NOT_SET" ||
+          code === "PASSWORD_FIELD_NOT_FOUND"
+        ) {
+          return { ok: false, reason: "not_configured" };
+        }
+      }
+      throw error;
+    }
   }
 
   private async ensurePublished(

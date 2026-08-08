@@ -1,23 +1,14 @@
-import Link from "next/link";
 import { LogoutButton } from "@/components/LogoutButton";
-import { getSessionUser, isLoginConfigured } from "@/lib/session";
+import { getSessionUser } from "@/lib/session";
 
 export async function AuthStatus() {
-  if (!isLoginConfigured()) return null;
   const user = await getSessionUser();
+  if (!user) return null;
 
   return (
     <div className="auth-status">
-      {user ? (
-        <>
-          <span className="muted">{user}</span>
-          <LogoutButton />
-        </>
-      ) : (
-        <Link href="/login" className="btn btn-small">
-          Sign in
-        </Link>
-      )}
+      <span className="muted">{user}</span>
+      <LogoutButton />
     </div>
   );
 }

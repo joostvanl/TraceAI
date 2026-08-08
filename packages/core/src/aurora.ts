@@ -167,6 +167,60 @@ export class AuroraManagementClient {
       { method: "POST" },
     );
   }
+
+  /**
+   * Check plaintext against a hashed `password` field on an entry.
+   * Never returns the hash. Wrong password → AuroraApiError 401.
+   */
+  verifyEntryPassword(
+    apiId: string,
+    entryId: string,
+    input: { password: string; fieldApiId?: string },
+  ) {
+    return this.request<{ ok: true; fieldApiId: string }>(
+      `/api/v1/admin/content-types/${apiId}/entries/${entryId}/verify-password`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          password: input.password,
+          fieldApiId: input.fieldApiId,
+        }),
+      },
+    );
+  }
+
+  /**
+   * Look up entry by slug and verify username + password fields.
+   * Wrong username/password/unknown slug → AuroraApiError 401 (no distinction).
+   */
+  verifyCredentials(
+    apiId: string,
+    input: {
+      slug: string;
+      username: string;
+      password: string;
+      locale?: string;
+      usernameFieldApiId?: string;
+      passwordFieldApiId?: string;
+    },
+  ) {
+    return this.request<{
+      ok: true;
+      entryId: string;
+      slug?: string;
+      username?: string;
+    }>(`/api/v1/admin/content-types/${apiId}/verify-credentials`, {
+      method: "POST",
+      body: JSON.stringify({
+        slug: input.slug,
+        username: input.username,
+        password: input.password,
+        locale: input.locale ?? this.locale,
+        usernameFieldApiId: input.usernameFieldApiId,
+        passwordFieldApiId: input.passwordFieldApiId,
+      }),
+    });
+  }
 }
 
 export class AuroraPublicClient {

@@ -1,31 +1,24 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
+import { TraceApiClient, TraceApiError } from "@traceai/core";
 
 export const SESSION_COOKIE = "traceai_session";
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
 
-type UiCredentials = {
-  user: string;
-  password: string;
-};
-
-export function readUiCredentials(): UiCredentials | null {
-  const user = process.env.TRACEAI_UI_USER?.trim();
-  const password = process.env.TRACEAI_UI_PASSWORD;
-  if (!user || !password) return null;
-  return { user, password };
+function createApiClient(): TraceApiClient | null {
+  const apiUrl = process.env.TRACEAI_API_URL?.replace(/\/$/, "");
+  const token = process.env.TRACEAI_TOKEN;
+  if (!apiUrl || !token?.startsWith("trc_")) return null;
+  return new TraceApiClient({ apiUrl, token });
 }
 
-export function isLoginConfigured(): boolean {
-  return readUiCredentials() !== null;
-}
-
-function sessionSecret(): string | null {
+/**
+ * HMAC key for the session cookie. Independent of Aurora password so Edge
+ * middleware can verify sync; rotating this invalidates open sessions.
+ */
+export function sessionSecret(): string | null {
   const explicit = process.env.TRACEAI_SESSION_SECRET?.trim();
-  if (explicit) return explicit;
-  const credentials = readUiCredentials();
-  // Deriving from the password means rotating it also invalidates existing sessions.
-  return credentials ? `${credentials.user}:${credentials.password}` : null;
+  return explicit || null;
 }
 
 function safeEqual(provided: string, expected: string): boolean {
@@ -39,18 +32,42 @@ function sign(payload: string, secret: string): string {
   return createHmac("sha256", secret).update(payload).digest("base64url");
 }
 
-export function verifyCredentials(user: string, password: string): boolean {
-  const expected = readUiCredentials();
-  if (!expected) return false;
-  // Evaluate both halves so a wrong username and a wrong password cost the same.
-  const userMatches = safeEqual(user, expected.user);
-  const passwordMatches = safeEqual(password, expected.password);
-  return userMatches && passwordMatches;
+export async function isLoginConfigured(): Promise<boolean> {
+  const client = createApiClient();
+  if (!client || !sessionSecret()) return false;
+  try {
+    const status = await client.uiLoginStatus();
+    return status.configured;
+  } catch {
+    return false;
+  }
+}
+
+export async function verifyCredentials(
+  user: string,
+  password: string,
+): Promise<{ ok: true; user: string } | { ok: false; configured: boolean }> {
+  const client = createApiClient();
+  if (!client || !sessionSecret()) {
+    return { ok: false, configured: false };
+  }
+  try {
+    const result = await client.verifyUiLogin({ username: user, password });
+    return { ok: true, user: result.user };
+  } catch (error) {
+    if (error instanceof TraceApiError) {
+      if (error.status === 503 || error.code === "NOT_CONFIGURED") {
+        return { ok: false, configured: false };
+      }
+      return { ok: false, configured: true };
+    }
+    return { ok: false, configured: false };
+  }
 }
 
 export function createSessionToken(user: string): string {
   const secret = sessionSecret();
-  if (!secret) throw new Error("UI login is not configured");
+  if (!secret) throw new Error("TRACEAI_SESSION_SECRET is not set");
   const payload = Buffer.from(
     JSON.stringify({
       user,
