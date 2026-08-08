@@ -80,6 +80,9 @@ function mapTicket(t: NonNullable<
     tokens_estimate: t.fields.tokens_estimate ?? null,
     tokens_actual: t.fields.tokens_actual ?? null,
     resolution: t.fields.resolution ?? null,
+    review_state: t.fields.review_state || null,
+    review_by: t.fields.review_by || null,
+    review_at: t.fields.review_at || null,
   };
 }
 
@@ -474,6 +477,9 @@ export function createApp(deps: {
         tokens_estimate: t.fields.tokens_estimate ?? null,
         tokens_actual: t.fields.tokens_actual ?? null,
         resolution: t.fields.resolution ?? null,
+        review_state: t.fields.review_state || null,
+        review_by: t.fields.review_by || null,
+        review_at: t.fields.review_at || null,
       })),
     );
   });
@@ -625,6 +631,51 @@ export function createApp(deps: {
       });
     },
   );
+
+  // Human review verdict: records the decision only. The agent still performs
+  // the stage transition, gated on the verdict recorded here.
+  app.post("/v1/tickets/:slug/review", requireScope("tickets:write"), async (c) => {
+    if (!isHumanProxyRequest(c)) {
+      return c.json(
+        {
+          message:
+            "A review verdict can only be recorded by a signed-in human via the TraceAI UI (Goedkeuren/Afkeuren).",
+          code: "HUMAN_ONLY",
+        },
+        403,
+      );
+    }
+    const body = await c.req.json<{
+      verdict?: string;
+      comment?: string;
+      reviewer?: string;
+    }>();
+    if (!body?.verdict) {
+      return c.json(
+        { message: "verdict is required (approved | rejected)", code: "VALIDATION" },
+        400,
+      );
+    }
+    const actor = c.get("actor");
+    const ticket = await deps.service.recordReviewVerdict(param(c, "slug"), {
+      verdict: body.verdict,
+      comment: body.comment,
+      author: body.reviewer?.trim() || actor.name,
+    });
+    const mapped = mapTicket(ticket);
+    publishTicketEvent(ticketEventFromMapped("ticket.reviewed", mapped));
+    audit(c, {
+      action: "ticket.review_verdict",
+      resourceType: "ticket",
+      resourceId: ticket.slug,
+      meta: {
+        stage: ticket.fields.stage,
+        verdict: ticket.fields.review_state ?? null,
+        review_by: ticket.fields.review_by ?? null,
+      },
+    });
+    return c.json(mapped);
+  });
 
   app.post("/v1/comments", requireScope("comments:write"), async (c) => {
     const actor = c.get("actor");

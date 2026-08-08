@@ -17,6 +17,8 @@ export type BoardTicket = {
   tokensActual?: number | null;
   /** Closure reason when set (typically on last stage). */
   resolution?: string | null;
+  /** Human verdict on the current human-gated stage, if one was given. */
+  reviewState?: string | null;
 };
 
 export type BoardStage = {
@@ -38,6 +40,7 @@ type TicketEvent = {
     tokens_estimate?: number | null;
     tokens_actual?: number | null;
     resolution?: string | null;
+    review_state?: string | null;
   };
   from_stage?: string;
   to_stage?: string;
@@ -70,6 +73,36 @@ function tokenLabel(ticket: BoardTicket): string | null {
   const left = estimate != null ? `~${formatTokenCount(estimate)}` : "—";
   const right = actual != null ? formatTokenCount(actual) : "—";
   return `${left} / ${right}`;
+}
+
+/**
+ * Review state of a card in a human-gated column: waiting for a verdict, or
+ * carrying one while the agent still has to make the move.
+ */
+function reviewBadge(
+  stage: BoardStage,
+  ticket: BoardTicket,
+): { label: string; cardClass: string; badgeClass: string } | null {
+  if (stage.requiresHumanApproval !== true) return null;
+  if (ticket.reviewState === "approved") {
+    return {
+      label: "Goedgekeurd — agent rondt af",
+      cardClass: "ticket-review-approved",
+      badgeClass: "review-approved-badge",
+    };
+  }
+  if (ticket.reviewState === "rejected") {
+    return {
+      label: "Afgekeurd — agent pakt op",
+      cardClass: "ticket-review-rejected",
+      badgeClass: "review-rejected-badge",
+    };
+  }
+  return {
+    label: "Wacht op beoordeling",
+    cardClass: "ticket-awaiting-human",
+    badgeClass: "human-gate-badge",
+  };
 }
 
 function groupByStage(
@@ -176,6 +209,12 @@ export function LiveBoard({
           tokensActual:
             event.ticket.tokens_actual ?? previous?.tokensActual ?? null,
           resolution: event.ticket.resolution ?? previous?.resolution ?? null,
+          // A transition always clears the verdict server-side; every other
+          // event carries the current one.
+          reviewState:
+            event.type === "ticket.transitioned"
+              ? null
+              : (event.ticket.review_state ?? null),
         };
         return [...without, next];
       });
@@ -190,6 +229,7 @@ export function LiveBoard({
     source.addEventListener("ticket.updated", applyEvent);
     source.addEventListener("ticket.transitioned", applyEvent);
     source.addEventListener("ticket.commented", applyEvent);
+    source.addEventListener("ticket.reviewed", applyEvent);
 
     source.onopen = () => setLiveState("live");
     source.onerror = () => setLiveState("offline");
@@ -245,12 +285,12 @@ export function LiveBoard({
                   const showResolution =
                     Boolean(ticket.resolution) &&
                     (lastStageKey == null || stage.key === lastStageKey);
-                  const awaitingHuman = stage.requiresHumanApproval === true;
+                  const review = reviewBadge(stage, ticket);
                   return (
                   <Link
                     key={ticket.slug}
                     href={`/projects/${projectSlug}/tickets/${ticket.slug}`}
-                    className={`ticket-card${awaitingHuman ? " ticket-awaiting-human" : ""}${flashSlug === ticket.slug ? " ticket-flash" : ""}`}
+                    className={`ticket-card${review ? ` ${review.cardClass}` : ""}${flashSlug === ticket.slug ? " ticket-flash" : ""}`}
                   >
                     {ticket.ticketKey ? (
                       <div className="ticket-key">{ticket.ticketKey}</div>
@@ -263,9 +303,9 @@ export function LiveBoard({
                       {showResolution ? (
                         <span className="badge">{ticket.resolution}</span>
                       ) : null}
-                      {awaitingHuman ? (
-                        <span className="badge human-gate-badge">
-                          Wacht op beoordeling
+                      {review ? (
+                        <span className={`badge ${review.badgeClass}`}>
+                          {review.label}
                         </span>
                       ) : null}
                       {tokens ? (

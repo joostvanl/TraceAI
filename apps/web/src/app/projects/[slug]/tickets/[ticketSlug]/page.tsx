@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import {
   humanApproveTarget,
   humanRejectTargets,
+  isTicketReviewState,
   parseWorkflowDocument,
 } from "@traceai/core";
 import { HumanReviewActions } from "@/components/HumanReviewActions";
@@ -43,9 +44,14 @@ export default async function TicketPage({ params }: Props) {
   const humanGated =
     currentStage?.agent?.require_human_approval_on_exit === true;
   const approveTo = currentStage ? humanApproveTarget(currentStage) : null;
-  const rejectTo = currentStage ? humanRejectTargets(currentStage) : [];
-  const targetApprove = approveTo
-    ? stages.find((s) => s.key === approveTo)
+  const rejectTo = currentStage ? humanRejectTargets(currentStage)[0] ?? null : null;
+  const reviewState = ticket.fields.review_state;
+  const verdict = isTicketReviewState(reviewState)
+    ? {
+        state: reviewState,
+        by: ticket.fields.review_by ?? null,
+        at: ticket.fields.review_at ?? null,
+      }
     : null;
 
   return (
@@ -130,17 +136,8 @@ export default async function TicketPage({ params }: Props) {
               projectSlug={slug}
               stageName={currentStage?.name ?? ticket.fields.stage}
               authenticated={Boolean(sessionUser)}
-              gate={{
-                approveTo,
-                rejectTo,
-                requireResolution:
-                  targetApprove?.agent?.require_resolution_on_enter === true,
-                requireWiki: Boolean(
-                  targetApprove?.agent?.require_comment_sections_on_enter?.some(
-                    (s) => s.toLowerCase().includes("wiki"),
-                  ),
-                ),
-              }}
+              gate={{ approveTo, rejectTo }}
+              verdict={verdict}
             />
           ) : null}
         </section>

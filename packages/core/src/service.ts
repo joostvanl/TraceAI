@@ -14,14 +14,18 @@ import {
   normalizeProjectKey,
   parseWorkflowDocument,
   refinementStageKey,
+  reviewVerdictTarget,
   serializeWorkflowDocument,
   slugify,
   validateHumanGateExit,
+  validateReviewVerdict,
   validateTicketDescription,
   validateTransitionComment,
   validateTransitionResolution,
   validateTransitionTokens,
+  CLEARED_REVIEW_FIELDS,
   type TicketResolution,
+  type TicketReviewState,
   APP_LOGIN_CONTENT_TYPE,
   APP_LOGIN_ENTRY_SLUG,
   WIKI_PAGE_CONTENT_TYPE,
@@ -805,6 +809,7 @@ export class TraceService {
         toStage: targetStage,
         asHuman: options?.asHuman === true,
         comment: options?.comment,
+        reviewState: ticket.fields.review_state,
       }),
     );
     assertNoErrors(
@@ -858,6 +863,8 @@ export class TraceService {
     const fields: Record<string, unknown> = {
       stage: toStage,
       stage_entered_at: now,
+      // A verdict belongs to a single review round.
+      ...CLEARED_REVIEW_FIELDS,
     };
     if (
       fromStage.key !== toStage &&
@@ -881,6 +888,66 @@ export class TraceService {
 
     const updated = await this.client.updateEntry<Ticket>("ticket", ticket.id, {
       fields,
+    });
+    await this.ensurePublished("ticket", updated);
+    return updated;
+  }
+
+  /**
+   * Record a human review verdict on the ticket without moving it. The agent
+   * reads the verdict and performs the matching transition afterwards.
+   */
+  async recordReviewVerdict(
+    slug: string,
+    input: {
+      verdict: TicketReviewState | string;
+      comment?: string;
+      author?: string;
+    },
+  ): Promise<Ticket> {
+    await this.ensureReady();
+    const ticket = await this.resolveTicket(slug);
+    if (!ticket) throw new Error(`Ticket not found: ${slug}`);
+    const workflow = await this.client.getEntryBySlug<Workflow>(
+      "workflow",
+      ticket.fields.workflow,
+    );
+    if (!workflow) throw new Error(`Workflow not found: ${ticket.fields.workflow}`);
+    const stages = parseWorkflowDocument(workflow.fields.stages_json).stages;
+    const stage = stages.find((s) => s.key === ticket.fields.stage);
+    if (!stage) throw new Error("Invalid workflow stage for review verdict");
+    assertNoErrors(
+      validateReviewVerdict({
+        stage,
+        verdict: input.verdict,
+        comment: input.comment,
+      }),
+    );
+
+    const verdict = input.verdict as TicketReviewState;
+    const author = input.author?.trim() || "human";
+    const now = new Date().toISOString();
+    const target = reviewVerdictTarget(stage, verdict);
+    const body = [
+      "## Vorige stap",
+      `Ticket stond in "${stage.name}" te wachten op beoordeling.`,
+      "",
+      "## Deze stap",
+      verdict === "approved"
+        ? `Goedgekeurd door ${author}. De agent mag dit ticket nu naar "${target ?? "de volgende stage"}" brengen.`
+        : `Afgekeurd door ${author}. De agent brengt dit ticket terug naar "${target ?? "een eerdere stage"}".`,
+      ...(input.comment?.trim()
+        ? ["", verdict === "approved" ? "## Toelichting" : "## Reden", input.comment.trim()]
+        : []),
+    ].join("\n");
+    await this.addComment({ ticket: ticket.slug, body, author });
+
+    const updated = await this.client.updateEntry<Ticket>("ticket", ticket.id, {
+      fields: {
+        review_state: verdict,
+        review_by: author,
+        review_at: now,
+      },
     });
     await this.ensurePublished("ticket", updated);
     return updated;

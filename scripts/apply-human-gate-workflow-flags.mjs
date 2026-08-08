@@ -17,17 +17,30 @@ const WORKFLOWS = [
 
 function patchStages(stages) {
   return stages.map((stage) => {
-    if (stage.key !== "review") return stage;
-    return {
-      ...stage,
-      transitions: ["done", "todo"],
-      agent: {
-        ...(stage.agent ?? {}),
-        require_human_approval_on_exit: true,
-        human_approve_to: "done",
-        human_reject_to: ["todo"],
-      },
-    };
+    if (stage.key === "review") {
+      return {
+        ...stage,
+        transitions: ["done", "todo"],
+        agent: {
+          ...(stage.agent ?? {}),
+          require_human_approval_on_exit: true,
+          human_approve_to: "done",
+          human_reject_to: ["todo"],
+        },
+      };
+    }
+    // Reopening a closed ticket: the agent needs a way back to To do.
+    if (stage.key === "done" && !(stage.transitions ?? []).includes("todo")) {
+      return {
+        ...stage,
+        transitions: [...(stage.transitions ?? []), "todo"],
+        agent: {
+          ...(stage.agent ?? {}),
+          require_comment_on_exit: true,
+        },
+      };
+    }
+    return stage;
   });
 }
 

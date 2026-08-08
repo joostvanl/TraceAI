@@ -1,7 +1,7 @@
 export type TraceApiClientOptions = {
   apiUrl: string;
   token: string;
-  /** When set, transition calls send X-TraceAI-Human-Proxy (web session only). */
+  /** When set, human-gate calls send X-TraceAI-Human-Proxy (web session only). */
   humanProxySecret?: string;
 };
 
@@ -181,6 +181,26 @@ export class TraceApiClient {
         }),
       },
       { asHuman: tokens?.asHuman === true },
+    );
+  }
+
+  /** Record a human review verdict; requires the human-proxy secret. */
+  recordReviewVerdict(
+    slug: string,
+    body: {
+      verdict: "approved" | "rejected";
+      comment?: string;
+      /** Signed-in reviewer, recorded instead of the proxy token name. */
+      reviewer?: string;
+    },
+  ) {
+    return this.request<unknown>(
+      `/v1/tickets/${encodeURIComponent(slug)}/review`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+      { asHuman: true },
     );
   }
 

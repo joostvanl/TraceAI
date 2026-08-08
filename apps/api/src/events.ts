@@ -6,7 +6,8 @@ export type TicketEventType =
   | "ticket.created"
   | "ticket.updated"
   | "ticket.transitioned"
-  | "ticket.commented";
+  | "ticket.commented"
+  | "ticket.reviewed";
 
 export type TicketEventTicket = {
   slug: string;
@@ -20,6 +21,9 @@ export type TicketEventTicket = {
   tokens_estimate?: number | null;
   tokens_actual?: number | null;
   resolution?: string | null;
+  review_state?: string | null;
+  review_by?: string | null;
+  review_at?: string | null;
 };
 
 export type TicketEvent = {
@@ -259,6 +263,9 @@ export function ticketEventFromMapped(
     tokens_estimate?: number | null;
     tokens_actual?: number | null;
     resolution?: string | null;
+    review_state?: string | null;
+    review_by?: string | null;
+    review_at?: string | null;
   },
   extra: Partial<Pick<TicketEvent, "from_stage" | "to_stage">> = {},
 ): TicketEvent {
@@ -277,6 +284,9 @@ export function ticketEventFromMapped(
       tokens_estimate: ticket.tokens_estimate ?? null,
       tokens_actual: ticket.tokens_actual ?? null,
       resolution: ticket.resolution ?? null,
+      review_state: ticket.review_state ?? null,
+      review_by: ticket.review_by ?? null,
+      review_at: ticket.review_at ?? null,
     },
     ...extra,
     at: new Date().toISOString(),

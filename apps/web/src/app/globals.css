@@ -356,6 +356,38 @@ h2 {
   color: var(--priority-medium);
 }
 
+.ticket-card.ticket-review-approved {
+  border-left: 3px solid var(--accent);
+  background:
+    linear-gradient(90deg, rgba(61, 154, 122, 0.1), transparent 55%),
+    var(--bg-elevated);
+}
+
+.ticket-card.ticket-review-approved:hover {
+  border-color: var(--accent);
+}
+
+.review-approved-badge {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.ticket-card.ticket-review-rejected {
+  border-left: 3px solid var(--priority-high);
+  background:
+    linear-gradient(90deg, rgba(217, 119, 87, 0.1), transparent 55%),
+    var(--bg-elevated);
+}
+
+.ticket-card.ticket-review-rejected:hover {
+  border-color: var(--priority-high);
+}
+
+.review-rejected-badge {
+  background: rgba(217, 119, 87, 0.15);
+  color: var(--priority-high);
+}
+
 .ticket-card h3 {
   margin: 0 0 0.45rem;
   font-size: 0.95rem;
@@ -460,6 +492,30 @@ h2 {
   background:
     linear-gradient(135deg, rgba(201, 162, 39, 0.08), transparent 60%),
     var(--bg-column);
+}
+
+.human-review.approved {
+  border-color: rgba(61, 154, 122, 0.45);
+  border-left-color: var(--accent);
+  background:
+    linear-gradient(135deg, rgba(61, 154, 122, 0.09), transparent 60%),
+    var(--bg-column);
+}
+
+.human-review.approved .human-review-kicker {
+  color: var(--accent);
+}
+
+.human-review.rejected {
+  border-color: rgba(217, 119, 87, 0.45);
+  border-left-color: var(--priority-high);
+  background:
+    linear-gradient(135deg, rgba(217, 119, 87, 0.09), transparent 60%),
+    var(--bg-column);
+}
+
+.human-review.rejected .human-review-kicker {
+  color: var(--priority-high);
 }
 
 .human-review-header {

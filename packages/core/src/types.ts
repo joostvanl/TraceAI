@@ -35,17 +35,18 @@ export type WorkflowStageAgentRules = {
    */
   require_resolution_on_enter?: boolean;
   /**
-   * When true, only a human (web session → human-proxy API) may leave this
-   * stage. Agent/MCP tokens with tickets:write alone are rejected.
+   * When true, this stage can only be left after a human recorded a review
+   * verdict in the UI. The human never moves the ticket: the agent performs
+   * the transition afterwards, towards the stage that matches the verdict.
    */
   require_human_approval_on_exit?: boolean;
   /**
-   * Target stage for the UI "Goedkeuren" action. Defaults to the first
-   * transition that is not listed in human_reject_to.
+   * Target stage for an "approved" verdict. Defaults to the first transition
+   * that is not listed in human_reject_to.
    */
   human_approve_to?: string;
   /**
-   * Target stage key(s) for the UI "Afkeuren" action. Reject comments must
+   * Target stage key(s) for a "rejected" verdict. Reject transitions must
    * include a "## Reden" section.
    */
   human_reject_to?: string[];
@@ -132,6 +133,15 @@ export type TicketFields = {
   tokens_actual?: number;
   /** Closure reason when entering a resolution-required stage. */
   resolution?: TicketResolution;
+  /**
+   * Human verdict on the current human-gated stage. Cleared on every stage
+   * change, so each review round needs its own verdict.
+   */
+  review_state?: TicketReviewState | "";
+  /** Name of the human who recorded the current verdict. */
+  review_by?: string;
+  /** ISO datetime of the current verdict. */
+  review_at?: string;
 };
 
 export const TICKET_RESOLUTIONS = [
@@ -150,6 +160,27 @@ export function isTicketResolution(value: unknown): value is TicketResolution {
     (TICKET_RESOLUTIONS as readonly string[]).includes(value)
   );
 }
+
+export const TICKET_REVIEW_STATES = ["approved", "rejected"] as const;
+
+/** Human verdict on a review; the agent transitions on the back of it. */
+export type TicketReviewState = (typeof TICKET_REVIEW_STATES)[number];
+
+export function isTicketReviewState(value: unknown): value is TicketReviewState {
+  return (
+    typeof value === "string" &&
+    (TICKET_REVIEW_STATES as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * Written on every stage change. Only the verdict itself is cleared: reviewer
+ * and timestamp stay behind as the record of the last verdict, and are read
+ * only while a verdict is active.
+ */
+export const CLEARED_REVIEW_FIELDS = {
+  review_state: "",
+} as const;
 
 /** Max visible tickets in the last workflow stage column. */
 export const LAST_STAGE_VISIBLE_LIMIT = 20;
@@ -220,6 +251,7 @@ export const DEFAULT_AGENT_POLICY: WorkflowAgentPolicy = {
     "Continue with '## Deze stap' describing what you completed and what the next stage should verify.",
     "List concrete artifacts (files, endpoints, commands) when relevant.",
     "Pass tokens_used: a non-negative integer estimate of LLM tokens (prompt+completion) spent on this step.",
+    "Stages with require_human_approval_on_exit need a human verdict (Goedkeuren/Afkeuren in the UI) before the agent may transition out.",
   ],
   min_description_chars: 280,
   require_description_headings: [
@@ -297,7 +329,8 @@ export const DEFAULT_STAGES: WorkflowStage[] = [
     name: "Review",
     transitions: ["done", "todo"],
     agent: {
-      purpose: "Verification before Done — human approval required to leave.",
+      purpose:
+        "Verification before Done — a human verdict is required before the agent may move on.",
       on_enter: [
         "Transition comment MUST include a short test report.",
         "List each test/check run and PASS/FAIL.",
@@ -306,8 +339,9 @@ export const DEFAULT_STAGES: WorkflowStage[] = [
       require_comment_on_enter: true,
       require_comment_sections_on_enter: ["## Testverslag", "## Uitslag"],
       on_exit: [
-        "If rejecting to To do, comment what failed and what to fix (## Reden).",
-        "If moving to Done, confirm acceptance criteria are met and include ## Wiki.",
+        "Wait for the human verdict (Goedkeuren/Afkeuren in the UI); only then transition.",
+        "If the verdict is rejected, move to To do and reference the reason (## Reden).",
+        "If the verdict is approved, move to Done, confirm acceptance criteria are met and include ## Wiki.",
       ],
       require_comment_on_exit: true,
       require_human_approval_on_exit: true,
@@ -320,7 +354,7 @@ export const DEFAULT_STAGES: WorkflowStage[] = [
   {
     key: "done",
     name: "Done",
-    transitions: [],
+    transitions: ["todo"],
     agent: {
       purpose: "Closed with an explicit resolution and supporting evidence or rationale.",
       on_enter: [
@@ -329,7 +363,11 @@ export const DEFAULT_STAGES: WorkflowStage[] = [
         "Pass resolution: completed | superseded | cancelled | duplicate | verification-only.",
         "Include ## Wiki with page slug(s) or N/A + reason.",
       ],
+      on_exit: [
+        "Reopening is only for tickets that turn out to be incomplete; explain what was missed and what will be picked up again.",
+      ],
       require_comment_on_enter: true,
+      require_comment_on_exit: true,
       require_comment_sections_on_enter: ["## Wiki"],
       require_resolution_on_enter: true,
     },
@@ -539,34 +577,91 @@ export function humanRejectTargets(stage: WorkflowStage): string[] {
 }
 
 /**
- * Enforce human-approval gates. Agents must not leave a gated stage unless
- * `asHuman` is true (set only by the human-proxy API path).
+ * Where a human verdict may take a gated stage. `null` outside a gate.
+ */
+export function reviewVerdictTarget(
+  stage: WorkflowStage,
+  verdict: TicketReviewState,
+): string | null {
+  if (stage.agent?.require_human_approval_on_exit !== true) return null;
+  if (verdict === "approved") return humanApproveTarget(stage);
+  return humanRejectTargets(stage)[0] ?? null;
+}
+
+/**
+ * Enforce human-approval gates. A gated stage may only be left once a human
+ * recorded a verdict, and only towards the stage that matches that verdict.
+ * The human-proxy path (`asHuman`) stays open as a manual override.
  */
 export function validateHumanGateExit(input: {
   fromStage: WorkflowStage;
   toStage: WorkflowStage;
   asHuman?: boolean;
   comment?: string | null;
+  /** Verdict currently recorded on the ticket, if any. */
+  reviewState?: string | null;
 }): string[] {
   const errors: string[] = [];
   if (input.fromStage.key === input.toStage.key) return errors;
   if (input.fromStage.agent?.require_human_approval_on_exit !== true) {
     return errors;
   }
-  if (!input.asHuman) {
-    errors.push(
-      `Leaving stage "${input.fromStage.key}" requires human approval (require_human_approval_on_exit). Use the TraceAI UI Goedkeuren/Afkeuren actions — agents cannot complete this transition via MCP.`,
-    );
-    return errors;
-  }
+
   const rejects = humanRejectTargets(input.fromStage);
-  if (rejects.includes(input.toStage.key)) {
+  const rejecting = rejects.includes(input.toStage.key);
+
+  if (!input.asHuman) {
+    const verdict = input.reviewState?.trim();
+    if (!isTicketReviewState(verdict)) {
+      errors.push(
+        `Stage "${input.fromStage.key}" is waiting for a human review verdict. Ask the reviewer to use Goedkeuren/Afkeuren in the TraceAI UI, then transition on the back of that verdict.`,
+      );
+      return errors;
+    }
+    const allowed = reviewVerdictTarget(input.fromStage, verdict);
+    if (allowed !== input.toStage.key) {
+      errors.push(
+        `The human verdict on "${input.fromStage.key}" is "${verdict}", so this ticket may only move to "${allowed ?? "(no target configured)"}" — not "${input.toStage.key}".`,
+      );
+      return errors;
+    }
+  }
+
+  if (rejecting) {
     const comment = input.comment?.trim() ?? "";
     if (!normalizeHeading(comment).includes("## reden")) {
       errors.push(
         `Rejecting from "${input.fromStage.key}" requires comment section "## Reden" with the rejection reason.`,
       );
     }
+  }
+  return errors;
+}
+
+/**
+ * Whether a human verdict may be recorded, and on which stage. Used by the
+ * API before writing a verdict and by the UI to decide what to render.
+ */
+export function validateReviewVerdict(input: {
+  stage: WorkflowStage;
+  verdict: string;
+  comment?: string | null;
+}): string[] {
+  const errors: string[] = [];
+  if (input.stage.agent?.require_human_approval_on_exit !== true) {
+    errors.push(
+      `Stage "${input.stage.key}" does not ask for a human review verdict.`,
+    );
+    return errors;
+  }
+  if (!isTicketReviewState(input.verdict)) {
+    errors.push(
+      `verdict must be one of: ${TICKET_REVIEW_STATES.join(", ")}.`,
+    );
+    return errors;
+  }
+  if (input.verdict === "rejected" && !input.comment?.trim()) {
+    errors.push("Rejecting a review requires a reason.");
   }
   return errors;
 }
