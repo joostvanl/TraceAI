@@ -24,6 +24,7 @@ export type TicketEventTicket = {
   review_state?: string | null;
   review_by?: string | null;
   review_at?: string | null;
+  parent?: string | null;
 };
 
 export type TicketEvent = {
@@ -266,6 +267,7 @@ export function ticketEventFromMapped(
     review_state?: string | null;
     review_by?: string | null;
     review_at?: string | null;
+    parent?: string | null;
   },
   extra: Partial<Pick<TicketEvent, "from_stage" | "to_stage">> = {},
 ): TicketEvent {
@@ -287,6 +289,7 @@ export function ticketEventFromMapped(
       review_state: ticket.review_state ?? null,
       review_by: ticket.review_by ?? null,
       review_at: ticket.review_at ?? null,
+      parent: ticket.parent ?? null,
     },
     ...extra,
     at: new Date().toISOString(),

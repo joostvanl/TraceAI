@@ -5,7 +5,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { AuthStore } from "@traceai/auth";
 import { hasScope } from "@traceai/auth";
 import type { TraceService } from "@traceai/core";
-import { parseWorkflowDocument } from "@traceai/core";
+import { computeTokenRollup, parseWorkflowDocument } from "@traceai/core";
 import {
   getEventsAfter,
   latestEventId,
@@ -83,6 +83,21 @@ function mapTicket(t: NonNullable<
     review_state: t.fields.review_state || null,
     review_by: t.fields.review_by || null,
     review_at: t.fields.review_at || null,
+    parent: t.fields.parent || null,
+  };
+}
+
+function mapTicketSummary(
+  t: NonNullable<Awaited<ReturnType<TraceService["getTicket"]>>>["ticket"],
+) {
+  return {
+    slug: t.slug,
+    ticket_key: t.fields.ticket_key ?? null,
+    title: t.fields.title,
+    stage: t.fields.stage,
+    tokens_estimate: t.fields.tokens_estimate ?? null,
+    tokens_actual: t.fields.tokens_actual ?? null,
+    parent: t.fields.parent || null,
   };
 }
 
@@ -462,25 +477,48 @@ export function createApp(deps: {
       );
     }
     const stage = c.req.query("stage") ?? undefined;
-    const tickets = await deps.service.listTickets({ project, stage });
+    const parentRaw = c.req.query("parent");
+    const parent =
+      parentRaw === undefined
+        ? undefined
+        : parentRaw === "" || parentRaw === "null"
+          ? null
+          : parentRaw;
+    // Load the full project set so roll-ups include descendants even when
+    // the response is filtered by stage/parent.
+    const projectTickets = await deps.service.listTickets({ project });
+    const tickets = projectTickets
+      .filter((t) => (stage ? t.fields.stage === stage : true))
+      .filter((t) => {
+        if (parent === undefined) return true;
+        const value = t.fields.parent || null;
+        if (parent === null) return value == null || value === "";
+        return value === parent;
+      });
     return c.json(
-      tickets.map((t) => ({
-        slug: t.slug,
-        ticket_key: t.fields.ticket_key ?? null,
-        ticket_number: t.fields.ticket_number ?? null,
-        title: t.fields.title,
-        stage: t.fields.stage,
-        priority: t.fields.priority ?? "medium",
-        workflow: t.fields.workflow,
-        created_by: t.fields.created_by ?? null,
-        stage_entered_at: t.fields.stage_entered_at ?? null,
-        tokens_estimate: t.fields.tokens_estimate ?? null,
-        tokens_actual: t.fields.tokens_actual ?? null,
-        resolution: t.fields.resolution ?? null,
-        review_state: t.fields.review_state || null,
-        review_by: t.fields.review_by || null,
-        review_at: t.fields.review_at || null,
-      })),
+      tickets.map((t) => {
+        const rollup = computeTokenRollup(projectTickets, t.slug);
+        return {
+          slug: t.slug,
+          ticket_key: t.fields.ticket_key ?? null,
+          ticket_number: t.fields.ticket_number ?? null,
+          title: t.fields.title,
+          stage: t.fields.stage,
+          priority: t.fields.priority ?? "medium",
+          workflow: t.fields.workflow,
+          created_by: t.fields.created_by ?? null,
+          stage_entered_at: t.fields.stage_entered_at ?? null,
+          tokens_estimate: t.fields.tokens_estimate ?? null,
+          tokens_actual: t.fields.tokens_actual ?? null,
+          tokens_estimate_rollup: rollup.tokens_estimate_rollup,
+          tokens_actual_rollup: rollup.tokens_actual_rollup,
+          resolution: t.fields.resolution ?? null,
+          review_state: t.fields.review_state || null,
+          review_by: t.fields.review_by || null,
+          review_at: t.fields.review_at || null,
+          parent: t.fields.parent || null,
+        };
+      }),
     );
   });
 
@@ -491,6 +529,12 @@ export function createApp(deps: {
     }
     return c.json({
       ...mapTicket(result.ticket),
+      tokens_estimate_rollup: result.tokens_estimate_rollup,
+      tokens_actual_rollup: result.tokens_actual_rollup,
+      parent_ticket: result.parent_ticket
+        ? mapTicketSummary(result.parent_ticket)
+        : null,
+      children: result.children.map(mapTicketSummary),
       comments: result.comments.map((comment) => ({
         slug: comment.slug,
         author: comment.fields.author ?? null,
@@ -510,6 +554,7 @@ export function createApp(deps: {
       workflow?: string;
       stage?: string;
       slug?: string;
+      parent?: string | null;
     }>();
     if (!body?.project || !body?.title?.trim()) {
       return c.json(
@@ -525,6 +570,7 @@ export function createApp(deps: {
       workflow: body.workflow,
       stage: body.stage,
       slug: body.slug,
+      parent: body.parent,
       created_by: actor.name,
     });
     const mapped = mapTicket(ticket);
@@ -544,6 +590,7 @@ export function createApp(deps: {
       priority?: string;
       tokens_estimate?: number;
       resolution?: string;
+      parent?: string | null;
     }>();
     const ticket = await deps.service.updateTicket(param(c, "slug"), body);
     const mapped = mapTicket(ticket);

@@ -43,6 +43,11 @@ import {
   lastStageKey,
 } from "./types.js";
 import {
+  computeTokenRollup,
+  listChildTickets,
+  validateTicketParent,
+} from "./ticket-links.js";
+import {
   computeProjectInsights,
   paginateItems,
   searchProjectContent,
@@ -284,6 +289,7 @@ export class TraceService {
   async listTickets(input: {
     project: string;
     stage?: string;
+    parent?: string | null;
   }): Promise<Ticket[]> {
     await this.ensureReady();
     const result = await this.client.listEntries<Ticket>("ticket", {
@@ -293,6 +299,14 @@ export class TraceService {
     return result.items
       .filter((t) => t.fields.project === input.project)
       .filter((t) => (input.stage ? t.fields.stage === input.stage : true))
+      .filter((t) => {
+        if (input.parent === undefined) return true;
+        const parent = t.fields.parent || null;
+        if (input.parent === null || input.parent === "") {
+          return parent == null || parent === "";
+        }
+        return parent === input.parent;
+      })
       .sort((a, b) => (a.fields.sort_order ?? 0) - (b.fields.sort_order ?? 0));
   }
 
@@ -431,6 +445,10 @@ export class TraceService {
   async getTicket(slugOrKey: string): Promise<{
     ticket: Ticket;
     comments: Comment[];
+    children: Ticket[];
+    tokens_estimate_rollup: number;
+    tokens_actual_rollup: number;
+    parent_ticket: Ticket | null;
   } | null> {
     await this.ensureReady();
     let ticket = await this.client.getEntryBySlug<Ticket>("ticket", slugOrKey);
@@ -448,6 +466,9 @@ export class TraceService {
         ) ?? null;
     }
     if (!ticket) return null;
+    const projectTickets = await this.listTickets({
+      project: ticket.fields.project,
+    });
     const comments = (
       await this.client.listEntries<Comment>("comment", {
         status: "published",
@@ -459,7 +480,23 @@ export class TraceService {
         (a, b) =>
           new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
       );
-    return { ticket, comments };
+    const childSlugs = new Set(
+      listChildTickets(projectTickets, ticket.slug).map((c) => c.slug),
+    );
+    const children = projectTickets.filter((t) => childSlugs.has(t.slug));
+    const rollup = computeTokenRollup(projectTickets, ticket.slug);
+    const parentSlug = ticket.fields.parent || null;
+    const parent_ticket = parentSlug
+      ? (projectTickets.find((t) => t.slug === parentSlug) ?? null)
+      : null;
+    return {
+      ticket,
+      comments,
+      children,
+      parent_ticket,
+      tokens_estimate_rollup: rollup.tokens_estimate_rollup,
+      tokens_actual_rollup: rollup.tokens_actual_rollup,
+    };
   }
 
   /**
@@ -634,6 +671,7 @@ export class TraceService {
     workflow?: string;
     stage?: string;
     slug?: string;
+    parent?: string | null;
   }): Promise<Ticket> {
     await this.ensureReady();
     const projectCtx = await this.getProject(input.project);
@@ -682,6 +720,15 @@ export class TraceService {
       new Set(existing.map((t) => t.slug)),
     );
 
+    const parentSlug =
+      input.parent !== undefined
+        ? validateTicketParent({
+            tickets: existing,
+            project: input.project,
+            parentRef: input.parent,
+          })
+        : null;
+
     const identity = await this.allocateTicketIdentity(input.project);
     const now = new Date().toISOString();
 
@@ -701,6 +748,7 @@ export class TraceService {
         ticket_key: identity.ticketKey,
         ticket_number: identity.ticketNumber,
         stage_entered_at: now,
+        ...(parentSlug ? { parent: parentSlug } : {}),
       },
     });
     await this.ensurePublished("ticket", ticket);
@@ -720,6 +768,7 @@ export class TraceService {
       priority?: Priority | string;
       tokens_estimate?: number;
       resolution?: TicketResolution | string;
+      parent?: string | null;
     },
   ): Promise<Ticket> {
     await this.ensureReady();
@@ -756,6 +805,21 @@ export class TraceService {
         }),
       );
     }
+    let parentSlug: string | null | undefined;
+    if (input.parent !== undefined) {
+      const siblings = (
+        await this.client.listEntries<Ticket>("ticket", {
+          status: "published",
+          limit: 100,
+        })
+      ).items;
+      parentSlug = validateTicketParent({
+        tickets: siblings,
+        project: ticket.fields.project,
+        selfSlug: ticket.slug,
+        parentRef: input.parent,
+      });
+    }
     const updated = await this.client.updateEntry<Ticket>("ticket", ticket.id, {
       fields: {
         ...(input.title != null ? { title: input.title } : {}),
@@ -765,6 +829,7 @@ export class TraceService {
           ? { tokens_estimate: input.tokens_estimate }
           : {}),
         ...(input.resolution != null ? { resolution: input.resolution } : {}),
+        ...(parentSlug !== undefined ? { parent: parentSlug ?? "" } : {}),
       },
     });
     await this.ensurePublished("ticket", updated);

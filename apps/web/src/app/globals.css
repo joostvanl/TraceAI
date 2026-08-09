@@ -460,6 +460,21 @@ h2 {
   margin-bottom: 1rem;
 }
 
+.ticket-children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.ticket-children li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem;
+}
+
 .comments {
   display: grid;
   gap: 1rem;

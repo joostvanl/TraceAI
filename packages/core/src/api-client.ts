@@ -94,9 +94,16 @@ export class TraceApiClient {
     });
   }
 
-  listTickets(project: string, stage?: string) {
+  listTickets(
+    project: string,
+    stage?: string,
+    parent?: string | null,
+  ) {
     const params = new URLSearchParams({ project });
     if (stage) params.set("stage", stage);
+    if (parent !== undefined) {
+      params.set("parent", parent === null ? "" : parent);
+    }
     return this.request<unknown[]>(`/v1/tickets?${params}`);
   }
 

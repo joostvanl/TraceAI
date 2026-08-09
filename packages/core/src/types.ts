@@ -154,6 +154,11 @@ export type TicketFields = {
   review_by?: string;
   /** ISO datetime of the current verdict. */
   review_at?: string;
+  /**
+   * Parent ticket slug in the same project (container with optional own work).
+   * Empty/omit for a root ticket. Input may be slug or TRA-n; stored as slug.
+   */
+  parent?: string | null;
 };
 
 export const TICKET_RESOLUTIONS = [

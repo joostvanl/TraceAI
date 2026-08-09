@@ -148,14 +148,21 @@ async function main() {
 
   server.tool(
     "list_tickets",
-    "List tickets for a project, optionally filtered by stage",
+    "List tickets for a project. Optional stage and parent filters. Each row includes tokens_estimate_rollup (own + descendants).",
     {
       project: z.string().describe("Project slug"),
       stage: z.string().optional().describe("Stage key filter"),
+      parent: z
+        .string()
+        .nullable()
+        .optional()
+        .describe(
+          "Parent ticket slug filter; null/empty for root tickets only",
+        ),
     },
-    async ({ project, stage }) => {
+    async ({ project, stage, parent }) => {
       try {
-        return ok(await client.listTickets(project, stage));
+        return ok(await client.listTickets(project, stage, parent));
       } catch (error) {
         return fail(error);
       }
@@ -229,7 +236,7 @@ async function main() {
 
   server.tool(
     "get_ticket",
-    "Get a ticket by slug OR exact ticket_key (e.g. TRA-42), including comments",
+    "Get a ticket by slug OR exact ticket_key (e.g. TRA-42), including comments, parent_ticket, children, and tokens_*_rollup (own + descendants).",
     { slug: z.string().describe("Ticket slug or ticket_key (TRA-42)") },
     async ({ slug }) => {
       try {
@@ -242,7 +249,7 @@ async function main() {
 
   server.tool(
     "create_ticket",
-    "Create and publish a ticket. Description MUST be self-contained for junior agents (Context/Goal/What to implement/Acceptance criteria). Actor comes from TraceAI token.",
+    "Create and publish a ticket. Description MUST be self-contained for junior agents (Context/Goal/What to implement/Acceptance criteria). Optional parent (slug or TRA-n) links it as a subticket. Actor comes from TraceAI token.",
     {
       project: z.string(),
       title: z.string().min(1),
@@ -256,6 +263,11 @@ async function main() {
       workflow: z.string().optional(),
       stage: z.string().optional(),
       slug: z.string().optional(),
+      parent: z
+        .string()
+        .nullable()
+        .optional()
+        .describe("Parent ticket slug or key (TRA-n); same project only"),
     },
     async (input) => {
       try {
@@ -268,7 +280,7 @@ async function main() {
 
   server.tool(
     "update_ticket",
-    "Update ticket title, description, priority, tokens_estimate, or resolution",
+    "Update ticket title, description, priority, tokens_estimate, resolution, or parent (slug/TRA-n; empty/null clears).",
     {
       slug: z.string(),
       title: z.string().optional(),
@@ -284,6 +296,11 @@ async function main() {
           "verification-only",
         ])
         .optional(),
+      parent: z
+        .string()
+        .nullable()
+        .optional()
+        .describe("Parent ticket slug or key; empty/null clears the link"),
     },
     async ({ slug, ...body }) => {
       try {
