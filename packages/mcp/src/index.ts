@@ -78,6 +78,8 @@ const stageAgentSchema = z
     require_comment_sections_on_exit: z.array(z.string()).optional(),
     comment_template: z.string().optional(),
     require_tokens_estimate_on_exit: z.boolean().optional(),
+    require_tokens_estimate_on_exit_to: z.array(z.string()).optional(),
+    require_playbook_description_on_exit_to: z.array(z.string()).optional(),
     require_resolution_on_enter: z.boolean().optional(),
     require_human_approval_on_exit: z.boolean().optional(),
     human_approve_to: z.string().optional(),

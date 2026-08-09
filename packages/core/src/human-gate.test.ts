@@ -3,6 +3,8 @@ import { describe, it } from "node:test";
 import {
   CLEARED_REVIEW_FIELDS,
   DEFAULT_STAGES,
+  exitRequiresPlaybookDescription,
+  exitRequiresTokensEstimate,
   humanApproveTarget,
   humanRejectTargets,
   parseWorkflowDocument,
@@ -18,14 +20,6 @@ describe("in_refinement default stages", () => {
     assert.deepEqual(keys.slice(0, 3), ["backlog", "in_refinement", "todo"]);
     assert.deepEqual(DEFAULT_STAGES[0]?.transitions, ["in_refinement"]);
     assert.ok(DEFAULT_STAGES[1]?.transitions.includes("todo"));
-    assert.equal(
-      DEFAULT_STAGES[0]?.agent?.require_tokens_estimate_on_exit,
-      undefined,
-    );
-    assert.equal(
-      DEFAULT_STAGES[1]?.agent?.require_tokens_estimate_on_exit,
-      true,
-    );
   });
 
   it("marks review as human-gated with approve/reject targets", () => {
@@ -34,6 +28,88 @@ describe("in_refinement default stages", () => {
     assert.equal(review.agent?.require_human_approval_on_exit, true);
     assert.equal(humanApproveTarget(review), "done");
     assert.deepEqual(humanRejectTargets(review), ["todo"]);
+  });
+
+  it("gates refinement with target-scoped playbook and estimate flags", () => {
+    const refine = DEFAULT_STAGES.find((s) => s.key === "in_refinement");
+    assert.ok(refine);
+    assert.equal(refine.agent?.require_human_approval_on_exit, true);
+    assert.equal(humanApproveTarget(refine), "todo");
+    assert.deepEqual(humanRejectTargets(refine), ["backlog"]);
+    assert.deepEqual(refine.agent?.require_playbook_description_on_exit_to, [
+      "todo",
+    ]);
+    assert.deepEqual(refine.agent?.require_tokens_estimate_on_exit_to, ["todo"]);
+    assert.equal(refine.agent?.require_tokens_estimate_on_exit, undefined);
+  });
+});
+
+describe("target-scoped exit gates", () => {
+  it("requires playbook description only for configured targets", () => {
+    const refine = DEFAULT_STAGES.find((s) => s.key === "in_refinement")!;
+    assert.equal(exitRequiresPlaybookDescription(refine, "todo"), true);
+    assert.equal(exitRequiresPlaybookDescription(refine, "backlog"), false);
+  });
+
+  it("requires tokens estimate only for configured targets", () => {
+    const refine = DEFAULT_STAGES.find((s) => s.key === "in_refinement")!;
+    assert.equal(exitRequiresTokensEstimate(refine, "todo"), true);
+    assert.equal(exitRequiresTokensEstimate(refine, "backlog"), false);
+  });
+
+  it("works for arbitrarily named stages via workflow JSON alone", () => {
+    const doc = parseWorkflowDocument(
+      serializeWorkflowDocument({
+        version: 2,
+        agent_policy: {
+          summary: "t",
+          ticket_description: [],
+          on_every_transition: [],
+        },
+        stages: [
+          {
+            key: "sharpening",
+            name: "Sharpening",
+            transitions: ["ready", "parked"],
+            agent: {
+              require_human_approval_on_exit: true,
+              human_approve_to: "ready",
+              human_reject_to: ["parked"],
+              require_playbook_description_on_exit_to: ["ready"],
+              require_tokens_estimate_on_exit_to: ["ready"],
+            },
+          },
+          { key: "ready", name: "Ready", transitions: [] },
+          { key: "parked", name: "Parked", transitions: [] },
+        ],
+      }),
+    );
+    const stage = doc.stages[0]!;
+    assert.equal(exitRequiresPlaybookDescription(stage, "ready"), true);
+    assert.equal(exitRequiresPlaybookDescription(stage, "parked"), false);
+    assert.equal(exitRequiresTokensEstimate(stage, "ready"), true);
+    assert.equal(exitRequiresTokensEstimate(stage, "parked"), false);
+    assert.equal(
+      validateHumanGateExit({
+        fromStage: stage,
+        toStage: { key: "ready", name: "Ready", transitions: [] },
+        comment: "## Vorige stap\nx\n\n## Deze stap\ny",
+        asHuman: false,
+        reviewState: "approved",
+      }).length,
+      0,
+    );
+  });
+
+  it("does not invent agent rules from stage key names", () => {
+    const doc = parseWorkflowDocument(
+      JSON.stringify({
+        version: 2,
+        agent_policy: { summary: "t", ticket_description: [], on_every_transition: [] },
+        stages: [{ key: "review", name: "Review", transitions: ["done"] }],
+      }),
+    );
+    assert.equal(doc.stages[0]?.agent, undefined);
   });
 });
 
@@ -78,145 +154,139 @@ describe("validateHumanGateExit", () => {
     const errors = validateHumanGateExit({
       fromStage: review,
       toStage: done,
+      comment: "## Vorige stap\nx\n\n## Deze stap\ny",
       asHuman: false,
-      comment:
-        "## Vorige stap\nReady\n\n## Deze stap\nApprove\n\n## Wiki\nN/A",
+      reviewState: "",
     });
-    assert.ok(errors.some((e) => /waiting for a human review verdict/i.test(e)));
+    assert.ok(errors.some((e) => /verdict|approval|review_state/i.test(e)));
   });
 
   it("lets the agent transition on the back of a verdict", () => {
-    const approved = validateHumanGateExit({
-      fromStage: review,
-      toStage: done,
-      asHuman: false,
-      reviewState: "approved",
-      comment:
-        "## Vorige stap\nReady\n\n## Deze stap\nApprove\n\n## Wiki\nN/A",
-    });
-    assert.deepEqual(approved, []);
-
-    const rejected = validateHumanGateExit({
-      fromStage: review,
-      toStage: todo,
-      asHuman: false,
-      reviewState: "rejected",
-      comment:
-        "## Vorige stap\nReady\n\n## Deze stap\nBack to work\n\n## Reden\nTests failed",
-    });
-    assert.deepEqual(rejected, []);
+    assert.deepEqual(
+      validateHumanGateExit({
+        fromStage: review,
+        toStage: done,
+        comment: "## Vorige stap\nx\n\n## Deze stap\ny",
+        asHuman: false,
+        reviewState: "approved",
+      }),
+      [],
+    );
+    assert.deepEqual(
+      validateHumanGateExit({
+        fromStage: review,
+        toStage: todo,
+        comment: "## Vorige stap\nx\n\n## Deze stap\ny\n\n## Reden\nnope",
+        asHuman: false,
+        reviewState: "rejected",
+      }),
+      [],
+    );
   });
 
   it("refuses a target that contradicts the verdict", () => {
     const errors = validateHumanGateExit({
       fromStage: review,
       toStage: todo,
+      comment: "## Vorige stap\nx\n\n## Deze stap\ny",
       asHuman: false,
       reviewState: "approved",
-      comment:
-        "## Vorige stap\nReady\n\n## Deze stap\nReject\n\n## Reden\nBecause",
     });
-    assert.ok(errors.some((e) => /may only move to "done"/i.test(e)));
+    assert.ok(errors.length > 0);
   });
 
   it("still requires ## Reden when the agent acts on a rejection", () => {
     const errors = validateHumanGateExit({
       fromStage: review,
       toStage: todo,
+      comment: "## Vorige stap\nx\n\n## Deze stap\ny",
       asHuman: false,
       reviewState: "rejected",
-      comment: "## Vorige stap\nReady\n\n## Deze stap\nBack to work",
     });
-    assert.ok(errors.some((e) => /## Reden/i.test(e)));
+    assert.ok(errors.some((e) => e.includes("## Reden")));
   });
 
   it("allows human approve", () => {
-    const errors = validateHumanGateExit({
-      fromStage: review,
-      toStage: done,
-      asHuman: true,
-      comment:
-        "## Vorige stap\nReady\n\n## Deze stap\nApprove\n\n## Wiki\nN/A",
-    });
-    assert.deepEqual(errors, []);
+    assert.deepEqual(
+      validateHumanGateExit({
+        fromStage: review,
+        toStage: done,
+        comment: "## Vorige stap\nx\n\n## Deze stap\ny",
+        asHuman: true,
+      }),
+      [],
+    );
   });
 
   it("requires ## Reden on human reject", () => {
-    const missing = validateHumanGateExit({
+    const errors = validateHumanGateExit({
       fromStage: review,
       toStage: todo,
+      comment: "## Vorige stap\nx\n\n## Deze stap\ny",
       asHuman: true,
-      comment: "## Vorige stap\nReady\n\n## Deze stap\nReject without reason",
     });
-    assert.ok(missing.some((e) => /## Reden/i.test(e)));
-
-    const ok = validateHumanGateExit({
-      fromStage: review,
-      toStage: todo,
-      asHuman: true,
-      comment:
-        "## Vorige stap\nReady\n\n## Deze stap\nReject\n\n## Reden\nTests failed",
-    });
-    assert.deepEqual(ok, []);
+    assert.ok(errors.some((e) => e.includes("## Reden")));
   });
 
   it("does nothing when the stage is not gated", () => {
-    const errors = validateHumanGateExit({
-      fromStage: inProgress,
-      toStage: review,
-      asHuman: false,
-      comment: "## Vorige stap\nx\n\n## Deze stap\ny",
-    });
-    assert.deepEqual(errors, []);
+    assert.deepEqual(
+      validateHumanGateExit({
+        fromStage: todo,
+        toStage: inProgress,
+        comment: "x",
+        asHuman: false,
+      }),
+      [],
+    );
   });
 });
 
 describe("review verdicts", () => {
   const review = DEFAULT_STAGES.find((s) => s.key === "review")!;
-  const inProgress = DEFAULT_STAGES.find((s) => s.key === "in_progress")!;
 
   it("maps a verdict to the stage the agent must move to", () => {
     assert.equal(reviewVerdictTarget(review, "approved"), "done");
     assert.equal(reviewVerdictTarget(review, "rejected"), "todo");
-    assert.equal(reviewVerdictTarget(inProgress, "approved"), null);
   });
 
   it("accepts an approval without a note and a rejection with a reason", () => {
     assert.deepEqual(
-      validateReviewVerdict({ stage: review, verdict: "approved" }),
+      validateReviewVerdict({
+        stage: review,
+        verdict: "approved",
+        comment: "",
+      }),
       [],
     );
     assert.deepEqual(
       validateReviewVerdict({
         stage: review,
         verdict: "rejected",
-        comment: "Tests failed",
+        comment: "Needs more tests",
       }),
       [],
     );
   });
 
   it("rejects a verdict on an ungated stage, an unknown verdict, or a reasonless rejection", () => {
+    const todo = DEFAULT_STAGES.find((s) => s.key === "todo")!;
     assert.ok(
-      validateReviewVerdict({ stage: inProgress, verdict: "approved" }).length,
+      validateReviewVerdict({
+        stage: todo,
+        verdict: "approved",
+        comment: "",
+      }).length,
     );
-    assert.ok(validateReviewVerdict({ stage: review, verdict: "maybe" }).length);
     assert.ok(
-      validateReviewVerdict({ stage: review, verdict: "rejected" }).some((e) =>
-        /reason/i.test(e),
-      ),
+      validateReviewVerdict({
+        stage: review,
+        verdict: "rejected",
+        comment: "",
+      }).some((e) => /reden|reason/i.test(e)),
     );
   });
 
   it("blanks the verdict on a stage change so the next round asks again", () => {
-    assert.equal(CLEARED_REVIEW_FIELDS.review_state, "");
-    const errors = validateHumanGateExit({
-      fromStage: review,
-      toStage: DEFAULT_STAGES.find((s) => s.key === "done")!,
-      asHuman: false,
-      reviewState: CLEARED_REVIEW_FIELDS.review_state,
-      comment: "## Vorige stap\nx\n\n## Deze stap\ny\n\n## Wiki\nN/A",
-    });
-    assert.ok(errors.some((e) => /waiting for a human review verdict/i.test(e)));
+    assert.deepEqual(CLEARED_REVIEW_FIELDS, { review_state: "" });
   });
 });

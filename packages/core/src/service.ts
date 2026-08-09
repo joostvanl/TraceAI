@@ -8,12 +8,13 @@ import {
   DEFAULT_WORKFLOW_DOCUMENT,
   canTransition,
   deriveProjectKeyFromSlug,
+  exitRequiresPlaybookDescription,
+  exitRequiresTokensEstimate,
   firstStageKey,
   formatTicketKey,
   isTicketKeyPattern,
   normalizeProjectKey,
   parseWorkflowDocument,
-  refinementStageKey,
   reviewVerdictTarget,
   serializeWorkflowDocument,
   slugify,
@@ -837,15 +838,8 @@ export class TraceService {
       }),
     );
 
-    // Leaving refinement (or legacy intake/backlog when no in_refinement stage)
-    // requires a refined, playbook-complete description.
-    const refineKey = refinementStageKey(stages);
-    const intakeStage = firstStageKey(stages);
-    const leavingRefine =
-      refineKey != null
-        ? fromStage.key === refineKey && toStage !== refineKey
-        : fromStage.key === intakeStage && toStage !== intakeStage;
-    if (leavingRefine) {
+    // Playbook-complete description only when the stage asks for it on this target.
+    if (exitRequiresPlaybookDescription(fromStage, toStage)) {
       assertNoErrors(
         validateTicketDescription(ticket.fields.description, doc.agent_policy),
       );
@@ -867,8 +861,7 @@ export class TraceService {
       ...CLEARED_REVIEW_FIELDS,
     };
     if (
-      fromStage.key !== toStage &&
-      fromStage.agent?.require_tokens_estimate_on_exit === true &&
+      exitRequiresTokensEstimate(fromStage, toStage) &&
       options?.tokens_estimate != null
     ) {
       fields.tokens_estimate = options.tokens_estimate;

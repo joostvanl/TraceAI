@@ -27,8 +27,20 @@ export type WorkflowStageAgentRules = {
   /**
    * When leaving this stage for another stage, the transition must include
    * tokens_estimate (LLM token estimate for the whole ticket).
+   * @deprecated Prefer require_tokens_estimate_on_exit_to so reject targets
+   * are not forced to carry an estimate.
    */
   require_tokens_estimate_on_exit?: boolean;
+  /**
+   * Require tokens_estimate only when leaving towards one of these stage keys.
+   * Takes precedence over require_tokens_estimate_on_exit when set.
+   */
+  require_tokens_estimate_on_exit_to?: string[];
+  /**
+   * Require a playbook-complete ticket description (agent_policy headings /
+   * min length) only when leaving towards one of these stage keys.
+   */
+  require_playbook_description_on_exit_to?: string[];
   /**
    * When entering this stage, the transition must include a resolution
    * (closure reason) from TICKET_RESOLUTIONS.
@@ -287,12 +299,17 @@ export const DEFAULT_STAGES: WorkflowStage[] = [
         "Confirm the ticket is ready to be rewritten with Context/Goal/What to implement/Acceptance criteria.",
       ],
       on_exit: [
+        "Wait for the human verdict on the playbook (Goedkeuren/Afkeuren in the UI); only then transition.",
         "When moving to To do, confirm the description is complete enough for a junior agent.",
-        "When returning to Backlog, explain why refinement stopped.",
+        "If the verdict is rejected, move the ticket back to Backlog and reference the reason (## Reden).",
         "Pass tokens_estimate when leaving to To do.",
       ],
       require_comment_on_exit: true,
-      require_tokens_estimate_on_exit: true,
+      require_tokens_estimate_on_exit_to: ["todo"],
+      require_playbook_description_on_exit_to: ["todo"],
+      require_human_approval_on_exit: true,
+      human_approve_to: "todo",
+      human_reject_to: ["backlog"],
     },
   },
   {
@@ -415,6 +432,16 @@ function parseStageAgent(raw: unknown): WorkflowStageAgentRules | undefined {
       typeof item.require_tokens_estimate_on_exit === "boolean"
         ? item.require_tokens_estimate_on_exit
         : undefined,
+    require_tokens_estimate_on_exit_to: Array.isArray(
+      item.require_tokens_estimate_on_exit_to,
+    )
+      ? item.require_tokens_estimate_on_exit_to.map((s) => String(s))
+      : undefined,
+    require_playbook_description_on_exit_to: Array.isArray(
+      item.require_playbook_description_on_exit_to,
+    )
+      ? item.require_playbook_description_on_exit_to.map((s) => String(s))
+      : undefined,
     require_resolution_on_enter:
       typeof item.require_resolution_on_enter === "boolean"
         ? item.require_resolution_on_enter
@@ -433,10 +460,6 @@ function parseStageAgent(raw: unknown): WorkflowStageAgentRules | undefined {
   };
 }
 
-function defaultAgentForStage(key: string): WorkflowStageAgentRules | undefined {
-  return DEFAULT_STAGES.find((s) => s.key === key)?.agent;
-}
-
 function parseStageList(raw: unknown): WorkflowStage[] {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -449,7 +472,8 @@ function parseStageList(raw: unknown): WorkflowStage[] {
         transitions: Array.isArray(item.transitions)
           ? item.transitions.map((t) => String(t))
           : [],
-        agent: parseStageAgent(item.agent) ?? defaultAgentForStage(key),
+        // No key-name fallback: live stages only get rules that are configured.
+        agent: parseStageAgent(item.agent),
       };
     })
     .filter((stage) => stage.key.length > 0);
@@ -550,10 +574,36 @@ export function firstStageKey(stages: WorkflowStage[]): string | null {
   return stages[0]?.key ?? null;
 }
 
-/** Stage key for playbook refinement (defaults to `in_refinement` when present). */
-export function refinementStageKey(stages: WorkflowStage[]): string | null {
-  if (stages.some((s) => s.key === "in_refinement")) return "in_refinement";
-  return null;
+/**
+ * True when leaving `fromStage` towards `toKey` requires a playbook-complete
+ * description, based solely on require_playbook_description_on_exit_to.
+ */
+export function exitRequiresPlaybookDescription(
+  fromStage: WorkflowStage,
+  toKey: string,
+): boolean {
+  if (fromStage.key === toKey) return false;
+  const targets = fromStage.agent?.require_playbook_description_on_exit_to;
+  return Array.isArray(targets) && targets.includes(toKey);
+}
+
+/**
+ * True when leaving `fromStage` towards `toKey` requires tokens_estimate.
+ * Prefer require_tokens_estimate_on_exit_to; legacy boolean applies to every
+ * exit except configured human_reject_to targets (so reject paths stay usable).
+ */
+export function exitRequiresTokensEstimate(
+  fromStage: WorkflowStage,
+  toKey: string,
+): boolean {
+  if (fromStage.key === toKey) return false;
+  const targets = fromStage.agent?.require_tokens_estimate_on_exit_to;
+  if (Array.isArray(targets)) return targets.includes(toKey);
+  if (fromStage.agent?.require_tokens_estimate_on_exit !== true) return false;
+  if (fromStage.agent?.require_human_approval_on_exit === true) {
+    return !humanRejectTargets(fromStage).includes(toKey);
+  }
+  return true;
 }
 
 /**
@@ -779,9 +829,10 @@ export function validateTransitionTokens(input: {
   tokens_used?: number | null;
 }): string[] {
   const errors: string[] = [];
-  const leavingMarkedStage =
-    input.fromStage.key !== input.toStage.key &&
-    input.fromStage.agent?.require_tokens_estimate_on_exit === true;
+  const leavingMarkedStage = exitRequiresTokensEstimate(
+    input.fromStage,
+    input.toStage.key,
+  );
 
   if (leavingMarkedStage) {
     const estimateErrors = validateTokenCount(
@@ -792,7 +843,7 @@ export function validateTransitionTokens(input: {
       errors.push(
         ...estimateErrors.map(
           (e) =>
-            `${e} Required when leaving stage "${input.fromStage.key}" (require_tokens_estimate_on_exit).`,
+            `${e} Required when leaving stage "${input.fromStage.key}" towards "${input.toStage.key}" (require_tokens_estimate_on_exit_to / require_tokens_estimate_on_exit).`,
         ),
       );
     }

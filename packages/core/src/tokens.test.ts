@@ -72,6 +72,50 @@ describe("validateTransitionTokens", () => {
     assert.ok(errors.some((e) => e.includes("tokens_used")));
   });
 
+  it("does not require estimate when leaving a gated stage towards a reject target", () => {
+    const errors = validateTransitionTokens({
+      fromStage: inRefinement,
+      toStage: backlog,
+      policy: { ...DEFAULT_AGENT_POLICY, require_tokens_used_on_transition: false },
+      tokens_used: 50,
+    });
+    assert.deepEqual(errors, []);
+  });
+
+  it("honours require_tokens_estimate_on_exit_to over the legacy boolean", () => {
+    const stage: WorkflowStage = {
+      key: "sharpening",
+      name: "Sharpening",
+      transitions: ["ready", "parked"],
+      agent: {
+        require_tokens_estimate_on_exit: true,
+        require_tokens_estimate_on_exit_to: ["ready"],
+      },
+    };
+    const ready: WorkflowStage = { key: "ready", name: "Ready", transitions: [] };
+    const parked: WorkflowStage = { key: "parked", name: "Parked", transitions: [] };
+    const policy = {
+      ...DEFAULT_AGENT_POLICY,
+      require_tokens_used_on_transition: false,
+    };
+    assert.ok(
+      validateTransitionTokens({
+        fromStage: stage,
+        toStage: ready,
+        policy,
+      }).some((e) => e.includes("tokens_estimate")),
+    );
+    assert.deepEqual(
+      validateTransitionTokens({
+        fromStage: stage,
+        toStage: parked,
+        policy,
+        tokens_used: 1,
+      }),
+      [],
+    );
+  });
+
   it("does not hard-code stage names — only flags matter", () => {
     const intake: WorkflowStage = {
       key: "ideas",
@@ -140,6 +184,8 @@ describe("workflow token flags parsing", () => {
   it("defaults enable token tracking on the product workflow template", () => {
     assert.equal(DEFAULT_AGENT_POLICY.require_tokens_used_on_transition, true);
     assert.equal(backlog.agent?.require_tokens_estimate_on_exit, undefined);
-    assert.equal(inRefinement.agent?.require_tokens_estimate_on_exit, true);
+    assert.deepEqual(inRefinement.agent?.require_tokens_estimate_on_exit_to, [
+      "todo",
+    ]);
   });
 });
