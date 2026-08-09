@@ -199,6 +199,8 @@ export class TraceApiClient {
       comment?: string;
       /** Signed-in reviewer, recorded instead of the proxy token name. */
       reviewer?: string;
+      /** Also write the same verdict to gated descendants. */
+      apply_to_children?: boolean;
     },
   ) {
     return this.request<unknown>(

@@ -6,6 +6,7 @@ import {
   humanRejectTargets,
   isTicketReviewState,
   listChildTickets,
+  listDescendantSlugs,
   parseWorkflowDocument,
 } from "@traceai/core";
 import { HumanReviewActions } from "@/components/HumanReviewActions";
@@ -79,6 +80,16 @@ export default async function TicketPage({ params }: Props) {
     children.length > 0 ||
     rollup.tokens_estimate_rollup !== (ownEstimate ?? 0) ||
     rollup.tokens_actual_rollup !== (ownActual ?? 0);
+
+  const descendantSlugs = listDescendantSlugs(projectTickets, ticket.slug);
+  const bySlug = new Map(projectTickets.map((t) => [t.slug, t] as const));
+  const stageByKey = new Map(stages.map((s) => [s.key, s] as const));
+  const gatedChildCount = descendantSlugs.filter((childSlug) => {
+    const child = bySlug.get(childSlug);
+    if (!child) return false;
+    const childStage = stageByKey.get(child.fields.stage);
+    return childStage?.agent?.require_human_approval_on_exit === true;
+  }).length;
 
   return (
     <>
@@ -210,6 +221,7 @@ export default async function TicketPage({ params }: Props) {
               authenticated={Boolean(sessionUser)}
               gate={{ approveTo, rejectTo }}
               verdict={verdict}
+              gatedChildCount={gatedChildCount}
             />
           ) : null}
         </section>

@@ -9,6 +9,7 @@ export const dynamic = "force-dynamic";
 type ReviewBody = {
   verdict?: string;
   comment?: string;
+  apply_to_children?: boolean;
 };
 
 type RouteContext = {
@@ -85,6 +86,7 @@ export async function POST(request: Request, context: RouteContext) {
       verdict,
       comment,
       reviewer: sessionUser,
+      apply_to_children: body.apply_to_children === true,
     });
     return NextResponse.json(result);
   } catch (error) {

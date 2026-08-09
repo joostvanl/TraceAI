@@ -533,6 +533,11 @@ h2 {
   color: var(--priority-high);
 }
 
+.human-review.cascade-confirm {
+  border-color: color-mix(in srgb, var(--accent, #3b82f6) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent, #3b82f6) 7%, var(--bg-elevated));
+}
+
 .human-review-header {
   display: flex;
   justify-content: space-between;

@@ -45,6 +45,7 @@ import {
 import {
   computeTokenRollup,
   listChildTickets,
+  listDescendantSlugs,
   validateTicketParent,
 } from "./ticket-links.js";
 import {
@@ -954,6 +955,8 @@ export class TraceService {
   /**
    * Record a human review verdict on the ticket without moving it. The agent
    * reads the verdict and performs the matching transition afterwards.
+   * When `apply_to_children` is true, the same verdict is also written to every
+   * descendant currently in a human-gated stage (no stage change).
    */
   async recordReviewVerdict(
     slug: string,
@@ -961,11 +964,57 @@ export class TraceService {
       verdict: TicketReviewState | string;
       comment?: string;
       author?: string;
+      apply_to_children?: boolean;
     },
-  ): Promise<Ticket> {
+  ): Promise<{ ticket: Ticket; cascaded: Ticket[] }> {
     await this.ensureReady();
     const ticket = await this.resolveTicket(slug);
     if (!ticket) throw new Error(`Ticket not found: ${slug}`);
+    const updated = await this.writeReviewVerdict(ticket, {
+      verdict: input.verdict,
+      comment: input.comment,
+      author: input.author,
+    });
+
+    const cascaded: Ticket[] = [];
+    if (input.apply_to_children === true) {
+      const projectTickets = await this.listTickets({
+        project: ticket.fields.project,
+      });
+      const descendantSlugs = listDescendantSlugs(projectTickets, ticket.slug);
+      for (const childSlug of descendantSlugs) {
+        const child = projectTickets.find((t) => t.slug === childSlug);
+        if (!child) continue;
+        const workflow = await this.client.getEntryBySlug<Workflow>(
+          "workflow",
+          child.fields.workflow,
+        );
+        if (!workflow) continue;
+        const stages = parseWorkflowDocument(workflow.fields.stages_json).stages;
+        const stage = stages.find((s) => s.key === child.fields.stage);
+        if (stage?.agent?.require_human_approval_on_exit !== true) continue;
+        const childUpdated = await this.writeReviewVerdict(child, {
+          verdict: input.verdict,
+          comment: input.comment,
+          author: input.author,
+          cascadedFrom: ticket.slug,
+        });
+        cascaded.push(childUpdated);
+      }
+    }
+
+    return { ticket: updated, cascaded };
+  }
+
+  private async writeReviewVerdict(
+    ticket: Ticket,
+    input: {
+      verdict: TicketReviewState | string;
+      comment?: string;
+      author?: string;
+      cascadedFrom?: string;
+    },
+  ): Promise<Ticket> {
     const workflow = await this.client.getEntryBySlug<Workflow>(
       "workflow",
       ticket.fields.workflow,
@@ -986,14 +1035,17 @@ export class TraceService {
     const author = input.author?.trim() || "human";
     const now = new Date().toISOString();
     const target = reviewVerdictTarget(stage, verdict);
+    const cascadeNote = input.cascadedFrom
+      ? ` (doorgezet vanaf parent "${input.cascadedFrom}")`
+      : "";
     const body = [
       "## Vorige stap",
       `Ticket stond in "${stage.name}" te wachten op beoordeling.`,
       "",
       "## Deze stap",
       verdict === "approved"
-        ? `Goedgekeurd door ${author}. De agent mag dit ticket nu naar "${target ?? "de volgende stage"}" brengen.`
-        : `Afgekeurd door ${author}. De agent brengt dit ticket terug naar "${target ?? "een eerdere stage"}".`,
+        ? `Goedgekeurd door ${author}${cascadeNote}. De agent mag dit ticket nu naar "${target ?? "de volgende stage"}" brengen.`
+        : `Afgekeurd door ${author}${cascadeNote}. De agent brengt dit ticket terug naar "${target ?? "een eerdere stage"}".`,
       ...(input.comment?.trim()
         ? ["", verdict === "approved" ? "## Toelichting" : "## Reden", input.comment.trim()]
         : []),

@@ -696,6 +696,7 @@ export function createApp(deps: {
       verdict?: string;
       comment?: string;
       reviewer?: string;
+      apply_to_children?: boolean;
     }>();
     if (!body?.verdict) {
       return c.json(
@@ -704,24 +705,35 @@ export function createApp(deps: {
       );
     }
     const actor = c.get("actor");
-    const ticket = await deps.service.recordReviewVerdict(param(c, "slug"), {
+    const result = await deps.service.recordReviewVerdict(param(c, "slug"), {
       verdict: body.verdict,
       comment: body.comment,
       author: body.reviewer?.trim() || actor.name,
+      apply_to_children: body.apply_to_children === true,
     });
-    const mapped = mapTicket(ticket);
+    const mapped = mapTicket(result.ticket);
     publishTicketEvent(ticketEventFromMapped("ticket.reviewed", mapped));
+    for (const child of result.cascaded) {
+      publishTicketEvent(
+        ticketEventFromMapped("ticket.reviewed", mapTicket(child)),
+      );
+    }
     audit(c, {
       action: "ticket.review_verdict",
       resourceType: "ticket",
-      resourceId: ticket.slug,
+      resourceId: result.ticket.slug,
       meta: {
-        stage: ticket.fields.stage,
-        verdict: ticket.fields.review_state ?? null,
-        review_by: ticket.fields.review_by ?? null,
+        stage: result.ticket.fields.stage,
+        verdict: result.ticket.fields.review_state ?? null,
+        review_by: result.ticket.fields.review_by ?? null,
+        apply_to_children: body.apply_to_children === true,
+        cascaded: result.cascaded.map((t) => t.slug),
       },
     });
-    return c.json(mapped);
+    return c.json({
+      ...mapped,
+      cascaded: result.cascaded.map(mapTicket),
+    });
   });
 
   app.post("/v1/comments", requireScope("comments:write"), async (c) => {

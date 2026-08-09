@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   computeTokenRollup,
   listChildTickets,
+  listDescendantSlugs,
   resolveTicketRef,
   validateTicketParent,
   type TicketLinkRow,
@@ -123,6 +124,25 @@ describe("listChildTickets", () => {
       listChildTickets(tickets, "root").map((t) => t.slug),
       ["a", "b"],
     );
+  });
+});
+
+describe("listDescendantSlugs", () => {
+  it("returns all nested descendants without the root", () => {
+    const tickets = [
+      row("root"),
+      row("a", { parent: "root" }),
+      row("b", { parent: "root" }),
+      row("c", { parent: "a" }),
+      row("d", { parent: "c" }),
+    ];
+    assert.deepEqual(listDescendantSlugs(tickets, "root").sort(), [
+      "a",
+      "b",
+      "c",
+      "d",
+    ]);
+    assert.deepEqual(listDescendantSlugs(tickets, "a").sort(), ["c", "d"]);
   });
 });
 

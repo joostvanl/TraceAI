@@ -24,6 +24,8 @@ type Props = {
   authenticated: boolean;
   gate: HumanGateInfo;
   verdict: ReviewVerdict | null;
+  /** Descendants currently in a human-gated stage (eligible for cascade). */
+  gatedChildCount?: number;
 };
 
 function formatMoment(value: string | null): string | null {
@@ -39,6 +41,7 @@ export function HumanReviewActions({
   authenticated,
   gate,
   verdict,
+  gatedChildCount = 0,
 }: Props) {
   const router = useRouter();
   const [mode, setMode] = useState<"idle" | "approve" | "reject">("idle");
@@ -47,13 +50,19 @@ export function HumanReviewActions({
   const [submitting, setSubmitting] = useState(false);
   const [revising, setRevising] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingVerdict, setPendingVerdict] = useState<
+    "approved" | "rejected" | null
+  >(null);
 
   const loginHref = `/login?next=${encodeURIComponent(
     `/projects/${projectSlug}/tickets/${ticketSlug}`,
   )}`;
+  const canCascade = gatedChildCount > 0;
 
-  async function submit(event: FormEvent, action: "approved" | "rejected") {
-    event.preventDefault();
+  async function postVerdict(
+    action: "approved" | "rejected",
+    applyToChildren: boolean,
+  ) {
     setError(null);
     setSubmitting(true);
     try {
@@ -65,6 +74,7 @@ export function HumanReviewActions({
           body: JSON.stringify({
             verdict: action,
             comment: action === "approved" ? note.trim() : reason.trim(),
+            apply_to_children: applyToChildren,
           }),
         },
       );
@@ -76,12 +86,22 @@ export function HumanReviewActions({
       setNote("");
       setReason("");
       setRevising(false);
+      setPendingVerdict(null);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function submit(event: FormEvent, action: "approved" | "rejected") {
+    event.preventDefault();
+    if (canCascade) {
+      setPendingVerdict(action);
+      return;
+    }
+    void postVerdict(action, false);
   }
 
   if (verdict && !revising) {
@@ -116,6 +136,7 @@ export function HumanReviewActions({
               onClick={() => {
                 setRevising(true);
                 setMode("idle");
+                setPendingVerdict(null);
               }}
             >
               Oordeel wijzigen
@@ -135,6 +156,54 @@ export function HumanReviewActions({
           Stage <strong>{stageName}</strong> wacht op een oordeel.{" "}
           <Link href={loginHref}>Log in</Link> om goed of af te keuren.
         </p>
+      </aside>
+    );
+  }
+
+  if (pendingVerdict) {
+    const approved = pendingVerdict === "approved";
+    const label = approved ? "Goedgekeurd" : "Afgekeurd";
+    return (
+      <aside className="human-review cascade-confirm">
+        <div className="human-review-kicker">Subtickets</div>
+        <h3>Ook children beoordelen?</h3>
+        <p className="muted">
+          Dit ticket heeft{" "}
+          <strong>
+            {gatedChildCount} subticket
+            {gatedChildCount === 1 ? "" : "s"}
+          </strong>{" "}
+          die ook op een menselijke beoordeling wachten. Wil je hetzelfde
+          oordeel (<strong>{label}</strong>) ook daar vastleggen? De stage
+          verandert niet — de agent doet de transitie nog steeds per ticket.
+        </p>
+        {error ? <p className="error">{error}</p> : null}
+        <div className="human-review-actions">
+          <button
+            type="button"
+            className="btn primary"
+            disabled={submitting}
+            onClick={() => void postVerdict(pendingVerdict, true)}
+          >
+            {submitting ? "Bezig…" : "Ja, ook alle children"}
+          </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={submitting}
+            onClick={() => void postVerdict(pendingVerdict, false)}
+          >
+            Alleen dit ticket
+          </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={submitting}
+            onClick={() => setPendingVerdict(null)}
+          >
+            Terug
+          </button>
+        </div>
       </aside>
     );
   }

@@ -55,6 +55,36 @@ export function listChildTickets(
     .sort((a, b) => a.slug.localeCompare(b.slug));
 }
 
+/** All descendants of `rootSlug` (not including the root), depth-first. */
+export function listDescendantSlugs(
+  rows: Array<Ticket | TicketLinkRow>,
+  rootSlug: string,
+): string[] {
+  const normalized = rows.map(asLinkRow);
+  const childrenOf = new Map<string, string[]>();
+  for (const row of normalized) {
+    const parent = row.parent || null;
+    if (!parent) continue;
+    const list = childrenOf.get(parent) ?? [];
+    list.push(row.slug);
+    childrenOf.set(parent, list);
+  }
+  const out: string[] = [];
+  const stack = [...(childrenOf.get(rootSlug) ?? [])].reverse();
+  const seen = new Set<string>();
+  while (stack.length > 0) {
+    const slug = stack.pop()!;
+    if (seen.has(slug) || slug === rootSlug) continue;
+    seen.add(slug);
+    out.push(slug);
+    const kids = childrenOf.get(slug) ?? [];
+    for (let i = kids.length - 1; i >= 0; i--) {
+      stack.push(kids[i]!);
+    }
+  }
+  return out;
+}
+
 /**
  * Own estimate/actual (0 if missing) plus the same for every descendant.
  * Roll-up is derived — it never writes back to stored token fields.
