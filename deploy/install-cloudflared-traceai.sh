@@ -6,7 +6,16 @@ UNIT=/etc/systemd/system/cloudflared-traceai.service
 CONFIG=/home/joostvl/.config/traceai/cloudflared.yml
 TUNNEL_ID=94bb4a5e-2fda-44b1-8899-1a208eb3227f
 
-[[ -f "$CONFIG" ]] || { echo "Missing $CONFIG"; exit 1; }
+if [[ ! -f "$CONFIG" ]]; then
+  echo "Missing $CONFIG — run deploy/write-cloudflared-config.sh first"
+  exit 1
+fi
+if grep -E 'path:[[:space:]]*/(v1|events)\*' "$CONFIG" >/dev/null 2>&1; then
+  echo "Refusing unsafe cloudflared paths (/v1* or /events*)."
+  echo "Those are Go regexes and match stray /v… URLs (e.g. /projects/vantage)."
+  echo "Run: deploy/write-cloudflared-config.sh"
+  exit 1
+fi
 
 sudo tee "$UNIT" >/dev/null <<EOF
 [Unit]

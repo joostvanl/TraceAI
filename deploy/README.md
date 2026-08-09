@@ -35,15 +35,24 @@ again. Secrets remain outside the git checkout.
 ## Cloudflare tunnel
 
 Hostname `traceai.joostvanleeuwaarden.com` is served by systemd unit
-`cloudflared-traceai` (config: `~/.config/traceai/cloudflared.yml`):
+`cloudflared-traceai` (config: `~/.config/traceai/cloudflared.yml`).
 
-- `/events*`, `/v1*`, `/health` → TraceAI API on `127.0.0.1:3847`
+`path` values are **Go regular expressions**, not shell globs. Use anchored
+prefixes only:
+
+- `^/events(/|$)`, `^/v1(/|$)`, `^/health$` → TraceAI API on `127.0.0.1:3847`
 - everything else → TraceAI web on `127.0.0.1:3011`
 
-Install/reinstall the unit (once):
+Do **not** write `/v1*` or `/events*`: in regex `1*` means “zero or more ones”,
+so `/v1*` matches any path containing `/v` (for example `/projects/vantage`)
+and incorrectly routes it to the API.
+
+Write/refresh the config, then install the unit:
 
 ```bash
+~/TraceAI/deploy/write-cloudflared-config.sh
 ~/TraceAI/deploy/install-cloudflared-traceai.sh
+sudo systemctl restart cloudflared-traceai
 ```
 
 Keep `NEXT_PUBLIC_TRACEAI_EVENTS_URL=https://traceai.joostvanleeuwaarden.com/events`
