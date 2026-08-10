@@ -8,6 +8,10 @@ import {
   parseWorkflowDocument,
 } from "@traceai/core";
 import { HumanReviewActions } from "@/components/HumanReviewActions";
+import {
+  InboxAccordion,
+  InboxAccordionItem,
+} from "@/components/InboxAccordion";
 import { Markdown } from "@/components/Markdown";
 import { MarkNotificationsReadButton } from "@/components/MarkNotificationsReadButton";
 import {
@@ -29,11 +33,6 @@ type InboxTicket = {
   stage: string;
   stage_name: string;
   awaiting: "verdict" | "agent";
-  description?: string | null;
-  priority?: string | null;
-  review_state?: string | null;
-  review_by?: string | null;
-  review_at?: string | null;
 };
 
 async function loadInbox(): Promise<{
@@ -76,7 +75,7 @@ async function loadInbox(): Promise<{
   }
 }
 
-async function InboxTicketCard({
+async function InboxTicketBody({
   item,
   authenticated,
 }: {
@@ -89,11 +88,7 @@ async function InboxTicketCard({
     listTicketsForProject(item.project),
   ]);
   if (!ticket) {
-    return (
-      <section className="panel inbox-ticket" id={item.slug}>
-        <p className="form-error">Ticket {item.slug} niet gevonden.</p>
-      </section>
-    );
+    return <p className="form-error">Ticket {item.slug} niet gevonden.</p>;
   }
   const workflow = await getWorkflow(ticket.fields.workflow);
   const stages = parseWorkflowDocument(workflow?.fields.stages_json).stages;
@@ -114,50 +109,28 @@ async function InboxTicketCard({
     : null;
   const stageByKey = new Map(stages.map((s) => [s.key, s] as const));
   const bySlug = new Map(projectTickets.map((t) => [t.slug, t] as const));
-  const gatedChildCount = listDescendantSlugs(projectTickets, ticket.slug).filter(
-    (childSlug) => {
-      const child = bySlug.get(childSlug);
-      if (!child) return false;
-      return (
-        stageByKey.get(child.fields.stage)?.agent
-          ?.require_human_approval_on_exit === true
-      );
-    },
-  ).length;
+  const gatedChildCount = listDescendantSlugs(
+    projectTickets,
+    ticket.slug,
+  ).filter((childSlug) => {
+    const child = bySlug.get(childSlug);
+    if (!child) return false;
+    return (
+      stageByKey.get(child.fields.stage)?.agent
+        ?.require_human_approval_on_exit === true
+    );
+  }).length;
 
   return (
-    <section className="panel inbox-ticket" id={ticket.slug}>
-      <div className="panel-header">
-        <div>
-          <div className="meta-row">
-            {ticket.fields.ticket_key ? (
-              <span className="ticket-key ticket-key-lg">
-                {ticket.fields.ticket_key}
-              </span>
-            ) : null}
-            <span className="badge">
-              {currentStage?.name ?? ticket.fields.stage}
-            </span>
-            <span className={`badge ${ticket.fields.priority ?? "medium"}`}>
-              {ticket.fields.priority ?? "medium"}
-            </span>
-            <span className="badge">
-              {item.awaiting === "verdict"
-                ? "Wacht op jouw oordeel"
-                : "Agent rondt af"}
-            </span>
-          </div>
-          <h2 style={{ marginTop: "0.5rem" }}>{ticket.fields.title}</h2>
-          <p className="muted" style={{ marginTop: "0.35rem" }}>
-            Project{" "}
-            <Link href={`/projects/${item.project}`}>{item.project}</Link>
-            {" · "}
-            <Link href={`/projects/${item.project}/tickets/${ticket.slug}`}>
-              Open op board
-            </Link>
-          </p>
-        </div>
-      </div>
+    <>
+      <p className="muted" style={{ marginBottom: "0.75rem" }}>
+        Project{" "}
+        <Link href={`/projects/${item.project}`}>{item.project}</Link>
+        {" · "}
+        <Link href={`/projects/${item.project}/tickets/${ticket.slug}`}>
+          Open op board
+        </Link>
+      </p>
 
       <Markdown content={ticket.fields.description ?? ""} />
 
@@ -179,19 +152,7 @@ async function InboxTicketCard({
           ))
         )}
 
-        {humanGated && item.awaiting === "verdict" ? (
-          <HumanReviewActions
-            ticketSlug={ticket.slug}
-            projectSlug={item.project}
-            stageName={currentStage?.name ?? ticket.fields.stage}
-            authenticated={authenticated}
-            gate={{ approveTo, rejectTo }}
-            verdict={verdict}
-            gatedChildCount={gatedChildCount}
-          />
-        ) : null}
-
-        {humanGated && item.awaiting === "agent" && verdict ? (
+        {humanGated ? (
           <HumanReviewActions
             ticketSlug={ticket.slug}
             projectSlug={item.project}
@@ -203,7 +164,7 @@ async function InboxTicketCard({
           />
         ) : null}
       </div>
-    </section>
+    </>
   );
 }
 
@@ -213,6 +174,7 @@ export default async function InboxPage() {
   if (!identity) redirect("/login");
 
   const inbox = await loadInbox();
+  const waiting = inbox.awaiting_verdict.length;
 
   return (
     <div className="inbox-page">
@@ -223,10 +185,17 @@ export default async function InboxPage() {
       </nav>
       <div className="panel-header" style={{ marginBottom: "1rem" }}>
         <div>
-          <h1>Review-inbox</h1>
+          <h1>
+            Review-inbox
+            {waiting > 0 ? (
+              <span className="inbox-badge inbox-badge-lg" aria-label={`${waiting} wachtend`}>
+                {waiting}
+              </span>
+            ) : null}
+          </h1>
           <p className="muted">
-            Tickets die op jouw oordeel wachten — keuren kan hier direct, zonder
-            naar het board te springen.
+            Klik een rij om het ticket te openen en te keuren. Er kan maar één
+            ticket tegelijk openstaan.
           </p>
         </div>
         {inbox.unread_count > 0 ? (
@@ -236,37 +205,42 @@ export default async function InboxPage() {
 
       {inbox.error ? <p className="form-error">{inbox.error}</p> : null}
 
-      <h2>Wacht op jouw oordeel ({inbox.awaiting_verdict.length})</h2>
+      <h2>
+        Wacht op jouw oordeel ({inbox.awaiting_verdict.length})
+      </h2>
       {inbox.awaiting_verdict.length === 0 ? (
         <p className="muted">Geen openstaande beoordelingen.</p>
-      ) : (
-        <div className="inbox-list">
-          {inbox.awaiting_verdict.map((item) => (
-            <InboxTicketCard
-              key={item.slug}
-              item={item}
-              authenticated={Boolean(identity)}
-            />
-          ))}
-        </div>
-      )}
+      ) : null}
 
-      <h2 style={{ marginTop: "2rem" }}>
+      <h2 style={{ marginTop: "1.5rem" }}>
         Agent rondt af ({inbox.awaiting_agent.length})
       </h2>
       {inbox.awaiting_agent.length === 0 ? (
         <p className="muted">Geen tickets die wachten op een agent-transitie.</p>
-      ) : (
-        <div className="inbox-list">
-          {inbox.awaiting_agent.map((item) => (
-            <InboxTicketCard
-              key={item.slug}
-              item={item}
-              authenticated={Boolean(identity)}
-            />
-          ))}
+      ) : null}
+
+      {inbox.awaiting_verdict.length + inbox.awaiting_agent.length > 0 ? (
+        <div style={{ marginTop: "1rem" }}>
+          <InboxAccordion initialOpenId={null}>
+            {[...inbox.awaiting_verdict, ...inbox.awaiting_agent].map((item) => (
+              <InboxAccordionItem
+                key={item.slug}
+                id={item.slug}
+                ticketKey={item.ticket_key}
+                title={item.title}
+                stageName={item.stage_name}
+                project={item.project}
+                awaiting={item.awaiting}
+              >
+                <InboxTicketBody
+                  item={item}
+                  authenticated={Boolean(identity)}
+                />
+              </InboxAccordionItem>
+            ))}
+          </InboxAccordion>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

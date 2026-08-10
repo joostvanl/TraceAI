@@ -7,23 +7,27 @@ export async function AuthStatus() {
   const identity = await getSessionIdentity();
   if (!identity) return null;
 
-  let unread = 0;
+  let waiting = 0;
   try {
     const client = createTraceServerClient({
       asHumanCapable: true,
       identity,
     });
-    const notifications = await client.listNotifications({ unreadOnly: true });
-    unread = notifications.unread_count;
+    const inbox = await client.listReviewInbox();
+    waiting = inbox.awaiting_verdict.length;
   } catch {
-    unread = 0;
+    waiting = 0;
   }
 
   return (
     <div className="auth-status">
-      <Link href="/inbox" className="auth-admin-link">
+      <Link href="/inbox" className="auth-inbox-link">
         Inbox
-        {unread > 0 ? <span className="inbox-badge">{unread}</span> : null}
+        {waiting > 0 ? (
+          <span className="inbox-badge" aria-label={`${waiting} wachtend`}>
+            {waiting}
+          </span>
+        ) : null}
       </Link>
       {(identity.is_platform_admin || identity.mode === "legacy") && (
         <Link href="/admin/users" className="auth-admin-link">

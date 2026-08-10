@@ -1039,27 +1039,101 @@ h2 {
   font-size: 0.9rem;
 }
 
+.auth-inbox-link {
+  margin-right: 0.75rem;
+  font-size: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
 .inbox-badge {
-  display: inline-block;
-  margin-left: 0.35rem;
-  min-width: 1.25rem;
-  padding: 0.05rem 0.35rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  padding: 0 0.35rem;
   border-radius: 999px;
-  background: var(--accent-soft);
-  border: 1px solid var(--accent);
-  color: var(--text);
-  font-size: 0.75rem;
-  text-align: center;
+  background: #c0392b;
+  border: 1px solid #a93226;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.inbox-badge-lg {
+  margin-left: 0.55rem;
+  min-width: 1.6rem;
+  height: 1.6rem;
+  font-size: 0.85rem;
+  vertical-align: middle;
 }
 
 .inbox-list {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 0.65rem;
 }
 
 .inbox-ticket {
   scroll-margin-top: 1.5rem;
+  padding: 0;
+  overflow: hidden;
+}
+
+.inbox-ticket-summary {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.inbox-ticket-summary:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.inbox-ticket.is-open .inbox-ticket-summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.inbox-ticket-summary-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.inbox-ticket-title {
+  font-weight: 600;
+}
+
+.inbox-ticket-summary-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.inbox-chevron {
+  color: var(--muted);
+  width: 1rem;
+  text-align: center;
+}
+
+.inbox-ticket-body {
+  padding: 1rem;
 }
 
 @media (max-width: 640px) {
