@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { TraceApiError } from "@traceai/core";
-import { getSessionUser, isLoginConfigured } from "@/lib/session";
+import { getSessionIdentity, isLoginConfigured } from "@/lib/session";
 import { createTraceServerClient } from "@/lib/traceai-server";
 
 export const runtime = "nodejs";
@@ -30,8 +30,8 @@ export async function POST(request: Request, context: RouteContext) {
     );
   }
 
-  const sessionUser = await getSessionUser();
-  if (!sessionUser) {
+  const identity = await getSessionIdentity();
+  if (!identity) {
     return NextResponse.json(
       { message: "Sign in to approve or reject tickets", code: "UNAUTHORIZED" },
       { status: 401 },
@@ -80,7 +80,10 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   try {
-    const client = createTraceServerClient({ asHumanCapable: true });
+    const client = createTraceServerClient({
+      asHumanCapable: true,
+      identity,
+    });
     const result = await client.transitionTicket(slug, toStage, comment, {
       tokens_estimate: body.tokens_estimate,
       tokens_used: body.tokens_used ?? 0,

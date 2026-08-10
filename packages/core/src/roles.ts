@@ -1,0 +1,55 @@
+/**
+ * Project-scoped roles for TraceAI humans (Aurora-backed memberships).
+ * Distinct from bearer token `admin` scope (platform/agent capability).
+ */
+
+export const PROJECT_ROLES = ["viewer", "editor", "admin"] as const;
+export type ProjectRole = (typeof PROJECT_ROLES)[number];
+
+const ROLE_RANK: Record<ProjectRole, number> = {
+  viewer: 1,
+  editor: 2,
+  admin: 3,
+};
+
+export function isProjectRole(value: unknown): value is ProjectRole {
+  return (
+    typeof value === "string" &&
+    (PROJECT_ROLES as readonly string[]).includes(value)
+  );
+}
+
+export function roleAtLeast(
+  actual: ProjectRole | null | undefined,
+  required: ProjectRole,
+): boolean {
+  if (!actual) return false;
+  return ROLE_RANK[actual] >= ROLE_RANK[required];
+}
+
+/** Minimum role for common project actions. */
+export function requiredRoleForAction(
+  action:
+    | "read"
+    | "write_tickets"
+    | "review"
+    | "write_wiki"
+    | "write_workflow"
+    | "manage_members",
+): ProjectRole {
+  switch (action) {
+    case "read":
+      return "viewer";
+    case "write_tickets":
+    case "review":
+    case "write_wiki":
+      return "editor";
+    case "write_workflow":
+    case "manage_members":
+      return "admin";
+  }
+}
+
+export function membershipSlug(projectSlug: string, userSlug: string): string {
+  return `${projectSlug}--${userSlug}`;
+}

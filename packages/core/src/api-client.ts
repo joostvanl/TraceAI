@@ -3,6 +3,8 @@ export type TraceApiClientOptions = {
   token: string;
   /** When set, human-gate calls send X-TraceAI-Human-Proxy (web session only). */
   humanProxySecret?: string;
+  /** Signed human identity header value (web session proxy). */
+  humanIdentityHeader?: string;
 };
 
 export class TraceApiError extends Error {
@@ -21,11 +23,13 @@ export class TraceApiClient {
   readonly apiUrl: string;
   private readonly token: string;
   private readonly humanProxySecret?: string;
+  private readonly humanIdentityHeader?: string;
 
   constructor(options: TraceApiClientOptions) {
     this.apiUrl = options.apiUrl.replace(/\/$/, "");
     this.token = options.token;
     this.humanProxySecret = options.humanProxySecret?.trim() || undefined;
+    this.humanIdentityHeader = options.humanIdentityHeader?.trim() || undefined;
   }
 
   private async request<T>(
@@ -40,6 +44,9 @@ export class TraceApiClient {
     }
     if (options?.asHuman && this.humanProxySecret) {
       headers.set("X-TraceAI-Human-Proxy", this.humanProxySecret);
+      if (this.humanIdentityHeader) {
+        headers.set("X-TraceAI-Human-Identity", this.humanIdentityHeader);
+      }
     }
 
     const res = await fetch(`${this.apiUrl}${path}`, { ...init, headers });
@@ -151,17 +158,25 @@ export class TraceApiClient {
   }
 
   createTicket(body: Record<string, unknown>) {
-    return this.request<unknown>("/v1/tickets", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    return this.request<unknown>(
+      "/v1/tickets",
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+      { asHuman: Boolean(this.humanIdentityHeader) },
+    );
   }
 
   updateTicket(slug: string, body: Record<string, unknown>) {
-    return this.request<unknown>(`/v1/tickets/${encodeURIComponent(slug)}`, {
-      method: "PATCH",
-      body: JSON.stringify(body),
-    });
+    return this.request<unknown>(
+      `/v1/tickets/${encodeURIComponent(slug)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      },
+      { asHuman: Boolean(this.humanIdentityHeader) },
+    );
   }
 
   transitionTicket(
@@ -276,13 +291,100 @@ export class TraceApiClient {
   }
 
   uiLoginStatus() {
-    return this.request<{ configured: boolean }>("/v1/ui/login/status");
+    return this.request<{ configured: boolean; mode?: "personal" | "legacy" | "none" }>(
+      "/v1/ui/login/status",
+    );
   }
 
   verifyUiLogin(body: { username: string; password: string }) {
-    return this.request<{ ok: true; user: string }>("/v1/ui/login/verify", {
+    return this.request<{
+      ok: true;
+      user: string;
+      identity: {
+        user: string;
+        slug: string | null;
+        display_name: string;
+        is_platform_admin: boolean;
+        mode: "personal" | "legacy";
+      };
+    }>("/v1/ui/login/verify", {
       method: "POST",
       body: JSON.stringify(body),
     });
+  }
+
+  listTraceaiUsers() {
+    return this.request<unknown[]>(
+      "/v1/traceai-users",
+      {},
+      { asHuman: Boolean(this.humanIdentityHeader) },
+    );
+  }
+
+  createTraceaiUser(body: {
+    username: string;
+    password: string;
+    display_name: string;
+    email?: string;
+    is_platform_admin?: boolean;
+  }) {
+    return this.request<unknown>(
+      "/v1/traceai-users",
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+      { asHuman: Boolean(this.humanIdentityHeader) },
+    );
+  }
+
+  updateTraceaiUser(
+    slug: string,
+    body: {
+      display_name?: string;
+      email?: string | null;
+      status?: string;
+      is_platform_admin?: boolean;
+      password?: string;
+    },
+  ) {
+    return this.request<unknown>(
+      `/v1/traceai-users/${encodeURIComponent(slug)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      },
+      { asHuman: Boolean(this.humanIdentityHeader) },
+    );
+  }
+
+  listProjectMembers(project: string) {
+    return this.request<unknown[]>(
+      `/v1/projects/${encodeURIComponent(project)}/members`,
+      {},
+      { asHuman: Boolean(this.humanIdentityHeader) },
+    );
+  }
+
+  setProjectMember(
+    project: string,
+    body: { user: string; role: "admin" | "editor" | "viewer" },
+  ) {
+    return this.request<unknown>(
+      `/v1/projects/${encodeURIComponent(project)}/members`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+      { asHuman: Boolean(this.humanIdentityHeader) },
+    );
+  }
+
+  removeProjectMember(project: string, user: string) {
+    return this.request<{ ok: true }>(
+      `/v1/projects/${encodeURIComponent(project)}/members/${encodeURIComponent(user)}`,
+      { method: "DELETE" },
+      { asHuman: Boolean(this.humanIdentityHeader) },
+    );
   }
 }

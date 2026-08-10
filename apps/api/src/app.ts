@@ -5,7 +5,13 @@ import { timingSafeEqual } from "node:crypto";
 import type { AuthStore } from "@traceai/auth";
 import { hasScope } from "@traceai/auth";
 import type { TraceService } from "@traceai/core";
-import { computeTokenRollup, parseWorkflowDocument } from "@traceai/core";
+import {
+  computeTokenRollup,
+  isProjectRole,
+  parseWorkflowDocument,
+  requiredRoleForAction,
+  type ProjectRole,
+} from "@traceai/core";
 import {
   getEventsAfter,
   latestEventId,
@@ -13,6 +19,12 @@ import {
   subscribeTicketEvents,
   ticketEventFromMapped,
 } from "./events.js";
+import {
+  attributionName,
+  HUMAN_IDENTITY_HEADER,
+  parseHumanIdentityHeader,
+  type HumanIdentity,
+} from "./human-identity.js";
 import {
   audit,
   createAuthMiddleware,
@@ -25,6 +37,11 @@ const HUMAN_PROXY_HEADER = "x-traceai-human-proxy";
 
 function humanProxySecret(): string | null {
   const value = process.env.TRACEAI_HUMAN_PROXY_SECRET?.trim();
+  return value || null;
+}
+
+function sessionSecret(): string | null {
+  const value = process.env.TRACEAI_SESSION_SECRET?.trim();
   return value || null;
 }
 
@@ -44,6 +61,64 @@ function isHumanProxyRequest(c: {
   } catch {
     return false;
   }
+}
+
+function resolveHumanIdentity(c: {
+  req: { header: (name: string) => string | undefined };
+}): HumanIdentity | null {
+  if (!isHumanProxyRequest(c)) return null;
+  return parseHumanIdentityHeader(
+    c.req.header(HUMAN_IDENTITY_HEADER),
+    sessionSecret(),
+  );
+}
+
+async function enforceProjectRole(
+  service: TraceService,
+  identity: HumanIdentity | null,
+  projectSlug: string,
+  required: ProjectRole,
+): Promise<string | null> {
+  if (!identity) return null; // agent/token path: scopes already checked
+  try {
+    await service.assertProjectRole({
+      projectSlug,
+      userSlug: identity.slug,
+      isPlatformAdmin: identity.is_platform_admin || identity.mode === "legacy",
+      required,
+    });
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : "Forbidden";
+  }
+}
+
+function mapTraceaiUser(
+  u: Awaited<ReturnType<TraceService["listTraceaiUsers"]>>[number],
+) {
+  return {
+    slug: u.slug,
+    username: u.fields.username,
+    display_name: u.fields.display_name,
+    email: u.fields.email ?? null,
+    status: u.fields.status,
+    is_platform_admin: u.fields.is_platform_admin === true,
+    password_set:
+      typeof u.fields.password === "object" &&
+      u.fields.password !== null &&
+      (u.fields.password as { set?: unknown }).set === true,
+  };
+}
+
+function mapMembership(
+  m: Awaited<ReturnType<TraceService["listProjectMemberships"]>>[number],
+) {
+  return {
+    slug: m.slug,
+    project: m.fields.project,
+    user: m.fields.user,
+    role: m.fields.role,
+  };
 }
 
 function param(c: { req: { param: (k: string) => string | undefined } }, key: string): string {
@@ -257,11 +332,26 @@ export function createApp(deps: {
     });
   });
 
-  // Web UI login: credentials live in Aurora `app_login`/`default`
-  // (username + hashed password fields). Verify via Aurora management API.
+  // Web UI login: personal `traceai_user` entries (preferred) or legacy
+  // shared `app_login`/`default`. Verify via Aurora management API.
   app.get("/v1/ui/login/status", async (c) => {
-    const configured = await deps.service.isAppLoginConfigured();
-    return c.json({ configured });
+    const personal = await deps.service
+      .listTraceaiUsers()
+      .then((users) =>
+        users.some(
+          (u) =>
+            u.fields.status === "active" &&
+            typeof u.fields.password === "object" &&
+            u.fields.password !== null &&
+            (u.fields.password as { set?: unknown }).set === true,
+        ),
+      )
+      .catch(() => false);
+    const configured = await deps.service.isUiLoginConfigured();
+    return c.json({
+      configured,
+      mode: personal ? ("personal" as const) : configured ? ("legacy" as const) : ("none" as const),
+    });
   });
 
   app.post("/v1/ui/login/verify", async (c) => {
@@ -278,13 +368,13 @@ export function createApp(deps: {
       );
     }
 
-    const result = await deps.service.verifyAppLogin(username, password);
+    const result = await deps.service.verifyUiLogin(username, password);
     if (!result.ok) {
       if (result.reason === "not_configured") {
         return c.json(
           {
             message:
-              "UI login is not configured in Aurora (app_login / default with Username + Password).",
+              "UI login is not configured. Create a TraceAI user in the admin UI, or set legacy app_login / default.",
             code: "NOT_CONFIGURED",
           },
           503,
@@ -298,10 +388,15 @@ export function createApp(deps: {
 
     audit(c, {
       action: "ui.login.verify",
-      resourceType: "app_login",
-      resourceId: "default",
+      resourceType: result.identity.mode === "personal" ? "traceai_user" : "app_login",
+      resourceId: result.identity.slug ?? "default",
+      meta: { mode: result.identity.mode },
     });
-    return c.json({ ok: true as const, user: result.user });
+    return c.json({
+      ok: true as const,
+      user: result.user,
+      identity: result.identity,
+    });
   });
 
   app.get("/v1/projects", requireScope("projects:read"), async (c) => {
@@ -546,6 +641,7 @@ export function createApp(deps: {
 
   app.post("/v1/tickets", requireScope("tickets:write"), async (c) => {
     const actor = c.get("actor");
+    const human = resolveHumanIdentity(c);
     const body = await c.req.json<{
       project: string;
       title: string;
@@ -555,12 +651,22 @@ export function createApp(deps: {
       stage?: string;
       slug?: string;
       parent?: string | null;
+      created_by?: string;
     }>();
     if (!body?.project || !body?.title?.trim()) {
       return c.json(
         { message: "project and title are required", code: "VALIDATION" },
         400,
       );
+    }
+    const denied = await enforceProjectRole(
+      deps.service,
+      human,
+      body.project,
+      requiredRoleForAction("write_tickets"),
+    );
+    if (denied) {
+      return c.json({ message: denied, code: "FORBIDDEN" }, 403);
     }
     const ticket = await deps.service.createTicket({
       project: body.project,
@@ -571,7 +677,7 @@ export function createApp(deps: {
       stage: body.stage,
       slug: body.slug,
       parent: body.parent,
-      created_by: actor.name,
+      created_by: attributionName(human, body.created_by?.trim() || actor.name),
     });
     const mapped = mapTicket(ticket);
     publishTicketEvent(ticketEventFromMapped("ticket.created", mapped));
@@ -579,6 +685,7 @@ export function createApp(deps: {
       action: "ticket.create",
       resourceType: "ticket",
       resourceId: ticket.slug,
+      meta: human ? { human: human.user, human_slug: human.slug } : undefined,
     });
     return c.json(mapped, 201);
   });
@@ -692,6 +799,7 @@ export function createApp(deps: {
         403,
       );
     }
+    const human = resolveHumanIdentity(c);
     const body = await c.req.json<{
       verdict?: string;
       comment?: string;
@@ -704,11 +812,27 @@ export function createApp(deps: {
         400,
       );
     }
+    const existing = await deps.service.getTicket(param(c, "slug"));
+    if (!existing) {
+      return c.json({ message: "Ticket not found", code: "NOT_FOUND" }, 404);
+    }
+    const denied = await enforceProjectRole(
+      deps.service,
+      human,
+      existing.ticket.fields.project,
+      requiredRoleForAction("review"),
+    );
+    if (denied) {
+      return c.json({ message: denied, code: "FORBIDDEN" }, 403);
+    }
     const actor = c.get("actor");
     const result = await deps.service.recordReviewVerdict(param(c, "slug"), {
       verdict: body.verdict,
       comment: body.comment,
-      author: body.reviewer?.trim() || actor.name,
+      author: attributionName(
+        human,
+        body.reviewer?.trim() || actor.name,
+      ),
       apply_to_children: body.apply_to_children === true,
     });
     const mapped = mapTicket(result.ticket);
@@ -926,6 +1050,210 @@ export function createApp(deps: {
         agent_policy: doc.agent_policy,
         workflow_document: doc,
       });
+    },
+  );
+
+  // TraceAI personal users (Aurora-backed; managed via TraceAI UI)
+  app.get("/v1/traceai-users", requireScope("admin"), async (c) => {
+    const users = await deps.service.listTraceaiUsers();
+    return c.json(users.map(mapTraceaiUser));
+  });
+
+  app.post("/v1/traceai-users", requireScope("admin"), async (c) => {
+    const human = resolveHumanIdentity(c);
+    if (
+      human &&
+      !human.is_platform_admin &&
+      human.mode !== "legacy"
+    ) {
+      return c.json(
+        {
+          message: "Only platform admins can create TraceAI users",
+          code: "FORBIDDEN",
+        },
+        403,
+      );
+    }
+    const body = await c.req.json<{
+      username?: string;
+      password?: string;
+      display_name?: string;
+      email?: string;
+      is_platform_admin?: boolean;
+    }>();
+    if (!body?.username?.trim() || !body?.password) {
+      return c.json(
+        { message: "username and password are required", code: "VALIDATION" },
+        400,
+      );
+    }
+    try {
+      const user = await deps.service.createTraceaiUser({
+        username: body.username,
+        password: body.password,
+        display_name: body.display_name?.trim() || body.username,
+        email: body.email,
+        is_platform_admin: body.is_platform_admin === true,
+      });
+      audit(c, {
+        action: "traceai_user.create",
+        resourceType: "traceai_user",
+        resourceId: user.slug,
+      });
+      return c.json(mapTraceaiUser(user), 201);
+    } catch (error) {
+      return c.json(
+        {
+          message: error instanceof Error ? error.message : "Create failed",
+          code: "VALIDATION",
+        },
+        400,
+      );
+    }
+  });
+
+  app.patch("/v1/traceai-users/:slug", requireScope("admin"), async (c) => {
+    const human = resolveHumanIdentity(c);
+    if (
+      human &&
+      !human.is_platform_admin &&
+      human.mode !== "legacy"
+    ) {
+      return c.json(
+        {
+          message: "Only platform admins can update TraceAI users",
+          code: "FORBIDDEN",
+        },
+        403,
+      );
+    }
+    const body = await c.req.json<{
+      display_name?: string;
+      email?: string | null;
+      status?: string;
+      is_platform_admin?: boolean;
+      password?: string;
+    }>();
+    try {
+      const user = await deps.service.updateTraceaiUser(param(c, "slug"), body);
+      audit(c, {
+        action: "traceai_user.update",
+        resourceType: "traceai_user",
+        resourceId: user.slug,
+      });
+      return c.json(mapTraceaiUser(user));
+    } catch (error) {
+      return c.json(
+        {
+          message: error instanceof Error ? error.message : "Update failed",
+          code: "VALIDATION",
+        },
+        400,
+      );
+    }
+  });
+
+  app.get(
+    "/v1/projects/:slug/members",
+    requireScope("projects:read"),
+    async (c) => {
+      const project = param(c, "slug");
+      const human = resolveHumanIdentity(c);
+      const denied = await enforceProjectRole(
+        deps.service,
+        human,
+        project,
+        requiredRoleForAction("read"),
+      );
+      if (denied) {
+        return c.json({ message: denied, code: "FORBIDDEN" }, 403);
+      }
+      const members = await deps.service.listProjectMemberships(project);
+      return c.json(members.map(mapMembership));
+    },
+  );
+
+  app.post(
+    "/v1/projects/:slug/members",
+    requireScope("projects:write"),
+    async (c) => {
+      const project = param(c, "slug");
+      const human = resolveHumanIdentity(c);
+      const denied = await enforceProjectRole(
+        deps.service,
+        human,
+        project,
+        requiredRoleForAction("manage_members"),
+      );
+      if (denied) {
+        // Token admins (no human identity) may still manage members.
+        if (human || !hasScope(c.get("actor").scopes, ["admin"])) {
+          return c.json({ message: denied, code: "FORBIDDEN" }, 403);
+        }
+      }
+      const body = await c.req.json<{ user?: string; role?: string }>();
+      if (!body?.user?.trim() || !isProjectRole(body.role)) {
+        return c.json(
+          {
+            message: "user and role (admin|editor|viewer) are required",
+            code: "VALIDATION",
+          },
+          400,
+        );
+      }
+      try {
+        const membership = await deps.service.setProjectMembership({
+          project,
+          user: body.user,
+          role: body.role,
+        });
+        audit(c, {
+          action: "project_membership.set",
+          resourceType: "project_membership",
+          resourceId: membership.slug,
+          meta: { project, user: body.user, role: body.role },
+        });
+        return c.json(mapMembership(membership), 201);
+      } catch (error) {
+        return c.json(
+          {
+            message: error instanceof Error ? error.message : "Set failed",
+            code: "VALIDATION",
+          },
+          400,
+        );
+      }
+    },
+  );
+
+  app.delete(
+    "/v1/projects/:slug/members/:user",
+    requireScope("projects:write"),
+    async (c) => {
+      const project = param(c, "slug");
+      const user = param(c, "user");
+      const human = resolveHumanIdentity(c);
+      const denied = await enforceProjectRole(
+        deps.service,
+        human,
+        project,
+        requiredRoleForAction("manage_members"),
+      );
+      if (denied) {
+        if (human || !hasScope(c.get("actor").scopes, ["admin"])) {
+          return c.json({ message: denied, code: "FORBIDDEN" }, 403);
+        }
+      }
+      const removed = await deps.service.removeProjectMembership(project, user);
+      if (!removed) {
+        return c.json({ message: "Membership not found", code: "NOT_FOUND" }, 404);
+      }
+      audit(c, {
+        action: "project_membership.remove",
+        resourceType: "project_membership",
+        resourceId: `${project}--${user}`,
+      });
+      return c.json({ ok: true as const });
     },
   );
 

@@ -1,9 +1,11 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
-import { TraceApiClient, TraceApiError } from "@traceai/core";
+import { TraceApiClient, TraceApiError, type UiIdentity } from "@traceai/core";
 
 export const SESSION_COOKIE = "traceai_session";
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
+
+export type SessionIdentity = UiIdentity;
 
 function createApiClient(): TraceApiClient | null {
   const apiUrl = process.env.TRACEAI_API_URL?.replace(/\/$/, "");
@@ -15,6 +17,7 @@ function createApiClient(): TraceApiClient | null {
 /**
  * HMAC key for the session cookie. Independent of Aurora password so Edge
  * middleware can verify sync; rotating this invalidates open sessions.
+ * Also used to sign human-identity headers to the API.
  */
 export function sessionSecret(): string | null {
   const explicit = process.env.TRACEAI_SESSION_SECRET?.trim();
@@ -46,14 +49,17 @@ export async function isLoginConfigured(): Promise<boolean> {
 export async function verifyCredentials(
   user: string,
   password: string,
-): Promise<{ ok: true; user: string } | { ok: false; configured: boolean }> {
+): Promise<
+  | { ok: true; user: string; identity: SessionIdentity }
+  | { ok: false; configured: boolean }
+> {
   const client = createApiClient();
   if (!client || !sessionSecret()) {
     return { ok: false, configured: false };
   }
   try {
     const result = await client.verifyUiLogin({ username: user, password });
-    return { ok: true, user: result.user };
+    return { ok: true, user: result.user, identity: result.identity };
   } catch (error) {
     if (error instanceof TraceApiError) {
       if (error.status === 503 || error.code === "NOT_CONFIGURED") {
@@ -65,12 +71,16 @@ export async function verifyCredentials(
   }
 }
 
-export function createSessionToken(user: string): string {
+export function createSessionToken(identity: SessionIdentity): string {
   const secret = sessionSecret();
   if (!secret) throw new Error("TRACEAI_SESSION_SECRET is not set");
   const payload = Buffer.from(
     JSON.stringify({
-      user,
+      user: identity.user,
+      slug: identity.slug,
+      display_name: identity.display_name,
+      is_platform_admin: identity.is_platform_admin,
+      mode: identity.mode,
       exp: Date.now() + SESSION_MAX_AGE_SECONDS * 1000,
     }),
     "utf8",
@@ -78,7 +88,9 @@ export function createSessionToken(user: string): string {
   return `${payload}.${sign(payload, secret)}`;
 }
 
-export function userFromSessionToken(token: string | undefined): string | null {
+export function identityFromSessionToken(
+  token: string | undefined,
+): SessionIdentity | null {
   if (!token) return null;
   const secret = sessionSecret();
   if (!secret) return null;
@@ -92,18 +104,57 @@ export function userFromSessionToken(token: string | undefined): string | null {
   try {
     const parsed = JSON.parse(
       Buffer.from(payload, "base64url").toString("utf8"),
-    ) as { user?: unknown; exp?: unknown };
+    ) as Partial<SessionIdentity> & { exp?: unknown };
     if (typeof parsed.user !== "string" || !parsed.user) return null;
     if (typeof parsed.exp !== "number" || parsed.exp < Date.now()) return null;
-    return parsed.user;
+    const mode = parsed.mode === "personal" || parsed.mode === "legacy"
+      ? parsed.mode
+      : "legacy";
+    return {
+      user: parsed.user,
+      slug: typeof parsed.slug === "string" && parsed.slug ? parsed.slug : null,
+      display_name:
+        typeof parsed.display_name === "string" && parsed.display_name
+          ? parsed.display_name
+          : parsed.user,
+      is_platform_admin: parsed.is_platform_admin === true || mode === "legacy",
+      mode,
+    };
   } catch {
     return null;
   }
 }
 
-export async function getSessionUser(): Promise<string | null> {
+/** @deprecated Prefer getSessionIdentity(); kept for username-only callers. */
+export function userFromSessionToken(token: string | undefined): string | null {
+  return identityFromSessionToken(token)?.user ?? null;
+}
+
+export async function getSessionIdentity(): Promise<SessionIdentity | null> {
   const store = await cookies();
-  return userFromSessionToken(store.get(SESSION_COOKIE)?.value);
+  return identityFromSessionToken(store.get(SESSION_COOKIE)?.value);
+}
+
+export async function getSessionUser(): Promise<string | null> {
+  const identity = await getSessionIdentity();
+  return identity?.user ?? null;
+}
+
+export function signHumanIdentityHeader(identity: SessionIdentity): string {
+  const secret = sessionSecret();
+  if (!secret) throw new Error("TRACEAI_SESSION_SECRET is not set");
+  const payload = Buffer.from(
+    JSON.stringify({
+      user: identity.user,
+      slug: identity.slug,
+      display_name: identity.display_name,
+      is_platform_admin: identity.is_platform_admin,
+      mode: identity.mode,
+      exp: Date.now() + 60_000,
+    }),
+    "utf8",
+  ).toString("base64url");
+  return `${payload}.${sign(payload, secret)}`;
 }
 
 export function sessionCookieOptions(maxAge: number) {

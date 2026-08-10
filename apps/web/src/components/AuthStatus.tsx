@@ -1,13 +1,19 @@
+import Link from "next/link";
 import { LogoutButton } from "@/components/LogoutButton";
-import { getSessionUser } from "@/lib/session";
+import { getSessionIdentity } from "@/lib/session";
 
 export async function AuthStatus() {
-  const user = await getSessionUser();
-  if (!user) return null;
+  const identity = await getSessionIdentity();
+  if (!identity) return null;
 
   return (
     <div className="auth-status">
-      <span className="muted">{user}</span>
+      {(identity.is_platform_admin || identity.mode === "legacy") && (
+        <Link href="/admin/users" className="auth-admin-link">
+          Admin
+        </Link>
+      )}
+      <span className="muted">{identity.display_name || identity.user}</span>
       <LogoutButton />
     </div>
   );

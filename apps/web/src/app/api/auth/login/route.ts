@@ -70,10 +70,13 @@ export async function POST(request: Request) {
     );
   }
 
-  const response = NextResponse.json({ user: result.user });
+  const response = NextResponse.json({
+    user: result.user,
+    identity: result.identity,
+  });
   response.cookies.set(
     SESSION_COOKIE,
-    createSessionToken(result.user),
+    createSessionToken(result.identity),
     sessionCookieOptions(SESSION_MAX_AGE_SECONDS),
   );
   return response;

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { TraceApiError } from "@traceai/core";
-import { getSessionUser, isLoginConfigured } from "@/lib/session";
+import { getSessionIdentity, isLoginConfigured } from "@/lib/session";
 import { createTraceServerClient } from "@/lib/traceai-server";
 
 export const runtime = "nodejs";
@@ -21,15 +21,15 @@ export async function POST(request: Request, context: RouteContext) {
     return NextResponse.json(
       {
         message:
-          "UI login is not configured in Aurora. Set Username + Password on app_login / default.",
+          "UI login is not configured. Create a TraceAI user or set legacy app_login.",
         code: "NOT_CONFIGURED",
       },
       { status: 503 },
     );
   }
 
-  const sessionUser = await getSessionUser();
-  if (!sessionUser) {
+  const identity = await getSessionIdentity();
+  if (!identity) {
     return NextResponse.json(
       { message: "Sign in to approve or reject tickets", code: "UNAUTHORIZED" },
       { status: 401 },
@@ -81,11 +81,14 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   try {
-    const client = createTraceServerClient({ asHumanCapable: true });
+    const client = createTraceServerClient({
+      asHumanCapable: true,
+      identity,
+    });
     const result = await client.recordReviewVerdict(slug, {
       verdict,
       comment,
-      reviewer: sessionUser,
+      reviewer: identity.slug || identity.user,
       apply_to_children: body.apply_to_children === true,
     });
     return NextResponse.json(result);

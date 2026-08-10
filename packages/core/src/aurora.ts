@@ -168,6 +168,13 @@ export class AuroraManagementClient {
     );
   }
 
+  deleteEntry(apiId: string, entryId: string) {
+    return this.request(
+      `/api/v1/admin/content-types/${apiId}/entries/${entryId}`,
+      { method: "DELETE" },
+    );
+  }
+
   /**
    * Check plaintext against a hashed `password` field on an entry.
    * Never returns the hash. Wrong password → AuroraApiError 401.

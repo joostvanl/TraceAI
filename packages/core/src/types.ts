@@ -226,6 +226,9 @@ export type WikiPageFields = {
  *
  * On read, `password` is never plaintext/hash — only `{ set: true }` or `null`.
  * Verify via Aurora management `POST .../verify-credentials`.
+ *
+ * @deprecated Prefer personal `traceai_user` entries (TRA-43). Kept as
+ * migration fallback until personal users exist.
  */
 export type AppLoginPasswordMarker = { set: true };
 
@@ -234,16 +237,56 @@ export type AppLoginFields = {
   password: AppLoginPasswordMarker | null;
 };
 
+/**
+ * Personal TraceAI web user (Aurora `traceai_user`). Credentials stay in
+ * Aurora; TraceAI UI/API manage entries so humans never need Aurora access.
+ */
+export type TraceaiUserFields = {
+  username: string;
+  password: AppLoginPasswordMarker | null;
+  display_name: string;
+  email?: string | null;
+  /** `active` | `disabled` */
+  status: string;
+  /** Platform-wide admin (all projects + user management). */
+  is_platform_admin?: boolean;
+};
+
+/**
+ * Project membership (Aurora `project_membership`): user slug ↔ project slug
+ * with role `admin` | `editor` | `viewer`.
+ */
+export type ProjectMembershipFields = {
+  project: string;
+  user: string;
+  role: string;
+};
+
 export type Project = AuroraEntry<ProjectFields>;
 export type Workflow = AuroraEntry<WorkflowFields>;
 export type Ticket = AuroraEntry<TicketFields>;
 export type Comment = AuroraEntry<CommentFields>;
 export type WikiPage = AuroraEntry<WikiPageFields>;
 export type AppLogin = AuroraEntry<AppLoginFields>;
+export type TraceaiUser = AuroraEntry<TraceaiUserFields>;
+export type ProjectMembership = AuroraEntry<ProjectMembershipFields>;
 
 export const APP_LOGIN_CONTENT_TYPE = "app_login";
 export const APP_LOGIN_ENTRY_SLUG = "default";
+export const TRACEAI_USER_CONTENT_TYPE = "traceai_user";
+export const PROJECT_MEMBERSHIP_CONTENT_TYPE = "project_membership";
 export const WIKI_PAGE_CONTENT_TYPE = "wiki_page";
+
+/** Session / login identity returned by TraceAI UI auth. */
+export type UiIdentity = {
+  /** Login username (stable attribution string). */
+  user: string;
+  /** Aurora `traceai_user` slug when personal; null for legacy app_login. */
+  slug: string | null;
+  display_name: string;
+  is_platform_admin: boolean;
+  mode: "personal" | "legacy";
+};
 
 export type ListResult<T> = {
   items: T[];

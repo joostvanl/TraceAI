@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { TraceApiError } from "@traceai/core";
-import { getSessionUser, isLoginConfigured } from "@/lib/session";
+import { getSessionIdentity, isLoginConfigured } from "@/lib/session";
 import { createTraceServerClient } from "@/lib/traceai-server";
 
 export const runtime = "nodejs";
@@ -18,15 +18,15 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         message:
-          "UI login is not configured in Aurora. Set Username + Password on app_login / default.",
+          "UI login is not configured. Create a TraceAI user or set legacy app_login.",
         code: "NOT_CONFIGURED",
       },
       { status: 503 },
     );
   }
 
-  const sessionUser = await getSessionUser();
-  if (!sessionUser) {
+  const identity = await getSessionIdentity();
+  if (!identity) {
     return NextResponse.json(
       { message: "Sign in to create tickets", code: "UNAUTHORIZED" },
       { status: 401 },
@@ -66,34 +66,22 @@ export async function POST(request: Request) {
   }
 
   try {
-    const client = createTraceServerClient();
+    const client = createTraceServerClient({
+      asHumanCapable: true,
+      identity,
+    });
     const ticket = (await client.createTicket({
       project,
       title,
       description,
       priority,
-      // First workflow stage — light wishes land here for AI refinement.
       stage: "backlog",
     })) as {
       slug: string;
       ticket_key?: string | null;
       title: string;
-      stage: string;
-      project: string;
-      priority?: string;
     };
-
-    return NextResponse.json(
-      {
-        slug: ticket.slug,
-        ticket_key: ticket.ticket_key ?? null,
-        title: ticket.title,
-        stage: ticket.stage,
-        project: ticket.project,
-        priority: ticket.priority ?? priority,
-      },
-      { status: 201 },
-    );
+    return NextResponse.json(ticket, { status: 201 });
   } catch (error) {
     if (error instanceof TraceApiError) {
       return NextResponse.json(
@@ -101,7 +89,10 @@ export async function POST(request: Request) {
           message: error.message,
           code: error.code ?? "TRACEAI_ERROR",
         },
-        { status: error.status >= 400 && error.status < 600 ? error.status : 502 },
+        {
+          status:
+            error.status >= 400 && error.status < 600 ? error.status : 502,
+        },
       );
     }
     const message = error instanceof Error ? error.message : String(error);

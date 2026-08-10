@@ -996,6 +996,36 @@ h2 {
   border-bottom: 1px solid var(--border);
 }
 
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0 1.5rem;
+  font-size: 0.92rem;
+}
+
+.data-table th,
+.data-table td {
+  text-align: left;
+  padding: 0.55rem 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.data-table th {
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.auth-admin-link {
+  margin-right: 0.75rem;
+  font-size: 0.9rem;
+}
+
 @media (max-width: 640px) {
   .site-main {
     padding: 1rem;

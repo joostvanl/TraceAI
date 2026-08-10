@@ -29,12 +29,17 @@ import {
   type TicketReviewState,
   APP_LOGIN_CONTENT_TYPE,
   APP_LOGIN_ENTRY_SLUG,
+  TRACEAI_USER_CONTENT_TYPE,
+  PROJECT_MEMBERSHIP_CONTENT_TYPE,
   WIKI_PAGE_CONTENT_TYPE,
   type AppLogin,
   type Comment,
   type Priority,
   type Project,
+  type ProjectMembership,
   type Ticket,
+  type TraceaiUser,
+  type UiIdentity,
   type WikiPage,
   type Workflow,
   type WorkflowAgentPolicy,
@@ -48,6 +53,12 @@ import {
   listDescendantSlugs,
   validateTicketParent,
 } from "./ticket-links.js";
+import {
+  isProjectRole,
+  membershipSlug,
+  roleAtLeast,
+  type ProjectRole,
+} from "./roles.js";
 import {
   computeProjectInsights,
   paginateItems,
@@ -1253,11 +1264,20 @@ export class TraceService {
   }
 
   /**
-   * True when Aurora `app_login`/`default` has a username and a set password
-   * marker (`{ set: true }`). The hash is never readable.
+   * True when at least one personal `traceai_user` is active with a password,
+   * or (legacy) Aurora `app_login`/`default` is configured.
    */
   async isAppLoginConfigured(): Promise<boolean> {
+    return this.isUiLoginConfigured();
+  }
+
+  async isUiLoginConfigured(): Promise<boolean> {
     await this.ensureReady();
+    if (await this.hasPersonalLoginUsers()) return true;
+    return this.isLegacyAppLoginConfigured();
+  }
+
+  private async isLegacyAppLoginConfigured(): Promise<boolean> {
     const entry = await this.client.getEntryBySlug<AppLogin>(
       APP_LOGIN_CONTENT_TYPE,
       APP_LOGIN_ENTRY_SLUG,
@@ -1267,26 +1287,88 @@ export class TraceService {
       typeof entry.fields.username === "string"
         ? entry.fields.username.trim()
         : "";
-    const passwordSet =
-      typeof entry.fields.password === "object" &&
-      entry.fields.password !== null &&
-      (entry.fields.password as { set?: unknown }).set === true;
-    return Boolean(username && passwordSet);
+    return Boolean(username && this.isPasswordSet(entry.fields.password));
+  }
+
+  private isPasswordSet(password: unknown): boolean {
+    return (
+      typeof password === "object" &&
+      password !== null &&
+      (password as { set?: unknown }).set === true
+    );
+  }
+
+  private async hasPersonalLoginUsers(): Promise<boolean> {
+    const users = await this.listTraceaiUsers();
+    return users.some(
+      (u) =>
+        u.fields.status === "active" && this.isPasswordSet(u.fields.password),
+    );
   }
 
   /**
-   * Verify UI login via Aurora management `verify-credentials`.
-   * Does not read or compare password hashes in TraceAI.
+   * Verify UI login. Prefers personal `traceai_user` entries; falls back to
+   * legacy shared `app_login`/`default` when no personal users exist.
    */
   async verifyAppLogin(
     username: string,
     password: string,
   ): Promise<
-    | { ok: true; user: string }
+    | { ok: true; user: string; identity: UiIdentity }
+    | { ok: false; reason: "not_configured" | "invalid" }
+  > {
+    return this.verifyUiLogin(username, password);
+  }
+
+  async verifyUiLogin(
+    username: string,
+    password: string,
+  ): Promise<
+    | { ok: true; user: string; identity: UiIdentity }
     | { ok: false; reason: "not_configured" | "invalid" }
   > {
     await this.ensureReady();
-    if (!(await this.isAppLoginConfigured())) {
+    const want = username.trim();
+    if (!want || !password) {
+      return { ok: false, reason: "invalid" };
+    }
+
+    const personalConfigured = await this.hasPersonalLoginUsers();
+    if (personalConfigured) {
+      const user = await this.findTraceaiUserByUsername(want);
+      if (!user || user.fields.status !== "active") {
+        return { ok: false, reason: "invalid" };
+      }
+      if (!this.isPasswordSet(user.fields.password)) {
+        return { ok: false, reason: "not_configured" };
+      }
+      try {
+        const result = await this.client.verifyCredentials(
+          TRACEAI_USER_CONTENT_TYPE,
+          {
+            slug: user.slug,
+            username: want,
+            password,
+          },
+        );
+        const loginUser =
+          typeof result.username === "string" && result.username.trim()
+            ? result.username.trim()
+            : want;
+        const identity: UiIdentity = {
+          user: loginUser,
+          slug: user.slug,
+          display_name: user.fields.display_name || loginUser,
+          is_platform_admin: user.fields.is_platform_admin === true,
+          mode: "personal",
+        };
+        return { ok: true, user: loginUser, identity };
+      } catch (error) {
+        return this.mapCredentialError(error);
+      }
+    }
+
+    if (!(await this.isLegacyAppLoginConfigured())) {
       return { ok: false, reason: "not_configured" };
     }
     try {
@@ -1294,38 +1376,288 @@ export class TraceService {
         APP_LOGIN_CONTENT_TYPE,
         {
           slug: APP_LOGIN_ENTRY_SLUG,
-          username,
+          username: want,
           password,
         },
       );
-      const user =
+      const loginUser =
         typeof result.username === "string" && result.username.trim()
           ? result.username.trim()
-          : username.trim();
-      return { ok: true, user };
+          : want;
+      const identity: UiIdentity = {
+        user: loginUser,
+        slug: null,
+        display_name: loginUser,
+        is_platform_admin: true,
+        mode: "legacy",
+      };
+      return { ok: true, user: loginUser, identity };
     } catch (error) {
-      if (error instanceof AuroraApiError) {
-        if (error.status === 401) {
-          return { ok: false, reason: "invalid" };
-        }
-        const code =
-          typeof error.body === "object" &&
-          error.body &&
-          "code" in error.body &&
-          typeof (error.body as { code: unknown }).code === "string"
-            ? (error.body as { code: string }).code
-            : "";
-        if (
-          error.status === 400 ||
-          error.status === 404 ||
-          code === "PASSWORD_NOT_SET" ||
-          code === "PASSWORD_FIELD_NOT_FOUND"
-        ) {
-          return { ok: false, reason: "not_configured" };
-        }
-      }
-      throw error;
+      return this.mapCredentialError(error);
     }
+  }
+
+  private mapCredentialError(
+    error: unknown,
+  ): { ok: false; reason: "not_configured" | "invalid" } {
+    if (error instanceof AuroraApiError) {
+      if (error.status === 401) {
+        return { ok: false, reason: "invalid" };
+      }
+      const code =
+        typeof error.body === "object" &&
+        error.body &&
+        "code" in error.body &&
+        typeof (error.body as { code: unknown }).code === "string"
+          ? (error.body as { code: string }).code
+          : "";
+      if (
+        error.status === 400 ||
+        error.status === 404 ||
+        code === "PASSWORD_NOT_SET" ||
+        code === "PASSWORD_FIELD_NOT_FOUND"
+      ) {
+        return { ok: false, reason: "not_configured" };
+      }
+    }
+    throw error;
+  }
+
+  async listTraceaiUsers(): Promise<TraceaiUser[]> {
+    await this.ensureReady();
+    const result = await this.client.listEntries<TraceaiUser>(
+      TRACEAI_USER_CONTENT_TYPE,
+      { limit: 200 },
+    );
+    return result.items.sort((a, b) => a.slug.localeCompare(b.slug));
+  }
+
+  async getTraceaiUser(slug: string): Promise<TraceaiUser | null> {
+    await this.ensureReady();
+    return this.client.getEntryBySlug<TraceaiUser>(
+      TRACEAI_USER_CONTENT_TYPE,
+      slug,
+    );
+  }
+
+  async findTraceaiUserByUsername(
+    username: string,
+  ): Promise<TraceaiUser | null> {
+    const want = username.trim().toLowerCase();
+    if (!want) return null;
+    const users = await this.listTraceaiUsers();
+    return (
+      users.find(
+        (u) =>
+          u.fields.username.trim().toLowerCase() === want ||
+          u.slug.toLowerCase() === want,
+      ) ?? null
+    );
+  }
+
+  async createTraceaiUser(input: {
+    username: string;
+    password: string;
+    display_name: string;
+    email?: string;
+    status?: string;
+    is_platform_admin?: boolean;
+    slug?: string;
+  }): Promise<TraceaiUser> {
+    await this.ensureReady();
+    const username = input.username.trim();
+    if (!username) throw new Error("username is required");
+    if (!input.password) throw new Error("password is required");
+    const display_name = input.display_name.trim() || username;
+    const existing = await this.listTraceaiUsers();
+    if (
+      existing.some(
+        (u) => u.fields.username.trim().toLowerCase() === username.toLowerCase(),
+      )
+    ) {
+      throw new Error(`User already exists: ${username}`);
+    }
+    const slug = uniqueSlug(
+      input.slug?.trim() || username,
+      new Set(existing.map((u) => u.slug)),
+    );
+    const user = await this.client.createEntry<TraceaiUser>(
+      TRACEAI_USER_CONTENT_TYPE,
+      {
+        slug,
+        status: "published",
+        fields: {
+          username,
+          password: input.password,
+          display_name,
+          email: input.email?.trim() || null,
+          status: input.status?.trim() || "active",
+          is_platform_admin: input.is_platform_admin === true,
+        },
+      },
+    );
+    await this.ensurePublished(TRACEAI_USER_CONTENT_TYPE, user);
+    return user;
+  }
+
+  async updateTraceaiUser(
+    slug: string,
+    input: {
+      display_name?: string;
+      email?: string | null;
+      status?: string;
+      is_platform_admin?: boolean;
+      password?: string;
+    },
+  ): Promise<TraceaiUser> {
+    await this.ensureReady();
+    const user = await this.getTraceaiUser(slug);
+    if (!user) throw new Error(`User not found: ${slug}`);
+    const fields: Record<string, unknown> = {};
+    if (input.display_name != null) {
+      fields.display_name = input.display_name.trim() || user.fields.username;
+    }
+    if (input.email !== undefined) {
+      fields.email = input.email?.trim() || null;
+    }
+    if (input.status != null) {
+      fields.status = input.status.trim() || "active";
+    }
+    if (input.is_platform_admin !== undefined) {
+      fields.is_platform_admin = input.is_platform_admin === true;
+    }
+    if (input.password) {
+      fields.password = input.password;
+    }
+    const updated = await this.client.updateEntry<TraceaiUser>(
+      TRACEAI_USER_CONTENT_TYPE,
+      user.id,
+      { fields },
+    );
+    await this.ensurePublished(TRACEAI_USER_CONTENT_TYPE, updated);
+    return updated;
+  }
+
+  async listProjectMemberships(
+    project?: string,
+  ): Promise<ProjectMembership[]> {
+    await this.ensureReady();
+    const result = await this.client.listEntries<ProjectMembership>(
+      PROJECT_MEMBERSHIP_CONTENT_TYPE,
+      { limit: 500, status: "published" },
+    );
+    const items = result.items;
+    if (!project) {
+      return items.sort((a, b) => a.slug.localeCompare(b.slug));
+    }
+    return items
+      .filter((m) => m.fields.project === project)
+      .sort((a, b) => a.slug.localeCompare(b.slug));
+  }
+
+  async getUserProjectRole(
+    projectSlug: string,
+    userSlug: string,
+  ): Promise<ProjectRole | null> {
+    const memberships = await this.listProjectMemberships(projectSlug);
+    const match = memberships.find((m) => m.fields.user === userSlug);
+    if (!match) return null;
+    return isProjectRole(match.fields.role) ? match.fields.role : null;
+  }
+
+  async assertProjectRole(input: {
+    projectSlug: string;
+    userSlug: string | null;
+    isPlatformAdmin?: boolean;
+    required: ProjectRole;
+  }): Promise<ProjectRole | "platform_admin"> {
+    if (input.isPlatformAdmin) return "platform_admin";
+    if (!input.userSlug) {
+      throw new Error(
+        `Missing project membership for role ${input.required} on ${input.projectSlug}`,
+      );
+    }
+    const role = await this.getUserProjectRole(
+      input.projectSlug,
+      input.userSlug,
+    );
+    if (!roleAtLeast(role, input.required)) {
+      throw new Error(
+        `Requires project role ${input.required} on ${input.projectSlug} (have ${role ?? "none"})`,
+      );
+    }
+    return role!;
+  }
+
+  async setProjectMembership(input: {
+    project: string;
+    user: string;
+    role: ProjectRole;
+  }): Promise<ProjectMembership> {
+    await this.ensureReady();
+    const project = input.project.trim();
+    const user = input.user.trim();
+    if (!project || !user) throw new Error("project and user are required");
+    if (!isProjectRole(input.role)) {
+      throw new Error(`Invalid role: ${input.role}`);
+    }
+    const projectEntry = await this.client.getEntryBySlug<Project>(
+      "project",
+      project,
+    );
+    if (!projectEntry) throw new Error(`Project not found: ${project}`);
+    const userEntry = await this.getTraceaiUser(user);
+    if (!userEntry) throw new Error(`User not found: ${user}`);
+
+    const slug = membershipSlug(project, user);
+    const existing = await this.client.getEntryBySlug<ProjectMembership>(
+      PROJECT_MEMBERSHIP_CONTENT_TYPE,
+      slug,
+    );
+    if (existing) {
+      const updated = await this.client.updateEntry<ProjectMembership>(
+        PROJECT_MEMBERSHIP_CONTENT_TYPE,
+        existing.id,
+        {
+          fields: {
+            project,
+            user,
+            role: input.role,
+          },
+        },
+      );
+      await this.ensurePublished(PROJECT_MEMBERSHIP_CONTENT_TYPE, updated);
+      return updated;
+    }
+    const created = await this.client.createEntry<ProjectMembership>(
+      PROJECT_MEMBERSHIP_CONTENT_TYPE,
+      {
+        slug,
+        status: "published",
+        fields: {
+          project,
+          user,
+          role: input.role,
+        },
+      },
+    );
+    await this.ensurePublished(PROJECT_MEMBERSHIP_CONTENT_TYPE, created);
+    return created;
+  }
+
+  async removeProjectMembership(
+    project: string,
+    user: string,
+  ): Promise<boolean> {
+    await this.ensureReady();
+    const slug = membershipSlug(project.trim(), user.trim());
+    const existing = await this.client.getEntryBySlug<ProjectMembership>(
+      PROJECT_MEMBERSHIP_CONTENT_TYPE,
+      slug,
+    );
+    if (!existing) return false;
+    await this.client.deleteEntry(PROJECT_MEMBERSHIP_CONTENT_TYPE, existing.id);
+    return true;
   }
 
   private async ensurePublished(
