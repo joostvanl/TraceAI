@@ -11,6 +11,7 @@ import {
   membershipSlug,
   parseWorkflowDocument,
   requiredRoleForAction,
+  WorkflowValidationError,
   type ProjectRole,
   type Ticket,
 } from "@traceai/core";
@@ -1093,24 +1094,245 @@ export function createApp(deps: {
         };
         agent_policy?: Record<string, unknown>;
       }>();
-      const workflow = await deps.service.updateWorkflow(param(c, "slug"), {
-        name: body.name,
-        stages: body.stages as never,
-        document: body.document as never,
-        agent_policy: body.agent_policy as never,
-      });
-      const doc = parseWorkflowDocument(workflow.fields.stages_json);
+      try {
+        const workflow = await deps.service.updateWorkflow(param(c, "slug"), {
+          name: body.name,
+          stages: body.stages as never,
+          document: body.document as never,
+          agent_policy: body.agent_policy as never,
+        });
+        const doc = parseWorkflowDocument(workflow.fields.stages_json);
+        audit(c, {
+          action: "workflow.update",
+          resourceType: "workflow",
+          resourceId: workflow.slug,
+        });
+        return c.json({
+          ...mapWorkflow(workflow),
+          stages: doc.stages,
+          agent_policy: doc.agent_policy,
+          workflow_document: doc,
+        });
+      } catch (error) {
+        if (error instanceof WorkflowValidationError) {
+          return c.json(
+            {
+              message: error.message,
+              code: "VALIDATION",
+              issues: error.issues,
+            },
+            400,
+          );
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.post(
+    "/v1/workflows/:slug/draft",
+    requireScope("workflows:write"),
+    async (c) => {
+      const body = await c.req.json<{
+        canvas?: Record<string, unknown>;
+        pending?: Record<string, unknown>;
+        name?: string;
+        saved_by?: string;
+      }>();
+      const actor = c.get("actor");
+      try {
+        const result = await deps.service.saveWorkflowDraft(param(c, "slug"), {
+          canvas: body.canvas as never,
+          pending: body.pending as never,
+          name: body.name,
+          saved_by: body.saved_by ?? actor.name,
+        });
+        audit(c, {
+          action: "workflow.draft_save",
+          resourceType: "workflow",
+          resourceId: result.workflow.slug,
+        });
+        return c.json({
+          ...mapWorkflow(result.workflow),
+          workflow_document: result.workflow_document,
+          aurora_version_id: result.aurora_version_id,
+          stages: result.workflow_document.stages,
+          agent_policy: result.workflow_document.agent_policy,
+        });
+      } catch (error) {
+        if (error instanceof WorkflowValidationError) {
+          return c.json(
+            {
+              message: error.message,
+              code: "VALIDATION",
+              issues: error.issues,
+            },
+            400,
+          );
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.get(
+    "/v1/workflows/:slug/activation-preview",
+    requireScope("workflows:read"),
+    async (c) => {
+      try {
+        const preview = await deps.service.previewWorkflowActivation(
+          param(c, "slug"),
+        );
+        return c.json(preview);
+      } catch (error) {
+        return c.json(
+          {
+            message: error instanceof Error ? error.message : String(error),
+            code: "NOT_FOUND",
+          },
+          404,
+        );
+      }
+    },
+  );
+
+  app.post(
+    "/v1/workflows/:slug/activate",
+    requireScope("workflows:write"),
+    async (c) => {
+      const body = await c.req.json<{
+        migration?: Record<string, string>;
+        activated_by?: string;
+      }>();
+      const actor = c.get("actor");
+      try {
+        const result = await deps.service.activateWorkflow(param(c, "slug"), {
+          migration: body.migration,
+          activated_by: body.activated_by ?? actor.name,
+        });
+        audit(c, {
+          action: "workflow.activate",
+          resourceType: "workflow",
+          resourceId: result.workflow.slug,
+          meta: { migrated_tickets: result.migrated_tickets },
+        });
+        return c.json({
+          ...mapWorkflow(result.workflow),
+          workflow_document: result.workflow_document,
+          migrated_tickets: result.migrated_tickets,
+          aurora_version_id: result.aurora_version_id,
+          stages: result.workflow_document.stages,
+          agent_policy: result.workflow_document.agent_policy,
+        });
+      } catch (error) {
+        if (error instanceof WorkflowValidationError) {
+          return c.json(
+            {
+              message: error.message,
+              code: "VALIDATION",
+              issues: error.issues,
+            },
+            400,
+          );
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.get(
+    "/v1/workflows/:slug/versions",
+    requireScope("workflows:read"),
+    async (c) => {
+      const versions = await deps.service.listWorkflowVersions(param(c, "slug"));
+      return c.json(
+        versions.map((v) => ({
+          id: v.id,
+          label: v.label,
+          source: v.source,
+          createdAt: v.createdAt,
+        })),
+      );
+    },
+  );
+
+  app.post(
+    "/v1/workflows/:slug/versions/:versionId/restore",
+    requireScope("workflows:write"),
+    async (c) => {
+      const result = await deps.service.restoreWorkflowVersion(
+        param(c, "slug"),
+        param(c, "versionId"),
+      );
       audit(c, {
-        action: "workflow.update",
+        action: "workflow.restore_version",
         resourceType: "workflow",
-        resourceId: workflow.slug,
+        resourceId: result.workflow.slug,
+        meta: { versionId: param(c, "versionId") },
       });
       return c.json({
-        ...mapWorkflow(workflow),
-        stages: doc.stages,
-        agent_policy: doc.agent_policy,
-        workflow_document: doc,
+        ...mapWorkflow(result.workflow),
+        workflow_document: result.workflow_document,
+        restored_from: {
+          id: result.restored_from.id,
+          label: result.restored_from.label,
+          createdAt: result.restored_from.createdAt,
+        },
       });
+    },
+  );
+
+  app.post(
+    "/v1/workflows/:slug/templates/apply",
+    requireScope("workflows:write"),
+    async (c) => {
+      const body = await c.req.json<{
+        template_slug: string;
+        title?: string;
+        description?: string;
+        priority?: string;
+        mode?: "fill_empty" | "confirm_overwrite" | "merge_headings";
+        confirmed?: boolean;
+      }>();
+      if (!body?.template_slug?.trim()) {
+        return c.json(
+          { message: "template_slug is required", code: "VALIDATION" },
+          400,
+        );
+      }
+      try {
+        const templates = await deps.service.getWorkflowTemplates(
+          param(c, "slug"),
+        );
+        const template = templates.find((t) => t.slug === body.template_slug);
+        if (!template) {
+          return c.json(
+            { message: "Template not found", code: "NOT_FOUND" },
+            404,
+          );
+        }
+        const applied = deps.service.applyWorkflowTicketTemplate(
+          template,
+          {
+            title: body.title,
+            description: body.description,
+            priority: body.priority,
+          },
+          {
+            mode: body.mode ?? "fill_empty",
+            confirmed: body.confirmed,
+          },
+        );
+        return c.json(applied);
+      } catch (error) {
+        return c.json(
+          {
+            message: error instanceof Error ? error.message : String(error),
+            code: "VALIDATION",
+          },
+          400,
+        );
+      }
     },
   );
 

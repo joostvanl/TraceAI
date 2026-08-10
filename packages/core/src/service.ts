@@ -74,6 +74,24 @@ import {
   type SearchFilters,
   type SearchHit,
 } from "./insights.js";
+import {
+  applyTicketTemplate,
+  canvasToPendingDraft,
+  computeMigrationImpact,
+  documentToCanvas,
+  effectiveEditableDocument,
+  summarizeWorkflowBehaviour,
+  validateMigrationMap,
+  validateWorkflowDocument,
+  WorkflowValidationError,
+  type ApplyTemplateMode,
+  type StageMigrationMap,
+  type TicketTemplate,
+  type WorkflowCanvasModel,
+  type WorkflowMigrationImpact,
+} from "./workflow-editor.js";
+
+export { WorkflowValidationError } from "./workflow-editor.js";
 
 export type TraceServiceOptions = AuroraClientConfig & {
   websiteId?: string;
@@ -300,18 +318,43 @@ export class TraceService {
     let nextDoc: WorkflowDocument | null = null;
     if (input.document) {
       nextDoc = {
-        version: input.document.version ?? 2,
+        version: input.document.version ?? current.version ?? 2,
         agent_policy: input.document.agent_policy ?? current.agent_policy,
         stages: input.document.stages?.length
           ? input.document.stages
           : current.stages,
+        editor_layout:
+          input.document.editor_layout !== undefined
+            ? input.document.editor_layout
+            : current.editor_layout,
+        ticket_templates:
+          input.document.ticket_templates !== undefined
+            ? input.document.ticket_templates
+            : current.ticket_templates,
+        pending:
+          input.document.pending !== undefined
+            ? input.document.pending
+            : current.pending,
       };
     } else if (input.stages || input.agent_policy) {
       nextDoc = {
         version: 2,
         agent_policy: input.agent_policy ?? current.agent_policy,
         stages: input.stages ?? current.stages,
+        editor_layout: current.editor_layout,
+        ticket_templates: current.ticket_templates,
+        pending: current.pending,
       };
+    }
+    if (nextDoc) {
+      const issues = validateWorkflowDocument({
+        stages: nextDoc.pending?.stages ?? nextDoc.stages,
+        agent_policy: nextDoc.pending?.agent_policy ?? nextDoc.agent_policy,
+      });
+      // Direct live updates must be valid; pending drafts are validated on saveDraft/activate.
+      if (!nextDoc.pending && issues.length) {
+        throw new WorkflowValidationError(issues);
+      }
     }
     const updated = await this.client.updateEntry<Workflow>("workflow", workflow.id, {
       fields: {
@@ -323,6 +366,252 @@ export class TraceService {
     });
     await this.ensurePublished("workflow", updated);
     return updated;
+  }
+
+  /**
+   * Save a visual-editor draft into `pending` without changing live stages.
+   * Creates an Aurora entry version checkpoint of the current entry first.
+   */
+  async saveWorkflowDraft(
+    slug: string,
+    input: {
+      canvas?: WorkflowCanvasModel;
+      pending?: {
+        agent_policy: WorkflowAgentPolicy;
+        stages: WorkflowStage[];
+        editor_layout?: WorkflowDocument["editor_layout"];
+        ticket_templates?: TicketTemplate[];
+      };
+      saved_by?: string;
+      name?: string;
+    },
+  ): Promise<{
+    workflow: Workflow;
+    workflow_document: WorkflowDocument;
+    aurora_version_id: string | null;
+  }> {
+    await this.ensureReady();
+    const workflow = await this.client.getEntryBySlug<Workflow>("workflow", slug);
+    if (!workflow) throw new Error(`Workflow not found: ${slug}`);
+    const current = parseWorkflowDocument(workflow.fields.stages_json);
+    const pending = input.pending
+      ? {
+          ...input.pending,
+          saved_at: new Date().toISOString(),
+          saved_by: input.saved_by,
+        }
+      : canvasToPendingDraft(
+          input.canvas ?? documentToCanvas(current),
+          { saved_by: input.saved_by },
+        );
+    const issues = validateWorkflowDocument(pending);
+    if (issues.length) throw new WorkflowValidationError(issues);
+
+    let aurora_version_id: string | null = null;
+    try {
+      const version = await this.client.createEntryVersion("workflow", workflow.id, {
+        label: `draft-save ${new Date().toISOString()}`,
+      });
+      aurora_version_id = version.id;
+    } catch {
+      // Aurora versions are best-effort; draft save still proceeds.
+      aurora_version_id = null;
+    }
+
+    const nextDoc: WorkflowDocument = {
+      ...current,
+      version: Math.max(current.version || 2, 3),
+      pending,
+      editor_layout: pending.editor_layout ?? current.editor_layout,
+      ticket_templates: pending.ticket_templates ?? current.ticket_templates,
+    };
+    const updated = await this.client.updateEntry<Workflow>("workflow", workflow.id, {
+      fields: {
+        ...(input.name != null ? { name: input.name } : {}),
+        stages_json: serializeWorkflowDocument(nextDoc),
+      },
+    });
+    await this.ensurePublished("workflow", updated);
+    return {
+      workflow: updated,
+      workflow_document: parseWorkflowDocument(updated.fields.stages_json),
+      aurora_version_id,
+    };
+  }
+
+  async previewWorkflowActivation(slug: string): Promise<{
+    workflow_document: WorkflowDocument;
+    impact: WorkflowMigrationImpact;
+    validation_issues: ReturnType<typeof validateWorkflowDocument>;
+    behaviour_summary: string;
+  }> {
+    await this.ensureReady();
+    const result = await this.getWorkflow(slug);
+    if (!result) throw new Error(`Workflow not found: ${slug}`);
+    const doc = result.workflow_document;
+    const editable = effectiveEditableDocument(doc);
+    const tickets = await this.listTickets({
+      project: result.workflow.fields.project,
+    });
+    const hits = tickets
+      .filter((t) => t.fields.workflow === result.workflow.slug)
+      .map((t) => ({
+        slug: t.slug,
+        ticket_key: t.fields.ticket_key ?? null,
+        title: t.fields.title,
+        stage: t.fields.stage,
+      }));
+    const impact = computeMigrationImpact(doc.stages, editable.stages, hits);
+    const validation_issues = validateWorkflowDocument(editable);
+    return {
+      workflow_document: doc,
+      impact,
+      validation_issues,
+      behaviour_summary: summarizeWorkflowBehaviour(editable),
+    };
+  }
+
+  /**
+   * Promote pending draft to live stages. Requires migration map when tickets
+   * sit on removed stages. Creates an Aurora version checkpoint before apply.
+   */
+  async activateWorkflow(
+    slug: string,
+    input: {
+      migration?: StageMigrationMap;
+      activated_by?: string;
+    } = {},
+  ): Promise<{
+    workflow: Workflow;
+    workflow_document: WorkflowDocument;
+    migrated_tickets: number;
+    aurora_version_id: string | null;
+  }> {
+    await this.ensureReady();
+    const workflow = await this.client.getEntryBySlug<Workflow>("workflow", slug);
+    if (!workflow) throw new Error(`Workflow not found: ${slug}`);
+    const current = parseWorkflowDocument(workflow.fields.stages_json);
+    const editable = effectiveEditableDocument(current);
+    const issues = validateWorkflowDocument(editable);
+    if (issues.length) throw new WorkflowValidationError(issues);
+
+    const tickets = await this.listTickets({
+      project: workflow.fields.project,
+    });
+    const workflowTickets = tickets.filter(
+      (t) => t.fields.workflow === workflow.slug,
+    );
+    const hits = workflowTickets.map((t) => ({
+      slug: t.slug,
+      ticket_key: t.fields.ticket_key ?? null,
+      title: t.fields.title,
+      stage: t.fields.stage,
+    }));
+    const impact = computeMigrationImpact(current.stages, editable.stages, hits);
+    const migration = input.migration ?? {};
+    const migrationIssues = validateMigrationMap(
+      impact,
+      migration,
+      editable.stages.map((s) => s.key),
+    );
+    if (migrationIssues.length) {
+      throw new WorkflowValidationError(migrationIssues);
+    }
+
+    let aurora_version_id: string | null = null;
+    try {
+      const version = await this.client.createEntryVersion("workflow", workflow.id, {
+        label: `pre-activate ${new Date().toISOString()}`,
+      });
+      aurora_version_id = version.id;
+    } catch {
+      aurora_version_id = null;
+    }
+
+    let migrated_tickets = 0;
+    for (const [fromStage, toStage] of Object.entries(migration)) {
+      const moving = workflowTickets.filter((t) => t.fields.stage === fromStage);
+      for (const ticket of moving) {
+        await this.client.updateEntry<Ticket>("ticket", ticket.id, {
+          fields: {
+            stage: toStage,
+            stage_entered_at: new Date().toISOString(),
+            ...CLEARED_REVIEW_FIELDS,
+          },
+        });
+        await this.ensurePublished("ticket", ticket);
+        migrated_tickets += 1;
+      }
+    }
+
+    const nextDoc: WorkflowDocument = {
+      version: Math.max(current.version || 2, 3),
+      agent_policy: editable.agent_policy,
+      stages: editable.stages,
+      editor_layout: editable.editor_layout,
+      ticket_templates: editable.ticket_templates,
+      pending: null,
+    };
+    const updated = await this.client.updateEntry<Workflow>("workflow", workflow.id, {
+      fields: {
+        stages_json: serializeWorkflowDocument(nextDoc),
+      },
+    });
+    await this.ensurePublished("workflow", updated);
+    return {
+      workflow: updated,
+      workflow_document: parseWorkflowDocument(updated.fields.stages_json),
+      migrated_tickets,
+      aurora_version_id,
+    };
+  }
+
+  async listWorkflowVersions(slug: string) {
+    await this.ensureReady();
+    const workflow = await this.client.getEntryBySlug<Workflow>("workflow", slug);
+    if (!workflow) throw new Error(`Workflow not found: ${slug}`);
+    return this.client.listEntryVersions("workflow", workflow.id);
+  }
+
+  async restoreWorkflowVersion(slug: string, versionId: string) {
+    await this.ensureReady();
+    const workflow = await this.client.getEntryBySlug<Workflow>("workflow", slug);
+    if (!workflow) throw new Error(`Workflow not found: ${slug}`);
+    // Snapshot current before restore (Aurora also snapshots on restore).
+    try {
+      await this.client.createEntryVersion("workflow", workflow.id, {
+        label: `pre-restore ${new Date().toISOString()}`,
+      });
+    } catch {
+      // ignore
+    }
+    const restored = await this.client.restoreEntryVersion(
+      "workflow",
+      workflow.id,
+      versionId,
+    );
+    const entry = restored.entry as Workflow;
+    await this.ensurePublished("workflow", entry);
+    return {
+      workflow: entry,
+      workflow_document: parseWorkflowDocument(entry.fields.stages_json),
+      restored_from: restored.restoredFrom,
+    };
+  }
+
+  applyWorkflowTicketTemplate(
+    template: TicketTemplate,
+    current: { title?: string; description?: string; priority?: Priority | string },
+    options: { mode: ApplyTemplateMode; confirmed?: boolean },
+  ) {
+    return applyTicketTemplate(template, current, options);
+  }
+
+  async getWorkflowTemplates(slug: string): Promise<TicketTemplate[]> {
+    const result = await this.getWorkflow(slug);
+    if (!result) throw new Error(`Workflow not found: ${slug}`);
+    const editable = effectiveEditableDocument(result.workflow_document);
+    return editable.ticket_templates ?? [];
   }
 
   async listTickets(input: {

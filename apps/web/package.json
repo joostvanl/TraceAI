@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@traceai/core": "workspace:*",
+    "@xyflow/react": "^12.11.2",
     "next": "^15.2.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

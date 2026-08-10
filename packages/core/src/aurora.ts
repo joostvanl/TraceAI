@@ -193,6 +193,61 @@ export class AuroraManagementClient {
     );
   }
 
+  unpublishEntry(apiId: string, entryId: string) {
+    return this.request(
+      `/api/v1/admin/content-types/${apiId}/entries/${entryId}/unpublish`,
+      { method: "POST" },
+    );
+  }
+
+  listEntryVersions(apiId: string, entryId: string) {
+    return this.request<
+      Array<{
+        id: string;
+        entryId: string;
+        label: string | null;
+        source: string;
+        snapshot: unknown;
+        createdAt: string;
+      }>
+    >(`/api/v1/admin/content-types/${apiId}/entries/${entryId}/versions`);
+  }
+
+  createEntryVersion(
+    apiId: string,
+    entryId: string,
+    input?: { label?: string },
+  ) {
+    return this.request<{
+      id: string;
+      entryId: string;
+      label: string | null;
+      source: string;
+      snapshot: unknown;
+      createdAt: string;
+    }>(`/api/v1/admin/content-types/${apiId}/entries/${entryId}/versions`, {
+      method: "POST",
+      body: JSON.stringify(input ?? {}),
+    });
+  }
+
+  restoreEntryVersion(apiId: string, entryId: string, versionId: string) {
+    return this.request<{
+      entry: unknown;
+      restoredFrom: {
+        id: string;
+        entryId: string;
+        label: string | null;
+        source: string;
+        snapshot: unknown;
+        createdAt: string;
+      };
+    }>(
+      `/api/v1/admin/content-types/${apiId}/entries/${entryId}/versions/${versionId}/restore`,
+      { method: "POST" },
+    );
+  }
+
   deleteEntry(apiId: string, entryId: string) {
     return this.request(
       `/api/v1/admin/content-types/${apiId}/entries/${entryId}`,

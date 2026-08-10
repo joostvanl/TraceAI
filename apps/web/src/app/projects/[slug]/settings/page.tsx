@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import type { WorkflowDocument } from "@traceai/core";
 import { ProjectMembersPanel } from "@/components/ProjectMembersPanel";
+import { WorkflowEditorPanel } from "@/components/WorkflowEditorPanel";
 import { getProject } from "@/lib/cms";
 import { getSessionIdentity, isLoginConfigured } from "@/lib/session";
 import { createTraceServerClient } from "@/lib/traceai-server";
@@ -33,6 +35,12 @@ export default async function ProjectSettingsPage({ params }: PageProps) {
     display_name: string;
   }> = [];
   let loadError: string | null = null;
+  let workflowPayload: {
+    slug: string;
+    name: string;
+    project: string;
+    workflow_document: WorkflowDocument;
+  } | null = null;
 
   try {
     const client = createTraceServerClient({
@@ -51,6 +59,21 @@ export default async function ProjectSettingsPage({ params }: PageProps) {
         display_name: u.display_name,
       }));
     }
+    const workflowSlug = project.fields.default_workflow;
+    if (workflowSlug) {
+      const workflow = (await client.getWorkflow(workflowSlug)) as {
+        slug: string;
+        name: string;
+        project: string;
+        workflow_document: WorkflowDocument;
+      };
+      workflowPayload = {
+        slug: workflow.slug,
+        name: workflow.name,
+        project: workflow.project,
+        workflow_document: workflow.workflow_document,
+      };
+    }
   } catch (error) {
     loadError = error instanceof Error ? error.message : String(error);
   }
@@ -65,8 +88,19 @@ export default async function ProjectSettingsPage({ params }: PageProps) {
         <span>Settings</span>
       </nav>
       <h1>Projectinstellingen</h1>
-      <p className="muted">Leden en rollen (admin / editor / viewer).</p>
+      <p className="muted">
+        Leden/rollen en visuele workflow-editor (stages als blokken, transitions
+        als pijlen).
+      </p>
       {loadError ? <p className="form-error">{loadError}</p> : null}
+
+      {workflowPayload ? (
+        <WorkflowEditorPanel projectSlug={slug} initial={workflowPayload} />
+      ) : (
+        <p className="muted">Geen default workflow geconfigureerd.</p>
+      )}
+
+      <h2>Leden</h2>
       <ProjectMembersPanel
         projectSlug={slug}
         members={members}

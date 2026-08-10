@@ -90,10 +90,47 @@ export type WorkflowAgentPolicy = {
   require_tokens_used_on_transition?: boolean;
 };
 
+export type WorkflowEditorLayoutNode = {
+  id: string;
+  x: number;
+  y: number;
+};
+
+export type WorkflowEditorLayout = {
+  nodes: WorkflowEditorLayoutNode[];
+};
+
+export type TicketTemplate = {
+  slug: string;
+  name: string;
+  description_headings?: string[];
+  default_priority?: Priority;
+  seed_body?: string;
+};
+
+/** Draft awaiting activate — live board keeps reading top-level stages. */
+export type WorkflowPendingDraft = {
+  agent_policy: WorkflowAgentPolicy;
+  stages: WorkflowStage[];
+  editor_layout?: WorkflowEditorLayout;
+  ticket_templates?: TicketTemplate[];
+  saved_at?: string;
+  saved_by?: string;
+};
+
 export type WorkflowDocument = {
   version: number;
   agent_policy: WorkflowAgentPolicy;
   stages: WorkflowStage[];
+  /** Canvas positions for the visual editor (Aurora stores this inside stages_json). */
+  editor_layout?: WorkflowEditorLayout;
+  /** Reusable ticket description templates for this workflow. */
+  ticket_templates?: TicketTemplate[];
+  /**
+   * Draft awaiting activate. Live board/agents keep reading top-level
+   * `stages` / `agent_policy` until activate merges `pending`.
+   */
+  pending?: WorkflowPendingDraft | null;
 };
 
 export type AuroraEntry<TFields extends Record<string, unknown> = Record<string, unknown>> = {
@@ -556,6 +593,64 @@ function parseAgentPolicy(raw: unknown): WorkflowAgentPolicy {
   };
 }
 
+function parseEditorLayout(raw: unknown): WorkflowEditorLayout | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const nodesRaw = (raw as { nodes?: unknown }).nodes;
+  if (!Array.isArray(nodesRaw)) return undefined;
+  const nodes = nodesRaw
+    .filter((n): n is Record<string, unknown> => !!n && typeof n === "object")
+    .map((n) => ({
+      id: String(n.id ?? ""),
+      x: typeof n.x === "number" ? n.x : 0,
+      y: typeof n.y === "number" ? n.y : 0,
+    }))
+    .filter((n) => n.id.length > 0);
+  return nodes.length ? { nodes } : undefined;
+}
+
+function parseTicketTemplates(raw: unknown): TicketTemplate[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const templates = raw
+    .filter((t): t is Record<string, unknown> => !!t && typeof t === "object")
+    .map((t) => {
+      const slug = String(t.slug ?? "").trim();
+      const name = String(t.name ?? slug).trim();
+      const priority =
+        t.default_priority === "low" ||
+        t.default_priority === "medium" ||
+        t.default_priority === "high"
+          ? t.default_priority
+          : undefined;
+      return {
+        slug,
+        name,
+        description_headings: Array.isArray(t.description_headings)
+          ? t.description_headings.map((h) => String(h))
+          : undefined,
+        default_priority: priority,
+        seed_body: t.seed_body != null ? String(t.seed_body) : undefined,
+      } satisfies TicketTemplate;
+    })
+    .filter((t) => t.slug.length > 0 && t.name.length > 0);
+  return templates.length ? templates : undefined;
+}
+
+function parsePendingDraft(raw: unknown): WorkflowPendingDraft | null | undefined {
+  if (raw === null) return null;
+  if (!raw || typeof raw !== "object") return undefined;
+  const obj = raw as Record<string, unknown>;
+  const stages = parseStageList(obj.stages);
+  if (!stages.length) return undefined;
+  return {
+    agent_policy: parseAgentPolicy(obj.agent_policy),
+    stages,
+    editor_layout: parseEditorLayout(obj.editor_layout),
+    ticket_templates: parseTicketTemplates(obj.ticket_templates),
+    saved_at: obj.saved_at != null ? String(obj.saved_at) : undefined,
+    saved_by: obj.saved_by != null ? String(obj.saved_by) : undefined,
+  };
+}
+
 /**
  * Parses workflow `stages_json`.
  * Supports legacy array-of-stages OR document `{ version, agent_policy, stages }`.
@@ -582,6 +677,9 @@ export function parseWorkflowDocument(
         version: typeof obj.version === "number" ? obj.version : 2,
         agent_policy: parseAgentPolicy(obj.agent_policy),
         stages: stages.length ? stages : DEFAULT_STAGES,
+        editor_layout: parseEditorLayout(obj.editor_layout),
+        ticket_templates: parseTicketTemplates(obj.ticket_templates),
+        pending: parsePendingDraft(obj.pending),
       };
     }
   } catch {

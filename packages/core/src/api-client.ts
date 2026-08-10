@@ -260,6 +260,55 @@ export class TraceApiClient {
     });
   }
 
+  saveWorkflowDraft(slug: string, body: Record<string, unknown>) {
+    return this.request<unknown>(
+      `/v1/workflows/${encodeURIComponent(slug)}/draft`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
+  }
+
+  previewWorkflowActivation(slug: string) {
+    return this.request<unknown>(
+      `/v1/workflows/${encodeURIComponent(slug)}/activation-preview`,
+    );
+  }
+
+  activateWorkflow(slug: string, body: Record<string, unknown> = {}) {
+    return this.request<unknown>(
+      `/v1/workflows/${encodeURIComponent(slug)}/activate`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
+  }
+
+  listWorkflowVersions(slug: string) {
+    return this.request<unknown[]>(
+      `/v1/workflows/${encodeURIComponent(slug)}/versions`,
+    );
+  }
+
+  restoreWorkflowVersion(slug: string, versionId: string) {
+    return this.request<unknown>(
+      `/v1/workflows/${encodeURIComponent(slug)}/versions/${encodeURIComponent(versionId)}/restore`,
+      { method: "POST" },
+    );
+  }
+
+  applyWorkflowTemplate(slug: string, body: Record<string, unknown>) {
+    return this.request<unknown>(
+      `/v1/workflows/${encodeURIComponent(slug)}/templates/apply`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
+  }
+
   listWikiPages(project: string) {
     const params = new URLSearchParams({ project });
     return this.request<unknown[]>(`/v1/wiki-pages?${params}`);
