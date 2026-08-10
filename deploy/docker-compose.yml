@@ -15,6 +15,7 @@ services:
       # Durable, append-only ticket-event store (persisted + shared across
       # workers on this volume so SSE replay/fan-out survives restarts).
       TRACEAI_EVENTS_DB: /data/traceai-events.sqlite
+      TRACEAI_NOTIFICATIONS_DB: /data/traceai-notifications.sqlite
       # Same as web — verifies signed X-TraceAI-Human-Identity headers.
       TRACEAI_SESSION_SECRET: ${TRACEAI_SESSION_SECRET:-}
       TRACEAI_HUMAN_PROXY_SECRET: ${TRACEAI_HUMAN_PROXY_SECRET:-}

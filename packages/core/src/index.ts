@@ -5,3 +5,4 @@ export * from "./api-client.js";
 export * from "./insights.js";
 export * from "./ticket-links.js";
 export * from "./roles.js";
+export * from "./review-inbox.js";

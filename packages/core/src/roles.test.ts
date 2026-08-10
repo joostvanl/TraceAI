@@ -5,6 +5,7 @@ import {
   membershipSlug,
   requiredRoleForAction,
   roleAtLeast,
+  wouldRemoveLastPlatformAdmin,
 } from "./roles.js";
 
 describe("roles", () => {
@@ -30,5 +31,33 @@ describe("roles", () => {
   it("builds URL-safe membership slugs", () => {
     assert.equal(membershipSlug("traceai", "joost"), "traceai-member-joost");
     assert.doesNotMatch(membershipSlug("traceai", "joost"), /--/);
+  });
+
+  it("blocks removing the last active platform admin", () => {
+    const users = [
+      { slug: "a", status: "active", is_platform_admin: true },
+      { slug: "b", status: "active", is_platform_admin: false },
+    ];
+    assert.equal(
+      wouldRemoveLastPlatformAdmin(users, "a", { status: "disabled" }),
+      true,
+    );
+    assert.equal(
+      wouldRemoveLastPlatformAdmin(users, "a", { is_platform_admin: false }),
+      true,
+    );
+    assert.equal(
+      wouldRemoveLastPlatformAdmin(users, "b", { status: "disabled" }),
+      false,
+    );
+
+    const twoAdmins = [
+      ...users,
+      { slug: "c", status: "active", is_platform_admin: true },
+    ];
+    assert.equal(
+      wouldRemoveLastPlatformAdmin(twoAdmins, "a", { status: "disabled" }),
+      false,
+    );
   });
 });

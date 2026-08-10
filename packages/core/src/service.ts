@@ -57,8 +57,13 @@ import {
   isProjectRole,
   membershipSlug,
   roleAtLeast,
+  wouldRemoveLastPlatformAdmin,
   type ProjectRole,
 } from "./roles.js";
+import {
+  buildReviewInboxItems,
+  type ReviewInboxItem,
+} from "./review-inbox.js";
 import {
   computeProjectInsights,
   paginateItems,
@@ -326,11 +331,10 @@ export class TraceService {
     parent?: string | null;
   }): Promise<Ticket[]> {
     await this.ensureReady();
-    const result = await this.client.listEntries<Ticket>("ticket", {
+    const items = await this.listAllEntries<Ticket>("ticket", {
       status: "published",
-      limit: 100,
     });
-    return result.items
+    return items
       .filter((t) => t.fields.project === input.project)
       .filter((t) => (input.stage ? t.fields.stage === input.stage : true))
       .filter((t) => {
@@ -342,6 +346,55 @@ export class TraceService {
         return parent === input.parent;
       })
       .sort((a, b) => (a.fields.sort_order ?? 0) - (b.fields.sort_order ?? 0));
+  }
+
+  /**
+   * Personal review inbox for a human: gated tickets across projects the user
+   * can access (membership editor+ not required here — callers filter; this
+   * returns all gated tickets for the given project set).
+   */
+  async listReviewInbox(projectSlugs: string[]): Promise<ReviewInboxItem[]> {
+    await this.ensureReady();
+    const items: ReviewInboxItem[] = [];
+    for (const projectSlug of projectSlugs) {
+      const project = await this.getProject(projectSlug);
+      if (!project) continue;
+      const stages = project.stages;
+      const tickets = await this.listTickets({ project: projectSlug });
+      items.push(...buildReviewInboxItems(tickets, stages, projectSlug));
+    }
+    return items.sort((a, b) => {
+      const aAt = a.ticket.fields.stage_entered_at ?? "";
+      const bAt = b.ticket.fields.stage_entered_at ?? "";
+      return bAt.localeCompare(aAt);
+    });
+  }
+
+  /** Active project members with role >= editor (notification recipients). */
+  async listReviewNotificationRecipients(
+    projectSlug: string,
+  ): Promise<string[]> {
+    const memberships = await this.listProjectMemberships(projectSlug);
+    const recipients: string[] = [];
+    for (const m of memberships) {
+      if (!roleAtLeast(isProjectRole(m.fields.role) ? m.fields.role : null, "editor")) {
+        continue;
+      }
+      const user = await this.getTraceaiUser(m.fields.user);
+      if (!user || user.fields.status !== "active") continue;
+      recipients.push(user.slug);
+    }
+    // Platform admins always hear about gates even without membership.
+    for (const user of await this.listTraceaiUsers()) {
+      if (
+        user.fields.is_platform_admin === true &&
+        user.fields.status === "active" &&
+        !recipients.includes(user.slug)
+      ) {
+        recipients.push(user.slug);
+      }
+    }
+    return recipients;
   }
 
   /**
@@ -1534,6 +1587,30 @@ export class TraceService {
     await this.ensureReady();
     const user = await this.getTraceaiUser(slug);
     if (!user) throw new Error(`User not found: ${slug}`);
+
+    const nextStatus =
+      input.status != null ? input.status.trim() || "active" : undefined;
+    if (
+      wouldRemoveLastPlatformAdmin(
+        (await this.listTraceaiUsers()).map((u) => ({
+          slug: u.slug,
+          status: u.fields.status,
+          is_platform_admin: u.fields.is_platform_admin === true,
+        })),
+        slug,
+        {
+          ...(nextStatus != null ? { status: nextStatus } : {}),
+          ...(input.is_platform_admin !== undefined
+            ? { is_platform_admin: input.is_platform_admin }
+            : {}),
+        },
+      )
+    ) {
+      throw new Error(
+        "Cannot disable or demote the last active platform admin",
+      );
+    }
+
     const fields: Record<string, unknown> = {};
     if (input.display_name != null) {
       fields.display_name = input.display_name.trim() || user.fields.username;
@@ -1541,8 +1618,8 @@ export class TraceService {
     if (input.email !== undefined) {
       fields.email = input.email?.trim() || null;
     }
-    if (input.status != null) {
-      fields.status = input.status.trim() || "active";
+    if (nextStatus != null) {
+      fields.status = nextStatus;
     }
     if (input.is_platform_admin !== undefined) {
       fields.is_platform_admin = input.is_platform_admin === true;

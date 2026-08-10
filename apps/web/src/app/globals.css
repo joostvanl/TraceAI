@@ -765,6 +765,19 @@ h2 {
   cursor: not-allowed;
 }
 
+.btn-secondary {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--muted);
+}
+
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
 .btn-small {
   padding: 0.3rem 0.7rem;
   font-size: 0.82rem;
@@ -1024,6 +1037,29 @@ h2 {
 .auth-admin-link {
   margin-right: 0.75rem;
   font-size: 0.9rem;
+}
+
+.inbox-badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  min-width: 1.25rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.inbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.inbox-ticket {
+  scroll-margin-top: 1.5rem;
 }
 
 @media (max-width: 640px) {

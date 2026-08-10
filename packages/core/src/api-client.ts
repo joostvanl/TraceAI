@@ -387,4 +387,27 @@ export class TraceApiClient {
       { asHuman: Boolean(this.humanIdentityHeader) },
     );
   }
+
+  listReviewInbox() {
+    return this.request<{
+      awaiting_verdict: Array<Record<string, unknown>>;
+      awaiting_agent: Array<Record<string, unknown>>;
+    }>("/v1/inbox/reviews", {}, { asHuman: Boolean(this.humanIdentityHeader) });
+  }
+
+  listNotifications(options: { unreadOnly?: boolean } = {}) {
+    const q = options.unreadOnly ? "?unread=1" : "";
+    return this.request<{
+      unread_count: number;
+      items: Array<Record<string, unknown>>;
+    }>(`/v1/notifications${q}`, {}, { asHuman: Boolean(this.humanIdentityHeader) });
+  }
+
+  markNotificationsRead(body: { id?: number; all?: boolean }) {
+    return this.request<{ ok: true; marked: number }>(
+      "/v1/notifications/mark-read",
+      { method: "POST", body: JSON.stringify(body) },
+      { asHuman: Boolean(this.humanIdentityHeader) },
+    );
+  }
 }

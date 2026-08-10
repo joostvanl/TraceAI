@@ -54,6 +54,44 @@ export function requiredRoleForAction(
  * Deterministic entry slug for a membership. Aurora rejects `--`, so the parts
  * are joined with a single-dash keyword instead.
  */
+/**
+ * Deterministic entry slug for a membership. Aurora rejects `--`, so the parts
+ * are joined with a single-dash keyword instead.
+ */
 export function membershipSlug(projectSlug: string, userSlug: string): string {
   return `${projectSlug}-member-${userSlug}`;
+}
+
+type PlatformAdminCandidate = {
+  slug: string;
+  status: string;
+  is_platform_admin?: boolean;
+};
+
+function isActivePlatformAdmin(user: PlatformAdminCandidate): boolean {
+  return user.is_platform_admin === true && user.status === "active";
+}
+
+/**
+ * True when applying `next` to `targetSlug` would leave zero active
+ * platform admins (last-admin lockout guard).
+ */
+export function wouldRemoveLastPlatformAdmin(
+  users: PlatformAdminCandidate[],
+  targetSlug: string,
+  next: { status?: string; is_platform_admin?: boolean },
+): boolean {
+  const target = users.find((u) => u.slug === targetSlug);
+  if (!target || !isActivePlatformAdmin(target)) return false;
+
+  const nextStatus = next.status ?? target.status;
+  const nextIsAdmin =
+    next.is_platform_admin !== undefined
+      ? next.is_platform_admin
+      : target.is_platform_admin === true;
+  if (nextIsAdmin && nextStatus === "active") return false;
+
+  return !users.some(
+    (u) => u.slug !== targetSlug && isActivePlatformAdmin(u),
+  );
 }

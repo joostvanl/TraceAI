@@ -12,6 +12,7 @@ import {
   parseWorkflowDocument,
   requiredRoleForAction,
   type ProjectRole,
+  type Ticket,
 } from "@traceai/core";
 import {
   getEventsAfter,
@@ -33,6 +34,7 @@ import {
   requestIdMiddleware,
   type AppVariables,
 } from "./middleware.js";
+import { getNotificationStore } from "./notifications.js";
 
 const HUMAN_PROXY_HEADER = "x-traceai-human-proxy";
 
@@ -92,6 +94,55 @@ async function enforceProjectRole(
   } catch (error) {
     return error instanceof Error ? error.message : "Forbidden";
   }
+}
+
+async function notifyReviewRequested(
+  service: TraceService,
+  ticket: Ticket,
+  options: { excludeRecipient?: string | null; type?: "review_requested" | "review_cascaded" },
+) {
+  const project = await service.getProject(ticket.fields.project);
+  const stage = project?.stages.find((s) => s.key === ticket.fields.stage);
+  if (!stage?.agent?.require_human_approval_on_exit) return;
+
+  const store = getNotificationStore();
+  const recipients = await service.listReviewNotificationRecipients(
+    ticket.fields.project,
+  );
+  const deeplink = `/inbox#${ticket.slug}`;
+  for (const recipient of recipients) {
+    if (options.excludeRecipient && recipient === options.excludeRecipient) {
+      continue;
+    }
+    store.notify({
+      recipient,
+      type: options.type ?? "review_requested",
+      project: ticket.fields.project,
+      ticket_slug: ticket.slug,
+      ticket_key: ticket.fields.ticket_key ?? null,
+      title: ticket.fields.title,
+      stage: ticket.fields.stage,
+      deeplink,
+    });
+  }
+}
+
+async function projectsForHuman(
+  service: TraceService,
+  identity: HumanIdentity,
+): Promise<string[]> {
+  if (identity.is_platform_admin || identity.mode === "legacy") {
+    return (await service.listProjects()).map((p) => p.slug);
+  }
+  if (!identity.slug) return [];
+  const memberships = await service.listProjectMemberships();
+  return [
+    ...new Set(
+      memberships
+        .filter((m) => m.fields.user === identity.slug)
+        .map((m) => m.fields.project),
+    ),
+  ];
 }
 
 function mapTraceaiUser(
@@ -760,6 +811,13 @@ export function createApp(deps: {
           to_stage: ticket.fields.stage,
         }),
       );
+      // Scenario A/B: notify humans when an agent enters a gated stage.
+      if (!asHuman) {
+        const human = resolveHumanIdentity(c);
+        await notifyReviewRequested(deps.service, ticket, {
+          excludeRecipient: human?.slug ?? null,
+        });
+      }
       audit(c, {
         action: asHuman ? "ticket.human_transition" : "ticket.transition",
         resourceType: "ticket",
@@ -838,10 +896,12 @@ export function createApp(deps: {
     });
     const mapped = mapTicket(result.ticket);
     publishTicketEvent(ticketEventFromMapped("ticket.reviewed", mapped));
+    getNotificationStore().markTicketReviewRead(result.ticket.slug);
     for (const child of result.cascaded) {
       publishTicketEvent(
         ticketEventFromMapped("ticket.reviewed", mapTicket(child)),
       );
+      getNotificationStore().markTicketReviewRead(child.slug);
     }
     audit(c, {
       action: "ticket.review_verdict",
@@ -1255,6 +1315,110 @@ export function createApp(deps: {
         resourceId: membershipSlug(project, user),
       });
       return c.json({ ok: true as const });
+    },
+  );
+
+  app.get(
+    "/v1/inbox/reviews",
+    requireScope("tickets:read"),
+    async (c) => {
+      const human = resolveHumanIdentity(c);
+      if (!human) {
+        return c.json(
+          {
+            message: "Review inbox requires a signed-in human identity",
+            code: "HUMAN_ONLY",
+          },
+          403,
+        );
+      }
+      const projects = await projectsForHuman(deps.service, human);
+      const items = await deps.service.listReviewInbox(projects);
+      return c.json({
+        awaiting_verdict: items
+          .filter((i) => i.awaiting === "verdict")
+          .map((i) => ({
+            ...mapTicket(i.ticket),
+            stage_key: i.stage_key,
+            stage_name: i.stage_name,
+            awaiting: i.awaiting,
+          })),
+        awaiting_agent: items
+          .filter((i) => i.awaiting === "agent")
+          .map((i) => ({
+            ...mapTicket(i.ticket),
+            stage_key: i.stage_key,
+            stage_name: i.stage_name,
+            awaiting: i.awaiting,
+          })),
+      });
+    },
+  );
+
+  app.get(
+    "/v1/notifications",
+    requireScope("tickets:read"),
+    async (c) => {
+      const human = resolveHumanIdentity(c);
+      if (!human?.slug && human?.mode !== "legacy") {
+        return c.json(
+          { message: "Notifications require a personal user", code: "HUMAN_ONLY" },
+          403,
+        );
+      }
+      const recipient =
+        human!.slug ||
+        (human!.mode === "legacy" ? human!.user : null);
+      if (!recipient) {
+        return c.json(
+          { message: "Notifications require a personal user", code: "HUMAN_ONLY" },
+          403,
+        );
+      }
+      const unreadOnly = c.req.query("unread") === "1";
+      const store = getNotificationStore();
+      return c.json({
+        unread_count: store.unreadCount(recipient),
+        items: store.listForRecipient(recipient, { unreadOnly }),
+      });
+    },
+  );
+
+  app.post(
+    "/v1/notifications/mark-read",
+    requireScope("tickets:write"),
+    async (c) => {
+      const human = resolveHumanIdentity(c);
+      const recipient =
+        human?.slug ||
+        (human?.mode === "legacy" ? human.user : null);
+      if (!recipient) {
+        return c.json(
+          { message: "Notifications require a personal user", code: "HUMAN_ONLY" },
+          403,
+        );
+      }
+      const body = (await c.req
+        .json<{ id?: number; all?: boolean }>()
+        .catch(() => ({ id: undefined, all: undefined }))) as {
+        id?: number;
+        all?: boolean;
+      };
+      const store = getNotificationStore();
+      if (body.all) {
+        return c.json({ ok: true as const, marked: store.markAllRead(recipient) });
+      }
+      if (typeof body.id !== "number") {
+        return c.json(
+          { message: "id or all=true required", code: "VALIDATION" },
+          400,
+        );
+      }
+      const ok = store.markRead(recipient, body.id);
+      if (!ok) {
+        return c.json({ message: "Notification not found", code: "NOT_FOUND" }, 404);
+      }
+      return c.json({ ok: true as const, marked: 1 });
     },
   );
 
