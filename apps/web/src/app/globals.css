@@ -1039,6 +1039,11 @@ h2 {
   font-size: 0.9rem;
 }
 
+.auth-account-link {
+  margin-right: 0.75rem;
+  font-size: 0.9rem;
+}
+
 .auth-inbox-link {
   margin-right: 0.75rem;
   font-size: 0.9rem;
@@ -1061,6 +1066,43 @@ h2 {
   font-size: 0.72rem;
   font-weight: 600;
   line-height: 1;
+}
+
+.account-page {
+  max-width: 44rem;
+}
+
+.account-tokens {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.account-token-secret {
+  padding: 1rem 1.1rem;
+}
+
+.account-token-list h3 {
+  margin: 0 0 0.65rem;
+  font-size: 1rem;
+}
+
+.account-token-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.account-token-rows li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
 }
 
 .inbox-badge-lg {

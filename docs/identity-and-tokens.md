@@ -7,23 +7,43 @@
 | Agents (Cursor / Claude) | TraceAI personal token `trc_…` | User / agent config |
 | TraceAI API | Validates `trc_…`, resolves actor + scopes | TraceAI server |
 | Aurora CMS | Website management token or user PAT | TraceAI server only |
-| Web UI humans | Username + password in Aurora `app_login` / `default` | Managed in Aurora Admin; password hashed; verified via TraceAI → Aurora `verify-credentials` |
+| Web UI humans | Username + password in Aurora `traceai_user` (preferred) or legacy `app_login` / `default` | Managed via TraceAI Admin UI; password hashed in Aurora; verified via TraceAI → Aurora `verify-credentials` |
 
 Agents never receive Aurora credentials. Aurora is an implementation detail of storage.
 
 ### Web UI login
 
-- Content type: `app_login` with Aurora field types `username` and `password`.
-- Entry slug: `default`. Password reads as `{ "set": true }` (never plaintext/hash).
-- Web container holds `TRACEAI_TOKEN` + `TRACEAI_SESSION_SECRET` only; it never holds `AURORA_*` tokens.
-- Login flow: browser → `POST /api/auth/login` → TraceAI `POST /v1/ui/login/verify` → Aurora `POST .../verify-credentials` → HttpOnly session cookie.
+- Preferred: Aurora content type `traceai_user` (personal accounts).
+- Legacy fallback: `app_login` entry `default`.
+- Web container holds `TRACEAI_TOKEN` + `TRACEAI_SESSION_SECRET` (+ human proxy secret) only; it never holds `AURORA_*` tokens.
+- Login flow: browser → `POST /api/auth/login` → TraceAI `POST /v1/ui/login/verify` → Aurora `verify-credentials` → HttpOnly session cookie (`traceai_session`).
+
+### Self-service API tokens (TRA-54)
+
+Personal web users can create/list/revoke **their own** agent tokens without CLI or `admin` scope:
+
+| Layer | Path |
+|---|---|
+| UI | `/account/tokens` (link in header after login) |
+| Web proxy | `/api/account/tokens`, `/api/account/tokens/:id/revoke` |
+| API | `GET/POST /v1/me/tokens`, `POST /v1/me/tokens/:id/revoke` |
+
+Rules:
+
+- Requires signed human identity (web session proxy). **Legacy shared login cannot create tokens.**
+- Ownership is derived server-side from `identity.slug`. Clients never send `userId`.
+- Bridge: each UI slug maps to an AuthStore user with email `ui+{slug}@users.traceai.local` (auto-provisioned on first token request).
+- Create returns the raw `trc_…` **once**; list/revoke expose only public fields (prefix, never hash/raw).
+- Self-service scopes default to agent scopes and **cannot** include `admin` (stripped server-side).
+- Admin routes `/v1/admin/tokens` remain for operators with `admin` scope.
+- CLI (`pnpm --filter @traceai/api create-token`) remains supported.
 
 ## Entities
 
-### TraceAIUser
+### TraceAIUser (AuthStore)
 
 - `id` — stable cuid-like id (`usr_…`)
-- `email` — unique login label
+- `email` — unique login label (for self-service UI users: `ui+{slug}@users.traceai.local`)
 - `name` — display name used as actor in tickets/comments
 - `status` — `active` | `disabled`
 - `createdAt` / `updatedAt`
@@ -54,9 +74,11 @@ Raw token format: `trc_` + 43 chars of base64url randomness. Shown **once** at c
 | `comments:write` | add comments |
 | `workflows:read` | list/get workflows |
 | `workflows:write` | create/update workflows |
-| `admin` | user/token management |
+| `wiki:read` | list/get wiki pages |
+| `wiki:write` | create/update wiki pages |
+| `admin` | user/token management (not grantable via self-service UI) |
 
-Default agent token scopes: all except `admin` unless explicitly granted.
+Default agent token scopes: all except `admin` unless explicitly granted via admin/CLI.
 
 ## Auth flow
 
@@ -67,6 +89,8 @@ Default agent token scopes: all except `admin` unless explicitly granted.
 5. Sets request actor = `{ userId, name, email, tokenId }`.
 6. Domain writes use actor name for `created_by` / `author` — clients cannot spoof.
 
+Human-gated routes (inbox, self-service tokens, …) additionally require the web proxy human headers; identity is HMAC-signed and not client-spoofable.
+
 ## Audit
 
-Each mutating API call appends an audit row: `action`, `resourceType`, `resourceId`, `actorUserId`, `actorTokenId`, `requestId`, `createdAt`, optional `meta` JSON.
+Each mutating API call appends an audit row: `action`, `resourceType`, `resourceId`, `actorUserId`, `actorTokenId`, `requestId`, `createdAt`, optional `meta` JSON. Self-service token create/revoke set `meta.selfService: true` and the UI slug.

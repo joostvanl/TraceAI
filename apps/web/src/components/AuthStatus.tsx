@@ -29,6 +29,9 @@ export async function AuthStatus() {
           </span>
         ) : null}
       </Link>
+      <Link href="/account/tokens" className="auth-account-link">
+        API-tokens
+      </Link>
       {(identity.is_platform_admin || identity.mode === "legacy") && (
         <Link href="/admin/users" className="auth-admin-link">
           Admin

@@ -459,4 +459,62 @@ export class TraceApiClient {
       { asHuman: Boolean(this.humanIdentityHeader) },
     );
   }
+
+  listMyTokens() {
+    return this.request<{
+      user: { id: string; email: string; name: string };
+      items: Array<{
+        id: string;
+        userId: string;
+        name: string;
+        tokenPrefix: string;
+        scopes: string[];
+        expiresAt: string | null;
+        revokedAt: string | null;
+        lastUsedAt: string | null;
+        createdAt: string;
+      }>;
+    }>("/v1/me/tokens", {}, { asHuman: Boolean(this.humanIdentityHeader) });
+  }
+
+  createMyToken(body: {
+    name: string;
+    scopes?: string[];
+    expiresAt?: string | null;
+  }) {
+    return this.request<{
+      id: string;
+      userId: string;
+      name: string;
+      tokenPrefix: string;
+      scopes: string[];
+      expiresAt: string | null;
+      revokedAt: string | null;
+      lastUsedAt: string | null;
+      createdAt: string;
+      token: string;
+    }>(
+      "/v1/me/tokens",
+      { method: "POST", body: JSON.stringify(body) },
+      { asHuman: Boolean(this.humanIdentityHeader) },
+    );
+  }
+
+  revokeMyToken(id: string) {
+    return this.request<{
+      id: string;
+      userId: string;
+      name: string;
+      tokenPrefix: string;
+      scopes: string[];
+      expiresAt: string | null;
+      revokedAt: string | null;
+      lastUsedAt: string | null;
+      createdAt: string;
+    }>(
+      `/v1/me/tokens/${encodeURIComponent(id)}/revoke`,
+      { method: "POST", body: "{}" },
+      { asHuman: Boolean(this.humanIdentityHeader) },
+    );
+  }
 }

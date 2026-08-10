@@ -36,6 +36,10 @@ import {
   type AppVariables,
 } from "./middleware.js";
 import { getNotificationStore } from "./notifications.js";
+import {
+  resolveSelfServiceAuthUser,
+  sanitizeSelfServiceScopes,
+} from "./self-service-tokens.js";
 
 const HUMAN_PROXY_HEADER = "x-traceai-human-proxy";
 
@@ -383,6 +387,114 @@ export function createApp(deps: {
       tokenId: actor.tokenId,
       scopes: actor.scopes,
     });
+  });
+
+  // Self-service API tokens for personal web logins (human proxy required).
+  // Ownership is derived from signed human identity — never from client userId.
+  app.get("/v1/me/tokens", async (c) => {
+    const human = resolveHumanIdentity(c);
+    const resolved = await resolveSelfServiceAuthUser(
+      deps.service,
+      deps.authStore,
+      human,
+    );
+    if (!resolved.ok) {
+      return c.json(
+        { message: resolved.message, code: resolved.code },
+        resolved.status,
+      );
+    }
+    return c.json({
+      user: {
+        id: resolved.user.id,
+        email: resolved.user.email,
+        name: resolved.user.name,
+      },
+      items: deps.authStore.listTokens(resolved.user.id),
+    });
+  });
+
+  app.post("/v1/me/tokens", async (c) => {
+    const human = resolveHumanIdentity(c);
+    const resolved = await resolveSelfServiceAuthUser(
+      deps.service,
+      deps.authStore,
+      human,
+    );
+    if (!resolved.ok) {
+      return c.json(
+        { message: resolved.message, code: resolved.code },
+        resolved.status,
+      );
+    }
+    const body = await c.req
+      .json<{
+        name?: string;
+        scopes?: string[];
+        expiresAt?: string | null;
+      }>()
+      .catch(() => ({} as { name?: string; scopes?: string[]; expiresAt?: string | null }));
+    const name = body.name?.trim();
+    if (!name) {
+      return c.json(
+        { message: "name is required", code: "VALIDATION" },
+        400,
+      );
+    }
+    const token = deps.authStore.createToken({
+      userId: resolved.user.id,
+      name,
+      scopes: sanitizeSelfServiceScopes(body.scopes),
+      expiresAt: body.expiresAt ?? null,
+    });
+    audit(c, {
+      action: "token.create",
+      resourceType: "token",
+      resourceId: token.id,
+      meta: {
+        userId: resolved.user.id,
+        uiSlug: resolved.uiSlug,
+        selfService: true,
+      },
+    });
+    return c.json(token, 201);
+  });
+
+  app.post("/v1/me/tokens/:id/revoke", async (c) => {
+    const human = resolveHumanIdentity(c);
+    const resolved = await resolveSelfServiceAuthUser(
+      deps.service,
+      deps.authStore,
+      human,
+    );
+    if (!resolved.ok) {
+      return c.json(
+        { message: resolved.message, code: resolved.code },
+        resolved.status,
+      );
+    }
+    const tokenId = param(c, "id");
+    const owned = deps.authStore
+      .listTokens(resolved.user.id)
+      .find((t) => t.id === tokenId);
+    if (!owned) {
+      return c.json({ message: "Token not found", code: "NOT_FOUND" }, 404);
+    }
+    const token = deps.authStore.revokeToken(tokenId);
+    if (!token) {
+      return c.json({ message: "Token not found", code: "NOT_FOUND" }, 404);
+    }
+    audit(c, {
+      action: "token.revoke",
+      resourceType: "token",
+      resourceId: token.id,
+      meta: {
+        userId: resolved.user.id,
+        uiSlug: resolved.uiSlug,
+        selfService: true,
+      },
+    });
+    return c.json(token);
   });
 
   // Web UI login: personal `traceai_user` entries (preferred) or legacy
