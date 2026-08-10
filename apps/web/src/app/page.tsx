@@ -1,29 +1,12 @@
 import Link from "next/link";
-import { listProjects } from "@/lib/cms";
+import { getHomepageConnect, listProjects } from "@/lib/cms";
 
 export const dynamic = "force-dynamic";
-
-const MCP_PATH =
-  "C:/Users/joost.vanleeuwaarden/webroot/TraceAI/packages/mcp/dist/index.js";
-const API_URL = "https://traceai.joostvanleeuwaarden.com";
-const REPO_ROOT = "C:/Users/joost.vanleeuwaarden/webroot/TraceAI";
-
-const mcpConfig = `{
-  "mcpServers": {
-    "traceai": {
-      "command": "node",
-      "args": ["${MCP_PATH}"],
-      "env": {
-        "TRACEAI_API_URL": "${API_URL}",
-        "TRACEAI_TOKEN": "trc_YOUR_TOKEN"
-      }
-    }
-  }
-}`;
 
 export default async function HomePage() {
   let projects: Awaited<ReturnType<typeof listProjects>> = [];
   let error: string | null = null;
+  const connect = await getHomepageConnect();
 
   try {
     projects = await listProjects();
@@ -34,115 +17,43 @@ export default async function HomePage() {
   return (
     <>
       <section className="connect" aria-labelledby="connect-heading">
-        <p className="eyebrow">For AI agents</p>
-        <h1 id="connect-heading">Connect to TraceAI</h1>
-        <p className="lede">
-          TraceAI is an issue tracker for agents (Cursor, Claude Code). Authenticate
-          with a <code>trc_…</code> TraceAI token — never with Aurora credentials.
-          Use MCP tools to create projects, tickets, comments, and workflows. The
-          human board below requires a shared UI login managed in Aurora CMS.
-        </p>
+        <p className="eyebrow">{connect.eyebrow}</p>
+        <h1 id="connect-heading">{connect.heading}</h1>
+        <p className="lede">{connect.lede}</p>
 
         <ol className="steps">
-          <li>
-            <strong>Ensure the TraceAI API is reachable</strong>
-            <pre className="code-block">{`# Production (required for agents / MCP)
-# ${API_URL}
-
-# Optional: run a local API only for API development.
-# Agents should still point TRACEAI_API_URL at ${API_URL}.
-cd ${REPO_ROOT}
-pnpm --filter @traceai/api start`}</pre>
-          </li>
-          <li>
-            <strong>Create a user token</strong> (once per agent/user). Prefer an
-            existing bootstrap token in <code>data/bootstrap-token.txt</code>, or:
-            <pre className="code-block">{`cd ${REPO_ROOT}
-pnpm --filter @traceai/api create-user -- --email agent@example.com --name "Agent Name"
-pnpm --filter @traceai/api create-token -- --email agent@example.com --name "cursor"
-# copy the printed trc_… token — shown only once`}</pre>
-          </li>
-          <li>
-            <strong>Register the TraceAI MCP server</strong> in Cursor (
-            <code>~/.cursor/mcp.json</code>) or Claude Code MCP config. Replace{" "}
-            <code>trc_YOUR_TOKEN</code> with your token:
-            <pre className="code-block">{mcpConfig}</pre>
-          </li>
-          <li>
-            <strong>Refresh MCP</strong> in the IDE, then call{" "}
-            <code>list_projects</code>. Pick or create a project, then use tickets /
-            comments / transitions / workflows as needed.
-          </li>
+          {connect.steps.map((step) => (
+            <li key={step.title}>
+              <strong>{step.title}</strong>
+              <pre className="code-block">{step.body}</pre>
+            </li>
+          ))}
         </ol>
+
+        {connect.mcpConfig ? (
+          <pre className="code-block">{connect.mcpConfig}</pre>
+        ) : null}
 
         <div className="connect-grid">
           <div className="panel connect-panel">
             <h2>MCP tools</h2>
             <ul className="tool-list">
-              <li>
-                <code>list_projects</code> / <code>get_project</code> /{" "}
-                <code>create_project</code>
-              </li>
-              <li>
-                <code>list_tickets</code> / <code>get_ticket</code> /{" "}
-                <code>create_ticket</code> / <code>update_ticket</code>
-              </li>
-              <li>
-                <code>add_comment</code> / <code>transition_ticket</code>
-              </li>
-              <li>
-                <code>list_workflows</code> / <code>get_workflow</code> /{" "}
-                <code>create_workflow</code> / <code>update_workflow</code>
-              </li>
+              {connect.tools.map((tool) => (
+                <li key={tool}>
+                  <code>{tool}</code>
+                </li>
+              ))}
             </ul>
-            <p className="muted note">
-              Ticket <code>created_by</code> and comment <code>author</code> are taken
-              from the TraceAI user behind the token. Do not invent Aurora tokens or
-              site keys for write access.
-            </p>
+            {connect.toolsNote ? (
+              <p className="muted note">{connect.toolsNote}</p>
+            ) : null}
           </div>
           <div className="panel connect-panel">
             <h2>Rules</h2>
             <ul className="rules-list">
-              <li>
-                Agents use <code>TRACEAI_TOKEN</code> (<code>trc_…</code>) only.
-              </li>
-              <li>
-                Aurora management tokens stay on the TraceAI API server, never in MCP
-                env for agents.
-              </li>
-              <li>
-                Call <code>get_project</code> / <code>get_workflow</code> first — the
-                response includes <code>agent_playbook</code> /{" "}
-                <code>agent_policy</code> (working agreements live in workflow JSON).
-              </li>
-              <li>
-                Ticket descriptions must be self-contained Markdown for junior agents
-                (Context, Goal, What to implement, Acceptance criteria).
-              </li>
-              <li>
-                Every <code>transition_ticket</code> needs a comment with{" "}
-                <code>## Vorige stap</code> and <code>## Deze stap</code>. Entering{" "}
-                <code>review</code> also requires <code>## Testverslag</code> and{" "}
-                <code>## Uitslag</code>.
-              </li>
-              <li>Descriptions and comments are Markdown.</li>
-              <li>
-                Humans can add light wish-tickets from a project board via{" "}
-                <strong>New ticket</strong> after signing in. They land in
-                Backlog; agents refine the description before moving them to To
-                do. Other mutations still go through MCP / API.
-              </li>
-              <li>
-                Prefer organizing work in projects with an explicit workflow before
-                large implementation tasks.
-              </li>
-              <li>
-                Project boards are <strong>live</strong>: open a project board and
-                leave it open. Ticket create/transition events arrive via SSE from{" "}
-                <code>https://traceai.joostvanleeuwaarden.com/events?project=…</code>{" "}
-                — cards move without refreshing the page.
-              </li>
+              {connect.rules.map((rule) => (
+                <li key={rule}>{rule}</li>
+              ))}
             </ul>
           </div>
         </div>

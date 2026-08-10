@@ -389,3 +389,177 @@ export async function getProjectInsightsPublic(
   );
   return { project: board.project, insights };
 }
+
+export type HomepageConnectStep = {
+  title: string;
+  body: string;
+};
+
+export type HomepageConnectContent = {
+  eyebrow: string;
+  heading: string;
+  lede: string;
+  steps: HomepageConnectStep[];
+  tools: string[];
+  toolsNote: string;
+  rules: string[];
+  mcpConfig: string;
+  apiUrl: string;
+};
+
+type HomepageConnectFields = {
+  eyebrow?: string | null;
+  heading?: string | null;
+  lede?: string | null;
+  steps_json?: string | null;
+  tools_json?: string | null;
+  tools_note?: string | null;
+  rules_json?: string | null;
+  mcp_config?: string | null;
+  api_url?: string | null;
+  mcp_package_path?: string | null;
+};
+
+const HOMEPAGE_CONNECT_FALLBACK: HomepageConnectContent = {
+  eyebrow: "For AI agents",
+  heading: "Connect to TraceAI",
+  lede: "TraceAI is an issue tracker built for agents (Cursor, Claude Code, and similar). Authenticate with a TraceAI token (`trc_…`) only. Use the TraceAI MCP tools to manage projects, tickets, comments, workflows, and wiki pages. Humans use the board below after signing in with a TraceAI account.",
+  steps: [
+    {
+      title: "Ensure the TraceAI API is reachable",
+      body: "Production (required for agents / MCP):\nhttps://traceai.joostvanleeuwaarden.com\n\nOptional: run a local API only for API development. Agents should still point TRACEAI_API_URL at the production URL above.",
+    },
+    {
+      title: "Create a TraceAI user token",
+      body: 'Once per agent/user. Prefer an existing bootstrap token if you have one, or from the TraceAI repo:\n\ncd <path-to-TraceAI>\npnpm --filter @traceai/api create-user -- --email agent@example.com --name "Agent Name"\npnpm --filter @traceai/api create-token -- --email agent@example.com --name "cursor"\n\nCopy the printed trc_… token — shown only once.',
+    },
+    {
+      title: "Register the TraceAI MCP server",
+      body: "Add it to Cursor (~/.cursor/mcp.json) or your Claude Code MCP config. Point args at packages/mcp/dist/index.js in your TraceAI checkout. Replace trc_YOUR_TOKEN with your token (see MCP config template below).",
+    },
+    {
+      title: "Refresh MCP and start",
+      body: "Reload the TraceAI MCP server in the IDE, then call list_projects. Pick or create a project, read get_project / get_workflow for the agent playbook, then use tickets, transitions, wiki, and search as needed.",
+    },
+  ],
+  tools: [
+    "list_projects / get_project / create_project",
+    "list_tickets / get_ticket / create_ticket / update_ticket (slug or TRA-n; optional parent)",
+    "add_comment / transition_ticket (tokens_used / tokens_estimate / resolution when required)",
+    "list_workflows / get_workflow / create_workflow / update_workflow",
+    "list_wiki_pages / get_wiki_page / create_wiki_page / update_wiki_page",
+    "search_project / list_project_history / get_project_insights",
+  ],
+  toolsNote:
+    "Ticket created_by and comment author come from the TraceAI user behind the token. Prefer organizing work in projects with an explicit workflow before large implementation tasks.",
+  rules: [
+    "Agents use TRACEAI_TOKEN (trc_…) only — never put other CMS credentials in the MCP env.",
+    "Call get_project / get_workflow first; the response includes agent_playbook / agent_policy (working agreements live in workflow JSON).",
+    "Ticket descriptions must be self-contained Markdown for junior agents (Context, Goal, What to implement, Acceptance criteria).",
+    "Every transition_ticket needs a comment with ## Vorige stap and ## Deze stap, plus tokens_used when the workflow requires it.",
+    "Leaving Backlog / In Refinement may require tokens_estimate (see require_*_on_exit_to flags on the stage).",
+    "Entering review also requires ## Testverslag and ## Uitslag (PASS/FAIL).",
+    "Human-gated stages: a signed-in reviewer presses Goedkeuren/Afkeuren in the UI; the agent then performs the transition.",
+    "Entering Done needs resolution (completed | superseded | cancelled | duplicate | verification-only) and ## Wiki with page slug(s) or N/A.",
+    "All ticket/workflow/wiki writes go through TraceAI MCP or the TraceAI API — never bypass TraceAI.",
+    "Humans can add light wish-tickets from a project board (New ticket) after signing in; they land in Backlog for agents to refine.",
+    "Project boards are live via SSE from https://traceai.joostvanleeuwaarden.com/events?project=… — cards move without refreshing.",
+    "Use the Inbox for tickets waiting on your human verdict.",
+  ],
+  mcpConfig: `{
+  "mcpServers": {
+    "traceai": {
+      "command": "node",
+      "args": ["<path-to-TraceAI>/packages/mcp/dist/index.js"],
+      "env": {
+        "TRACEAI_API_URL": "https://traceai.joostvanleeuwaarden.com",
+        "TRACEAI_TOKEN": "trc_YOUR_TOKEN"
+      }
+    }
+  }
+}`,
+  apiUrl: "https://traceai.joostvanleeuwaarden.com",
+};
+
+function parseJsonArray<T>(raw: string | null | undefined, fallback: T[]): T[] {
+  if (!raw?.trim()) return fallback;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as T[]) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function parseHomepageConnectFields(
+  fields: HomepageConnectFields | undefined,
+): HomepageConnectContent {
+  if (!fields) return HOMEPAGE_CONNECT_FALLBACK;
+
+  const stepsRaw = parseJsonArray<HomepageConnectStep>(
+    fields.steps_json,
+    HOMEPAGE_CONNECT_FALLBACK.steps,
+  );
+  const steps = stepsRaw
+    .filter(
+      (s): s is HomepageConnectStep =>
+        Boolean(s) &&
+        typeof s === "object" &&
+        typeof s.title === "string" &&
+        typeof s.body === "string",
+    )
+    .map((s) => ({ title: s.title, body: s.body }));
+
+  const tools = parseJsonArray<unknown>(
+    fields.tools_json,
+    HOMEPAGE_CONNECT_FALLBACK.tools,
+  )
+    .filter((t): t is string => typeof t === "string" && t.trim().length > 0)
+    .map((t) => t.trim());
+
+  const rules = parseJsonArray<unknown>(
+    fields.rules_json,
+    HOMEPAGE_CONNECT_FALLBACK.rules,
+  )
+    .filter((r): r is string => typeof r === "string" && r.trim().length > 0)
+    .map((r) => r.trim());
+
+  return {
+    eyebrow: fields.eyebrow?.trim() || HOMEPAGE_CONNECT_FALLBACK.eyebrow,
+    heading: fields.heading?.trim() || HOMEPAGE_CONNECT_FALLBACK.heading,
+    lede: fields.lede?.trim() || HOMEPAGE_CONNECT_FALLBACK.lede,
+    steps: steps.length > 0 ? steps : HOMEPAGE_CONNECT_FALLBACK.steps,
+    tools: tools.length > 0 ? tools : HOMEPAGE_CONNECT_FALLBACK.tools,
+    toolsNote:
+      fields.tools_note?.trim() || HOMEPAGE_CONNECT_FALLBACK.toolsNote,
+    rules: rules.length > 0 ? rules : HOMEPAGE_CONNECT_FALLBACK.rules,
+    mcpConfig:
+      fields.mcp_config?.trim() || HOMEPAGE_CONNECT_FALLBACK.mcpConfig,
+    apiUrl: fields.api_url?.trim() || HOMEPAGE_CONNECT_FALLBACK.apiUrl,
+  };
+}
+
+/** Public homepage Connect section copy (CMS `homepage_connect`, slug `default`). */
+export async function getHomepageConnect(): Promise<HomepageConnectContent> {
+  try {
+    if (!siteKey) return HOMEPAGE_CONNECT_FALLBACK;
+    const client = getPublicClient();
+    try {
+      const entry = await client.getEntry<{ fields: HomepageConnectFields }>(
+        "homepage_connect",
+        "default",
+      );
+      return parseHomepageConnectFields(entry.fields);
+    } catch {
+      const listed = await client.listEntries<{ fields: HomepageConnectFields }>(
+        "homepage_connect",
+        { limit: 1 },
+      );
+      const first = listed.items[0];
+      if (!first) return HOMEPAGE_CONNECT_FALLBACK;
+      return parseHomepageConnectFields(first.fields);
+    }
+  } catch {
+    return HOMEPAGE_CONNECT_FALLBACK;
+  }
+}
