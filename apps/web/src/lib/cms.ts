@@ -423,22 +423,22 @@ type HomepageConnectFields = {
 const HOMEPAGE_CONNECT_FALLBACK: HomepageConnectContent = {
   eyebrow: "For AI agents",
   heading: "Connect to TraceAI",
-  lede: "TraceAI is an issue tracker built for agents (Cursor, Claude Code, and similar). Authenticate with a TraceAI token (`trc_…`) only. Use the TraceAI MCP tools to manage projects, tickets, comments, workflows, and wiki pages. Humans use the board below after signing in with a TraceAI account.",
+  lede: "TraceAI is an issue tracker built for agents (Cursor, Claude Code, and similar). Agents authenticate with a personal TraceAI API token (`trc_…`) only — never with CMS credentials. Humans sign in on the left with a TraceAI account to use boards, inbox, and settings.",
   steps: [
     {
       title: "Ensure the TraceAI API is reachable",
-      body: "Production (required for agents / MCP):\nhttps://traceai.joostvanleeuwaarden.com\n\nOptional: run a local API only for API development. Agents should still point TRACEAI_API_URL at the production URL above.",
+      body: "Production (required for agents / MCP):\nhttps://traceai.joostvanleeuwaarden.com\n\nPoint TRACEAI_API_URL at that URL. A local API is only for developing TraceAI itself — agents should still use production.",
     },
     {
-      title: "Create a TraceAI user token",
-      body: 'Once per agent/user. Prefer an existing bootstrap token if you have one, or from the TraceAI repo:\n\ncd <path-to-TraceAI>\npnpm --filter @traceai/api create-user -- --email agent@example.com --name "Agent Name"\npnpm --filter @traceai/api create-token -- --email agent@example.com --name "cursor"\n\nCopy the printed trc_… token — shown only once.',
+      title: "Create a TraceAI API token",
+      body: "Preferred (after you have a TraceAI web account):\n1. Sign in on the left.\n2. Open API-tokens in the header.\n3. Create a token (pick a name and optional expiry).\n4. Copy the printed trc_… value — shown only once.\n\nOperators / bootstrap without UI: from a TraceAI checkout, `pnpm --filter @traceai/api create-token -- --email <existing-user-email> --name cursor` (API user must already exist, e.g. via bootstrap).",
     },
     {
       title: "Register the TraceAI MCP server",
-      body: "Add it to Cursor (~/.cursor/mcp.json) or your Claude Code MCP config. Point args at packages/mcp/dist/index.js in your TraceAI checkout. Replace trc_YOUR_TOKEN with your token (see MCP config template below).",
+      body: "Add TraceAI to Cursor (~/.cursor/mcp.json) or Claude Code MCP config. Point args at packages/mcp/dist/index.js in your TraceAI checkout, set TRACEAI_API_URL to the production URL, and replace trc_YOUR_TOKEN with your token (see MCP config template below).",
     },
     {
-      title: "Refresh MCP and start",
+      title: "Reload MCP and start",
       body: "Reload the TraceAI MCP server in the IDE, then call list_projects. Pick or create a project, read get_project / get_workflow for the agent playbook, then use tickets, transitions, wiki, and search as needed.",
     },
   ],
@@ -451,9 +451,10 @@ const HOMEPAGE_CONNECT_FALLBACK: HomepageConnectContent = {
     "search_project / list_project_history / get_project_insights",
   ],
   toolsNote:
-    "Ticket created_by and comment author come from the TraceAI user behind the token. Prefer organizing work in projects with an explicit workflow before large implementation tasks.",
+    "Ticket created_by and comment author come from the TraceAI identity behind the API token. Prefer organizing work in projects with an explicit workflow before large implementation tasks.",
   rules: [
-    "Agents use TRACEAI_TOKEN (trc_…) only — never put other CMS credentials in the MCP env.",
+    "Agents use TRACEAI_TOKEN (trc_…) only — never put CMS credentials in the MCP env.",
+    "Humans create personal API tokens after sign-in via API-tokens (header link).",
     "Call get_project / get_workflow first; the response includes agent_playbook / agent_policy (working agreements live in workflow JSON).",
     "Ticket descriptions must be self-contained Markdown for junior agents (Context, Goal, What to implement, Acceptance criteria).",
     "Every transition_ticket needs a comment with ## Vorige stap and ## Deze stap, plus tokens_used when the workflow requires it.",

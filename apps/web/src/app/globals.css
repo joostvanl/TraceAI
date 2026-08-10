@@ -120,7 +120,6 @@ h2 {
   display: block;
   margin: 0.65rem 0 0;
   padding: 0.85rem 1rem;
-  overflow-x: auto;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -128,7 +127,9 @@ h2 {
   font-size: 0.8rem;
   line-height: 1.45;
   color: var(--text);
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .connect code,
