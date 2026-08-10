@@ -410,7 +410,9 @@ export function createApp(deps: {
         email: resolved.user.email,
         name: resolved.user.name,
       },
-      items: deps.authStore.listTokens(resolved.user.id),
+      items: deps.authStore
+        .listTokens(resolved.user.id)
+        .filter((t) => !t.revokedAt),
     });
   });
 

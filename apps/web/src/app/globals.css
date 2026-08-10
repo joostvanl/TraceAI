@@ -795,6 +795,33 @@ h2 {
   max-width: 26rem;
 }
 
+.login-layout {
+  display: grid;
+  gap: 2rem;
+  align-items: start;
+}
+
+@media (min-width: 960px) {
+  .login-layout {
+    grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr);
+    gap: 2.5rem;
+  }
+}
+
+.login-pane {
+  max-width: 26rem;
+}
+
+.login-connect-pane .connect {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.login-connect-pane .connect h1 {
+  font-size: 1.55rem;
+}
+
 .auth-form {
   padding: 1.1rem 1.2rem;
   background: var(--bg-elevated);

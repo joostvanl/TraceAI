@@ -13,6 +13,23 @@ type TokenRow = {
   createdAt: string;
 };
 
+type ExpiryChoice = "never" | "7d" | "30d" | "90d" | "365d";
+
+const EXPIRY_OPTIONS: Array<{ value: ExpiryChoice; label: string }> = [
+  { value: "never", label: "Geen verloopdatum" },
+  { value: "7d", label: "7 dagen" },
+  { value: "30d", label: "30 dagen" },
+  { value: "90d", label: "90 dagen" },
+  { value: "365d", label: "1 jaar" },
+];
+
+function expiresAtFromChoice(choice: ExpiryChoice): string | null {
+  if (choice === "never") return null;
+  const days = Number(choice.replace("d", ""));
+  const at = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+  return at.toISOString();
+}
+
 function formatDate(value: string | null): string {
   if (!value) return "—";
   try {
@@ -26,6 +43,7 @@ export function AccountTokensPanel() {
   const [items, setItems] = useState<TokenRow[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [name, setName] = useState("");
+  const [expiry, setExpiry] = useState<ExpiryChoice>("never");
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [createdToken, setCreatedToken] = useState<string | null>(null);
@@ -43,7 +61,7 @@ export function AccountTokensPanel() {
         setLoadError(body.message || `Laden mislukt (${res.status})`);
         return;
       }
-      setItems(body.items ?? []);
+      setItems((body.items ?? []).filter((t) => !t.revokedAt));
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : String(err));
     }
@@ -63,7 +81,10 @@ export function AccountTokensPanel() {
       const res = await fetch("/api/account/tokens", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim() }),
+        body: JSON.stringify({
+          name: name.trim(),
+          expiresAt: expiresAtFromChoice(expiry),
+        }),
       });
       const body = (await res.json().catch(() => ({}))) as {
         message?: string;
@@ -75,6 +96,7 @@ export function AccountTokensPanel() {
       }
       if (body.token) setCreatedToken(body.token);
       setName("");
+      setExpiry("never");
       await refresh();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : String(err));
@@ -84,15 +106,20 @@ export function AccountTokensPanel() {
   }
 
   async function onRevoke(id: string) {
-    if (!window.confirm("Deze token intrekken? Agents die hem gebruiken stoppen met werken.")) {
+    if (
+      !window.confirm(
+        "Deze token intrekken? Agents die hem gebruiken stoppen met werken.",
+      )
+    ) {
       return;
     }
     setBusy(true);
     setFormError(null);
     try {
-      const res = await fetch(`/api/account/tokens/${encodeURIComponent(id)}/revoke`, {
-        method: "POST",
-      });
+      const res = await fetch(
+        `/api/account/tokens/${encodeURIComponent(id)}/revoke`,
+        { method: "POST" },
+      );
       const body = (await res.json().catch(() => ({}))) as { message?: string };
       if (!res.ok) {
         setFormError(body.message || `Intrekken mislukt (${res.status})`);
@@ -116,9 +143,6 @@ export function AccountTokensPanel() {
     }
   }
 
-  const active = items.filter((t) => !t.revokedAt);
-  const revoked = items.filter((t) => t.revokedAt);
-
   return (
     <div className="account-tokens">
       <form className="create-ticket-form" onSubmit={onCreate}>
@@ -138,6 +162,20 @@ export function AccountTokensPanel() {
             disabled={busy}
           />
         </label>
+        <label>
+          Houdbaarheid
+          <select
+            value={expiry}
+            onChange={(e) => setExpiry(e.target.value as ExpiryChoice)}
+            disabled={busy}
+          >
+            {EXPIRY_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </label>
         {formError ? <p className="create-ticket-error">{formError}</p> : null}
         <button type="submit" className="btn" disabled={busy || !name.trim()}>
           Token aanmaken
@@ -152,7 +190,11 @@ export function AccountTokensPanel() {
             naar je MCP-config en bewaar hem veilig.
           </p>
           <pre className="code-block">{createdToken}</pre>
-          <button type="button" className="btn btn-small" onClick={() => void copyToken()}>
+          <button
+            type="button"
+            className="btn btn-small"
+            onClick={() => void copyToken()}
+          >
             {copied ? "Gekopieerd" : "Kopieer token"}
           </button>
         </div>
@@ -161,61 +203,43 @@ export function AccountTokensPanel() {
       {loadError ? (
         <div className="empty">Kon tokens niet laden: {loadError}</div>
       ) : (
-        <>
-          <section className="account-token-list" aria-labelledby="active-tokens-heading">
-            <h3 id="active-tokens-heading">Actieve tokens</h3>
-            {active.length === 0 ? (
-              <p className="muted">Nog geen actieve tokens.</p>
-            ) : (
-              <ul className="account-token-rows">
-                {active.map((token) => (
-                  <li key={token.id}>
-                    <div>
-                      <strong>{token.name}</strong>
-                      <div className="muted note">
-                        <code>{token.tokenPrefix}</code> · aangemaakt{" "}
-                        {formatDate(token.createdAt)}
-                        {token.lastUsedAt
-                          ? ` · laatst gebruikt ${formatDate(token.lastUsedAt)}`
-                          : ""}
-                      </div>
+        <section
+          className="account-token-list"
+          aria-labelledby="active-tokens-heading"
+        >
+          <h3 id="active-tokens-heading">Actieve tokens</h3>
+          {items.length === 0 ? (
+            <p className="muted">Nog geen actieve tokens.</p>
+          ) : (
+            <ul className="account-token-rows">
+              {items.map((token) => (
+                <li key={token.id}>
+                  <div>
+                    <strong>{token.name}</strong>
+                    <div className="muted note">
+                      <code>{token.tokenPrefix}</code> · aangemaakt{" "}
+                      {formatDate(token.createdAt)}
+                      {token.expiresAt
+                        ? ` · verloopt ${formatDate(token.expiresAt)}`
+                        : " · geen verloopdatum"}
+                      {token.lastUsedAt
+                        ? ` · laatst gebruikt ${formatDate(token.lastUsedAt)}`
+                        : ""}
                     </div>
-                    <button
-                      type="button"
-                      className="btn btn-small"
-                      disabled={busy}
-                      onClick={() => void onRevoke(token.id)}
-                    >
-                      Intrekken
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
-          {revoked.length > 0 ? (
-            <section
-              className="account-token-list"
-              aria-labelledby="revoked-tokens-heading"
-            >
-              <h3 id="revoked-tokens-heading">Ingetrokken</h3>
-              <ul className="account-token-rows muted">
-                {revoked.map((token) => (
-                  <li key={token.id}>
-                    <div>
-                      <strong>{token.name}</strong>
-                      <div className="note">
-                        <code>{token.tokenPrefix}</code> · ingetrokken{" "}
-                        {formatDate(token.revokedAt)}
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
-        </>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-small"
+                    disabled={busy}
+                    onClick={() => void onRevoke(token.id)}
+                  >
+                    Intrekken
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       )}
     </div>
   );

@@ -34,6 +34,8 @@ Rules:
 - Ownership is derived server-side from `identity.slug`. Clients never send `userId`.
 - Bridge: each UI slug maps to an AuthStore user with email `ui+{slug}@users.traceai.local` (auto-provisioned on first token request).
 - Create returns the raw `trc_…` **once**; list/revoke expose only public fields (prefix, never hash/raw).
+- List returns only **non-revoked** tokens; revoked tokens disappear from the UI.
+- Create accepts optional `expiresAt` (ISO); the account UI offers presets (never / 7d / 30d / 90d / 1y).
 - Self-service scopes default to agent scopes and **cannot** include `admin` (stripped server-side).
 - Admin routes `/v1/admin/tokens` remain for operators with `admin` scope.
 - CLI (`pnpm --filter @traceai/api create-token`) remains supported.
