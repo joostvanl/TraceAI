@@ -41,7 +41,10 @@ export async function isLoginConfigured(): Promise<boolean> {
   try {
     const status = await client.uiLoginStatus();
     return status.configured;
-  } catch {
+  } catch (error) {
+    // A failing status check looks identical to "not configured" in the UI,
+    // so surface it in the logs instead of silently redirecting to /login.
+    console.error("[traceai] ui login status failed:", error);
     return false;
   }
 }

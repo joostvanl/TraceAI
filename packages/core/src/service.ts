@@ -116,6 +116,28 @@ export class TraceService {
     await this.ready;
   }
 
+  /**
+   * Page through all entries of a content type. Aurora caps `limit` at 100, so
+   * anything that can exceed that must paginate instead of asking for more.
+   */
+  private async listAllEntries<T>(
+    apiId: string,
+    query: { status?: string } = {},
+  ): Promise<T[]> {
+    const pageSize = 100;
+    const items: T[] = [];
+    for (let offset = 0; ; offset += pageSize) {
+      const result = await this.client.listEntries<T>(apiId, {
+        ...query,
+        limit: pageSize,
+        offset,
+      });
+      items.push(...result.items);
+      if (result.items.length < pageSize || items.length >= result.total) break;
+    }
+    return items;
+  }
+
   async listProjects(): Promise<Project[]> {
     await this.ensureReady();
     const result = await this.client.listEntries<Project>("project", {
@@ -1425,11 +1447,10 @@ export class TraceService {
 
   async listTraceaiUsers(): Promise<TraceaiUser[]> {
     await this.ensureReady();
-    const result = await this.client.listEntries<TraceaiUser>(
+    const items = await this.listAllEntries<TraceaiUser>(
       TRACEAI_USER_CONTENT_TYPE,
-      { limit: 200 },
     );
-    return result.items.sort((a, b) => a.slug.localeCompare(b.slug));
+    return items.sort((a, b) => a.slug.localeCompare(b.slug));
   }
 
   async getTraceaiUser(slug: string): Promise<TraceaiUser | null> {
@@ -1542,11 +1563,10 @@ export class TraceService {
     project?: string,
   ): Promise<ProjectMembership[]> {
     await this.ensureReady();
-    const result = await this.client.listEntries<ProjectMembership>(
+    const items = await this.listAllEntries<ProjectMembership>(
       PROJECT_MEMBERSHIP_CONTENT_TYPE,
-      { limit: 500, status: "published" },
+      { status: "published" },
     );
-    const items = result.items;
     if (!project) {
       return items.sort((a, b) => a.slug.localeCompare(b.slug));
     }
