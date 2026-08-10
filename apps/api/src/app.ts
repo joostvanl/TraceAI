@@ -8,6 +8,7 @@ import type { TraceService } from "@traceai/core";
 import {
   computeTokenRollup,
   isProjectRole,
+  membershipSlug,
   parseWorkflowDocument,
   requiredRoleForAction,
   type ProjectRole,
@@ -1251,7 +1252,7 @@ export function createApp(deps: {
       audit(c, {
         action: "project_membership.remove",
         resourceType: "project_membership",
-        resourceId: `${project}--${user}`,
+        resourceId: membershipSlug(project, user),
       });
       return c.json({ ok: true as const });
     },

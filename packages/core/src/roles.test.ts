@@ -27,7 +27,8 @@ describe("roles", () => {
     assert.equal(requiredRoleForAction("manage_members"), "admin");
   });
 
-  it("builds membership slugs", () => {
-    assert.equal(membershipSlug("traceai", "joost"), "traceai--joost");
+  it("builds URL-safe membership slugs", () => {
+    assert.equal(membershipSlug("traceai", "joost"), "traceai-member-joost");
+    assert.doesNotMatch(membershipSlug("traceai", "joost"), /--/);
   });
 });

@@ -50,6 +50,10 @@ export function requiredRoleForAction(
   }
 }
 
+/**
+ * Deterministic entry slug for a membership. Aurora rejects `--`, so the parts
+ * are joined with a single-dash keyword instead.
+ */
 export function membershipSlug(projectSlug: string, userSlug: string): string {
-  return `${projectSlug}--${userSlug}`;
+  return `${projectSlug}-member-${userSlug}`;
 }

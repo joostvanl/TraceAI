@@ -25,6 +25,34 @@ async function parseJson(res: Response): Promise<unknown> {
   }
 }
 
+/**
+ * Aurora answers a rejected write with a bare "Validation failed" plus an
+ * `issues` array; without those issues the message says nothing actionable.
+ */
+function errorMessage(body: unknown, fallback: string): string {
+  if (typeof body !== "object" || !body) return fallback;
+  const record = body as { message?: unknown; issues?: unknown };
+  const message =
+    typeof record.message === "string" && record.message
+      ? record.message
+      : fallback;
+  if (!Array.isArray(record.issues) || record.issues.length === 0) {
+    return message;
+  }
+  const issues = record.issues
+    .map((issue) => {
+      const { path, message: detail } = issue as {
+        path?: unknown;
+        message?: unknown;
+      };
+      const field = Array.isArray(path) ? path.join(".") : "";
+      const text = typeof detail === "string" ? detail : JSON.stringify(issue);
+      return field ? `${field}: ${text}` : text;
+    })
+    .join("; ");
+  return `${message} (${issues})`;
+}
+
 export class AuroraManagementClient {
   readonly apiUrl: string;
   readonly locale: string;
@@ -60,14 +88,11 @@ export class AuroraManagementClient {
     });
     const body = await parseJson(res);
     if (!res.ok) {
-      const message =
-        typeof body === "object" &&
-        body &&
-        "message" in body &&
-        typeof (body as { message: unknown }).message === "string"
-          ? (body as { message: string }).message
-          : `Aurora API ${res.status}`;
-      throw new AuroraApiError(message, res.status, body);
+      throw new AuroraApiError(
+        errorMessage(body, `Aurora API ${res.status}`),
+        res.status,
+        body,
+      );
     }
     return body as T;
   }
@@ -247,14 +272,11 @@ export class AuroraPublicClient {
     });
     const body = await parseJson(res);
     if (!res.ok) {
-      const message =
-        typeof body === "object" &&
-        body &&
-        "message" in body &&
-        typeof (body as { message: unknown }).message === "string"
-          ? (body as { message: string }).message
-          : `Aurora public API ${res.status}`;
-      throw new AuroraApiError(message, res.status, body);
+      throw new AuroraApiError(
+        errorMessage(body, `Aurora public API ${res.status}`),
+        res.status,
+        body,
+      );
     }
     return body as T;
   }
