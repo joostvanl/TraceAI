@@ -14,6 +14,11 @@ type AccordionContextValue = {
 
 const AccordionContext = createContext<AccordionContextValue | null>(null);
 
+/**
+ * Shares "only one expanded" state across every list it wraps, so the two
+ * inbox sections can render under their own headings and still behave as one
+ * accordion. Renders no markup of its own.
+ */
 export function InboxAccordion({
   children,
   initialOpenId = null,
@@ -24,9 +29,13 @@ export function InboxAccordion({
   const [openId, setOpenId] = useState<string | null>(initialOpenId);
   return (
     <AccordionContext.Provider value={{ openId, setOpenId }}>
-      <div className="inbox-list">{children}</div>
+      {children}
     </AccordionContext.Provider>
   );
+}
+
+export function InboxAccordionList({ children }: { children: ReactNode }) {
+  return <div className="inbox-list">{children}</div>;
 }
 
 export function InboxAccordionItem({
@@ -53,10 +62,7 @@ export function InboxAccordionItem({
   const open = ctx.openId === id;
 
   return (
-    <section
-      className={`panel inbox-ticket${open ? " is-open" : ""}`}
-      id={id}
-    >
+    <section className={`panel inbox-ticket${open ? " is-open" : ""}`} id={id}>
       <button
         type="button"
         className="inbox-ticket-summary"

@@ -11,6 +11,7 @@ import { HumanReviewActions } from "@/components/HumanReviewActions";
 import {
   InboxAccordion,
   InboxAccordionItem,
+  InboxAccordionList,
 } from "@/components/InboxAccordion";
 import { Markdown } from "@/components/Markdown";
 import { MarkNotificationsReadButton } from "@/components/MarkNotificationsReadButton";
@@ -205,24 +206,13 @@ export default async function InboxPage() {
 
       {inbox.error ? <p className="form-error">{inbox.error}</p> : null}
 
-      <h2>
-        Wacht op jouw oordeel ({inbox.awaiting_verdict.length})
-      </h2>
-      {inbox.awaiting_verdict.length === 0 ? (
-        <p className="muted">Geen openstaande beoordelingen.</p>
-      ) : null}
-
-      <h2 style={{ marginTop: "1.5rem" }}>
-        Agent rondt af ({inbox.awaiting_agent.length})
-      </h2>
-      {inbox.awaiting_agent.length === 0 ? (
-        <p className="muted">Geen tickets die wachten op een agent-transitie.</p>
-      ) : null}
-
-      {inbox.awaiting_verdict.length + inbox.awaiting_agent.length > 0 ? (
-        <div style={{ marginTop: "1rem" }}>
-          <InboxAccordion initialOpenId={null}>
-            {[...inbox.awaiting_verdict, ...inbox.awaiting_agent].map((item) => (
+      <InboxAccordion initialOpenId={null}>
+        <h2>Wacht op jouw oordeel ({inbox.awaiting_verdict.length})</h2>
+        {inbox.awaiting_verdict.length === 0 ? (
+          <p className="muted">Geen openstaande beoordelingen.</p>
+        ) : (
+          <InboxAccordionList>
+            {inbox.awaiting_verdict.map((item) => (
               <InboxAccordionItem
                 key={item.slug}
                 id={item.slug}
@@ -232,15 +222,37 @@ export default async function InboxPage() {
                 project={item.project}
                 awaiting={item.awaiting}
               >
-                <InboxTicketBody
-                  item={item}
-                  authenticated={Boolean(identity)}
-                />
+                <InboxTicketBody item={item} authenticated={Boolean(identity)} />
               </InboxAccordionItem>
             ))}
-          </InboxAccordion>
-        </div>
-      ) : null}
+          </InboxAccordionList>
+        )}
+
+        <h2 style={{ marginTop: "2rem" }}>
+          Agent rondt af ({inbox.awaiting_agent.length})
+        </h2>
+        {inbox.awaiting_agent.length === 0 ? (
+          <p className="muted">
+            Geen tickets die wachten op een agent-transitie.
+          </p>
+        ) : (
+          <InboxAccordionList>
+            {inbox.awaiting_agent.map((item) => (
+              <InboxAccordionItem
+                key={item.slug}
+                id={item.slug}
+                ticketKey={item.ticket_key}
+                title={item.title}
+                stageName={item.stage_name}
+                project={item.project}
+                awaiting={item.awaiting}
+              >
+                <InboxTicketBody item={item} authenticated={Boolean(identity)} />
+              </InboxAccordionItem>
+            ))}
+          </InboxAccordionList>
+        )}
+      </InboxAccordion>
     </div>
   );
 }
