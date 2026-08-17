@@ -677,6 +677,59 @@ h2 {
   border-left: 1px solid color-mix(in srgb, currentColor 18%, transparent);
 }
 
+.wiki-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 1.75rem;
+}
+
+.wiki-tree-toggle {
+  flex: 0 0 1.5rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg, #fff) 88%, currentColor 4%);
+  color: inherit;
+  font: inherit;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.wiki-tree-toggle:hover {
+  border-color: color-mix(in srgb, currentColor 35%, var(--border));
+}
+
+.wiki-tree-toggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, currentColor 45%, transparent);
+  outline-offset: 1px;
+}
+
+.wiki-tree-toggle-spacer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: color-mix(in srgb, currentColor 28%, transparent);
+  cursor: default;
+}
+
+.wiki-tree-link {
+  text-decoration: none;
+}
+
+.wiki-tree-link:hover {
+  text-decoration: underline;
+}
+
+.wiki-tree-link.is-active {
+  font-weight: 600;
+}
+
 .wiki-tree a {
   text-decoration: none;
 }

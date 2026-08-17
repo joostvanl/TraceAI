@@ -101,6 +101,20 @@ export type WikiTreeNode = {
   children: WikiTreeNode[];
 };
 
+/** Coerce Aurora relation field (slug string or `{ slug }`) to a slug. */
+function wikiRelationSlug(value: unknown): string | null {
+  if (value == null || value === "") return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || null;
+  }
+  if (typeof value === "object" && value !== null && "slug" in value) {
+    const slug = (value as { slug?: unknown }).slug;
+    if (typeof slug === "string" && slug.trim()) return slug.trim();
+  }
+  return null;
+}
+
 export async function listWikiPagesForProject(projectSlug: string): Promise<{
   pages: WikiPage[];
   tree: WikiTreeNode[];
@@ -109,7 +123,7 @@ export async function listWikiPagesForProject(projectSlug: string): Promise<{
     limit: 100,
   });
   const pages = result.items
-    .filter((p) => p.fields.project === projectSlug)
+    .filter((p) => wikiRelationSlug(p.fields.project) === projectSlug)
     .sort((a, b) => {
       const so = (a.fields.sort_order ?? 0) - (b.fields.sort_order ?? 0);
       if (so !== 0) return so;
@@ -121,7 +135,7 @@ export async function listWikiPagesForProject(projectSlug: string): Promise<{
     bySlug.set(page.slug, {
       slug: page.slug,
       title: page.fields.title,
-      parent: page.fields.parent || null,
+      parent: wikiRelationSlug(page.fields.parent),
       children: [],
     });
   }
