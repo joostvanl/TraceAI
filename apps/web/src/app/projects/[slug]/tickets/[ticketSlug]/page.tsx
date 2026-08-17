@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import {
   computeTokenRollup,
   humanApproveTarget,
@@ -9,6 +9,7 @@ import {
   listChildTickets,
   listDescendantSlugs,
   parseWorkflowDocument,
+  resolveTicketRef,
 } from "@traceai/core";
 import { HumanReviewActions } from "@/components/HumanReviewActions";
 import { Markdown } from "@/components/Markdown";
@@ -29,19 +30,38 @@ type Props = {
 
 export default async function TicketPage({ params }: Props) {
   const { slug, ticketSlug } = await params;
-  const [project, ticket, sessionUser, projectTickets] = await Promise.all([
+  const [project, sessionUser, projectTickets] = await Promise.all([
     getProject(slug),
-    getTicket(ticketSlug),
     getSessionUser(),
     listTicketsForProject(slug),
   ]);
 
-  if (!project || !ticket || ticket.fields.project !== slug) {
+  if (!project) {
     notFound();
   }
 
+  const resolved = resolveTicketRef(projectTickets, ticketSlug);
+  let ticket = resolved
+    ? (projectTickets.find((t) => t.slug === resolved.slug) ?? null)
+    : null;
+
+  if (!ticket) {
+    const byRef = await getTicket(ticketSlug);
+    if (byRef && byRef.fields.project === slug) {
+      ticket = byRef;
+    }
+  }
+
+  if (!ticket) {
+    notFound();
+  }
+
+  if (ticketSlug !== ticket.slug) {
+    permanentRedirect(`/projects/${slug}/tickets/${ticket.slug}`);
+  }
+
   const [comments, workflow] = await Promise.all([
-    listCommentsForTicket(ticketSlug),
+    listCommentsForTicket(ticket.slug),
     getWorkflow(ticket.fields.workflow),
   ]);
 

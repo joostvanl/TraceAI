@@ -7,6 +7,7 @@ import {
   newestFirstCapped,
   paginateItems,
   parseStages,
+  isTicketKeyPattern,
   relationSlug,
   searchProjectContent,
   sortTicketsNewestFirst,
@@ -74,9 +75,22 @@ export async function listTicketsForProject(
     .sort((a, b) => (a.fields.sort_order ?? 0) - (b.fields.sort_order ?? 0));
 }
 
-export async function getTicket(slug: string): Promise<Ticket | null> {
+export async function getTicket(slugOrKey: string): Promise<Ticket | null> {
+  const client = getPublicClient();
   try {
-    return await getPublicClient().getEntry<Ticket>("ticket", slug);
+    return await client.getEntry<Ticket>("ticket", slugOrKey);
+  } catch {
+    // Fall through to ticket_key lookup when the path segment looks like TRA-n.
+  }
+  if (!isTicketKeyPattern(slugOrKey)) return null;
+  const want = slugOrKey.trim().toUpperCase();
+  try {
+    const result = await client.listEntries<Ticket>("ticket", { limit: 100 });
+    return (
+      result.items.find(
+        (t) => (t.fields.ticket_key ?? "").toUpperCase() === want,
+      ) ?? null
+    );
   } catch {
     return null;
   }
