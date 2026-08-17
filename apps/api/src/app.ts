@@ -246,12 +246,16 @@ function mapWorkflow(w: Awaited<ReturnType<TraceService["listWorkflows"]>>[numbe
 }
 
 function mapWikiPage(
-  p: Awaited<ReturnType<TraceService["listWikiPages"]>>[number],
+  p: Awaited<ReturnType<TraceService["listWikiPages"]>>["items"][number],
+  options: { includeBody?: boolean } = {},
 ) {
+  // Listings omit the body on purpose: with every page's Markdown inline the
+  // response outgrows an agent's context. Use GET /v1/wiki-pages/:slug for it.
+  const withBody = options.includeBody ?? true;
   return {
     slug: p.slug,
     title: p.fields.title,
-    body: p.fields.body ?? "",
+    ...(withBody ? { body: p.fields.body ?? "" } : {}),
     project: p.fields.project,
     parent: p.fields.parent ?? null,
     sort_order: p.fields.sort_order ?? null,
@@ -1185,8 +1189,20 @@ export function createApp(deps: {
         400,
       );
     }
-    const pages = await deps.service.listWikiPages({ project });
-    return c.json(pages.map(mapWikiPage));
+    const includeBody = c.req.query("include_body") === "true";
+    const parentQuery = c.req.query("parent");
+    const page = await deps.service.listWikiPages({
+      project,
+      parent: parentQuery == null ? undefined : parentQuery,
+      limit: c.req.query("limit") ? Number(c.req.query("limit")) : undefined,
+      offset: c.req.query("offset") ? Number(c.req.query("offset")) : undefined,
+    });
+    return c.json({
+      items: page.items.map((p) => mapWikiPage(p, { includeBody })),
+      total: page.total,
+      limit: page.limit,
+      offset: page.offset,
+    });
   });
 
   app.get("/v1/wiki-pages/:slug", requireScope("wiki:read"), async (c) => {

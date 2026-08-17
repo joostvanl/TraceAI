@@ -433,11 +433,23 @@ export function registerTraceAiTools(
 
   server.tool(
     "list_wiki_pages",
-    "List wiki pages for a project (read-only tree nodes). Cursor must use TraceAI MCP only — never Aurora MCP for wiki entries.",
-    { project: z.string().describe("Project slug") },
-    async ({ project }) => {
+    "List wiki pages for a project (read-only tree nodes: slug, title, parent, sort_order). Page bodies are NOT included — use get_wiki_page for content. Returns {items, total, limit, offset}; compare total with items.length to see whether you got the whole tree. Cursor must use TraceAI MCP only — never Aurora MCP for wiki entries.",
+    {
+      project: z.string().describe("Project slug"),
+      parent: z
+        .string()
+        .optional()
+        .describe("Only direct children of this page slug; empty string for root pages"),
+      include_body: z
+        .boolean()
+        .optional()
+        .describe("Include Markdown bodies. Off by default — a full tree with bodies can exceed the context window"),
+      limit: z.number().int().optional(),
+      offset: z.number().int().optional(),
+    },
+    async ({ project, ...query }) => {
       try {
-        return ok(await client.listWikiPages(project), apiBase);
+        return ok(await client.listWikiPages(project, query), apiBase);
       } catch (error) {
         return fail(error);
       }

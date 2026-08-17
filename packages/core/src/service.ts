@@ -15,6 +15,7 @@ import {
   resolveWikiEntrySlugInProject,
   wikiLogicalSlug,
 } from "./wiki-slugs.js";
+import { selectWikiPages, sortWikiPages } from "./wiki-pages.js";
 import {
   DEFAULT_STAGES,
   DEFAULT_WORKFLOW_DOCUMENT,
@@ -909,7 +910,8 @@ export class TraceService {
       updatedAt?: string | null;
     }> = [];
     if (input.includeWiki !== false) {
-      wikiPages = (await this.listWikiPages({ project: input.project })).map(
+      // Search matches on page bodies, so it needs every page, not one slice.
+      wikiPages = (await this.loadProjectWikiPages(input.project)).map(
         (p) => ({
           slug: p.slug,
           title: p.fields.title,
@@ -1629,25 +1631,61 @@ export class TraceService {
     return comment;
   }
 
-  async listWikiPages(input: { project: string }): Promise<WikiPage[]> {
+  /**
+   * All published wiki pages of one project, in tree order (sort_order, title).
+   * Uses Aurora `field`/`in` so the project filter runs server-side, and pages
+   * through everything — the number of wiki pages in Aurora must never decide
+   * which pages of this project come back.
+   */
+  private async loadProjectWikiPages(project: string): Promise<WikiPage[]> {
+    const scoped = await this.listAllEntries<WikiPage>(WIKI_PAGE_CONTENT_TYPE, {
+      status: "published",
+      field: "project",
+      in: [project],
+    });
+    const matches = (pages: WikiPage[]) =>
+      sortWikiPages(
+        pages
+          .map((p) => this.normalizeWikiRelations(p))
+          .filter((p) => p.fields.project === project),
+      );
+
+    const filtered = matches(scoped);
+    if (filtered.length > 0) return filtered;
+    // Relation fields may be stored as objects rather than slugs, in which case
+    // the server-side filter matches nothing. An empty result is indistinguishable
+    // from "no pages yet", so confirm with a full scan before believing it.
+    return matches(
+      await this.listAllEntries<WikiPage>(WIKI_PAGE_CONTENT_TYPE, {
+        status: "published",
+      }),
+    );
+  }
+
+  async listWikiPages(input: {
+    project: string;
+    parent?: string | null;
+    limit?: number;
+    offset?: number;
+  }): Promise<{
+    items: WikiPage[];
+    total: number;
+    limit: number;
+    offset: number;
+  }> {
     await this.ensureReady();
     const project = await this.client.getEntryBySlug<Project>(
       "project",
       input.project,
     );
     if (!project) throw new Error(`Project not found: ${input.project}`);
-    const result = await this.client.listEntries<WikiPage>(
-      WIKI_PAGE_CONTENT_TYPE,
-      { status: "published", limit: 100 },
-    );
-    return result.items
-      .map((p) => this.normalizeWikiRelations(p))
-      .filter((p) => p.fields.project === input.project)
-      .sort((a, b) => {
-        const so = (a.fields.sort_order ?? 0) - (b.fields.sort_order ?? 0);
-        if (so !== 0) return so;
-        return a.fields.title.localeCompare(b.fields.title);
-      });
+
+    return selectWikiPages({
+      pages: await this.loadProjectWikiPages(input.project),
+      parent: input.parent,
+      limit: input.limit,
+      offset: input.offset,
+    });
   }
 
   async getWikiPage(slug: string): Promise<WikiPage | null> {
@@ -1674,7 +1712,7 @@ export class TraceService {
     const exact = await this.getWikiPage(want);
     if (exact && exact.fields.project === projectSlug) return exact;
 
-    const pages = await this.listWikiPages({ project: projectSlug });
+    const pages = await this.loadProjectWikiPages(projectSlug);
     const entrySlug = resolveWikiEntrySlugInProject({
       project: projectSlug,
       slugOrLogical: want,
@@ -1691,25 +1729,25 @@ export class TraceService {
     selfSlug?: string,
   ): Promise<string | null> {
     if (parentSlug == null || parentSlug === "") return null;
-    const all = (
-      await this.client.listEntries<WikiPage>(WIKI_PAGE_CONTENT_TYPE, {
-        limit: 100,
-      })
-    ).items.map((p) => this.normalizeWikiRelations(p));
-    const projectPages = all.filter((p) => p.fields.project === project);
+    const projectPages = await this.loadProjectWikiPages(project);
     const resolvedParent =
       resolveWikiEntrySlugInProject({
         project,
         slugOrLogical: parentSlug,
         pages: projectPages,
       }) ?? parentSlug;
-    const bySlug = new Map(all.map((p) => [p.slug, p] as const));
+    const bySlug = new Map(projectPages.map((p) => [p.slug, p] as const));
     const parent = bySlug.get(resolvedParent);
-    if (!parent) throw new Error(`Parent wiki page not found: ${parentSlug}`);
-    if (parent.fields.project !== project) {
-      throw new Error(
-        `Parent wiki page "${parentSlug}" belongs to a different project.`,
-      );
+    if (!parent) {
+      // Not in this project — look the entry up directly so "belongs to another
+      // project" stays distinguishable from "does not exist".
+      const foreign = await this.getWikiPage(resolvedParent);
+      if (foreign) {
+        throw new Error(
+          `Parent wiki page "${parentSlug}" belongs to a different project.`,
+        );
+      }
+      throw new Error(`Parent wiki page not found: ${parentSlug}`);
     }
     if (selfSlug && resolvedParent === selfSlug) {
       throw new Error("A wiki page cannot be its own parent.");

@@ -342,9 +342,26 @@ export class TraceApiClient {
     );
   }
 
-  listWikiPages(project: string) {
+  listWikiPages(
+    project: string,
+    query: {
+      include_body?: boolean;
+      parent?: string;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ) {
     const params = new URLSearchParams({ project });
-    return this.request<unknown[]>(`/v1/wiki-pages?${params}`);
+    if (query.include_body) params.set("include_body", "true");
+    if (query.parent != null) params.set("parent", query.parent);
+    if (query.limit != null) params.set("limit", String(query.limit));
+    if (query.offset != null) params.set("offset", String(query.offset));
+    return this.request<{
+      items: unknown[];
+      total: number;
+      limit: number;
+      offset: number;
+    }>(`/v1/wiki-pages?${params}`);
   }
 
   getWikiPage(slug: string) {
