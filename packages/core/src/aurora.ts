@@ -4,6 +4,62 @@ export type AuroraClientConfig = {
   locale?: string;
 };
 
+/**
+ * Aurora list query. Field filter (`field` + `in`) selects entries whose named
+ * content-type field equals one of the given values (max 50). See
+ * https://aurora.joostvanleeuwaarden.com/docs/management-api
+ */
+export type ListEntriesQuery = {
+  limit?: number;
+  offset?: number;
+  slug?: string;
+  status?: string;
+  locale?: string;
+  sort?: string;
+  order?: "asc" | "desc";
+  /** Content-type field apiId to filter on (requires `in`). */
+  field?: string;
+  /** One value or IN-list (max 50) for `field`. */
+  in?: string | readonly string[];
+};
+
+/** Aurora caps `in` to 50 values per request. */
+export const AURORA_FIELD_IN_MAX = 50;
+
+export function buildEntriesSearchParams(
+  query: ListEntriesQuery,
+  defaults: { locale: string; limit?: number },
+): URLSearchParams {
+  const params = new URLSearchParams();
+  params.set("limit", String(query.limit ?? defaults.limit ?? 100));
+  if (query.offset != null) params.set("offset", String(query.offset));
+  if (query.slug) params.set("slug", query.slug);
+  if (query.status) params.set("status", query.status);
+  if (query.sort) params.set("sort", query.sort);
+  if (query.order) params.set("order", query.order);
+  params.set("locale", query.locale ?? defaults.locale);
+
+  const field = query.field?.trim();
+  if (field) {
+    const values = (Array.isArray(query.in) ? query.in : [query.in ?? ""])
+      .map((v) => String(v).trim())
+      .filter(Boolean);
+    if (values.length === 0) {
+      throw new Error(
+        "Aurora listEntries field filter requires a non-empty `in` value list",
+      );
+    }
+    if (values.length > AURORA_FIELD_IN_MAX) {
+      throw new Error(
+        `Aurora listEntries field filter allows at most ${AURORA_FIELD_IN_MAX} values in \`in\` (got ${values.length})`,
+      );
+    }
+    params.set("field", field);
+    params.set("in", values.join(","));
+  }
+  return params;
+}
+
 export class AuroraApiError extends Error {
   constructor(
     message: string,
@@ -109,22 +165,8 @@ export class AuroraManagementClient {
     return result;
   }
 
-  listEntries<T>(
-    apiId: string,
-    query: {
-      limit?: number;
-      offset?: number;
-      slug?: string;
-      status?: string;
-      locale?: string;
-    } = {},
-  ) {
-    const params = new URLSearchParams();
-    params.set("limit", String(query.limit ?? 100));
-    if (query.offset != null) params.set("offset", String(query.offset));
-    if (query.slug) params.set("slug", query.slug);
-    if (query.status) params.set("status", query.status);
-    params.set("locale", query.locale ?? this.locale);
+  listEntries<T>(apiId: string, query: ListEntriesQuery = {}) {
+    const params = buildEntriesSearchParams(query, { locale: this.locale });
     return this.request<{
       items: T[];
       total: number;
@@ -336,24 +378,8 @@ export class AuroraPublicClient {
     return body as T;
   }
 
-  listEntries<T>(
-    apiId: string,
-    query: {
-      limit?: number;
-      offset?: number;
-      slug?: string;
-      locale?: string;
-      sort?: string;
-      order?: "asc" | "desc";
-    } = {},
-  ) {
-    const params = new URLSearchParams();
-    params.set("limit", String(query.limit ?? 100));
-    if (query.offset != null) params.set("offset", String(query.offset));
-    if (query.slug) params.set("slug", query.slug);
-    if (query.sort) params.set("sort", query.sort);
-    if (query.order) params.set("order", query.order);
-    params.set("locale", query.locale ?? this.locale);
+  listEntries<T>(apiId: string, query: ListEntriesQuery = {}) {
+    const params = buildEntriesSearchParams(query, { locale: this.locale });
     return this.request<{
       items: T[];
       total: number;

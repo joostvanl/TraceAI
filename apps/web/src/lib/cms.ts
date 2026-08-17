@@ -1,4 +1,5 @@
 import {
+  AURORA_FIELD_IN_MAX,
   AuroraPublicClient,
   TraceApiClient,
   computeProjectInsights,
@@ -6,6 +7,7 @@ import {
   newestFirstCapped,
   paginateItems,
   parseStages,
+  relationSlug,
   searchProjectContent,
   sortTicketsNewestFirst,
   type Comment,
@@ -83,15 +85,56 @@ export async function getTicket(slug: string): Promise<Ticket | null> {
 export async function listCommentsForTicket(
   ticketSlug: string,
 ): Promise<Comment[]> {
-  const result = await getPublicClient().listEntries<Comment>("comment", {
-    limit: 100,
-  });
-  return result.items
-    .filter((c) => c.fields.ticket === ticketSlug)
-    .sort(
-      (a, b) =>
-        new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-    );
+  const client = getPublicClient();
+  const pageSize = 100;
+  const items: Comment[] = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const result = await client.listEntries<Comment>("comment", {
+      limit: pageSize,
+      offset,
+      field: "ticket",
+      in: ticketSlug,
+    });
+    items.push(...result.items);
+    if (result.items.length < pageSize || items.length >= result.total) break;
+  }
+  return items.sort(
+    (a, b) =>
+      new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+  );
+}
+
+async function listCommentsForTickets(
+  ticketSlugs: readonly string[],
+): Promise<Comment[]> {
+  const unique = [
+    ...new Set(ticketSlugs.map((s) => s.trim()).filter(Boolean)),
+  ];
+  if (unique.length === 0) return [];
+  const client = getPublicClient();
+  const pageSize = 100;
+  const out: Comment[] = [];
+  for (let i = 0; i < unique.length; i += AURORA_FIELD_IN_MAX) {
+    const chunk = unique.slice(i, i + AURORA_FIELD_IN_MAX);
+    const chunkItems: Comment[] = [];
+    for (let offset = 0; ; offset += pageSize) {
+      const result = await client.listEntries<Comment>("comment", {
+        limit: pageSize,
+        offset,
+        field: "ticket",
+        in: chunk,
+      });
+      chunkItems.push(...result.items);
+      if (
+        result.items.length < pageSize ||
+        chunkItems.length >= result.total
+      ) {
+        break;
+      }
+    }
+    out.push(...chunkItems);
+  }
+  return out;
 }
 
 export type WikiTreeNode = {
@@ -282,15 +325,16 @@ export async function searchProjectPublic(
   limit: number;
   offset: number;
 }> {
-  const [tickets, comments, wiki] = await Promise.all([
-    listTicketsForProject(projectSlug),
-    getPublicClient().listEntries<Comment>("comment", { limit: 100 }),
+  const tickets = await listTicketsForProject(projectSlug);
+  const [comments, wiki] = await Promise.all([
+    listCommentsForTickets(tickets.map((t) => t.slug)),
     listWikiPagesForProject(projectSlug),
   ]);
 
   const commentsByTicket = new Map<string, Comment[]>();
-  for (const comment of comments.items) {
-    const key = comment.fields.ticket;
+  for (const comment of comments) {
+    const key = relationSlug(comment.fields.ticket);
+    if (!key) continue;
     const list = commentsByTicket.get(key) ?? [];
     list.push(comment);
     commentsByTicket.set(key, list);

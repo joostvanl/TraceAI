@@ -1,7 +1,9 @@
 import {
+  AURORA_FIELD_IN_MAX,
   AuroraApiError,
   AuroraManagementClient,
   type AuroraClientConfig,
+  type ListEntriesQuery,
 } from "./aurora.js";
 import {
   assertNonNegativeIntegerSortOrder,
@@ -147,10 +149,12 @@ export class TraceService {
   /**
    * Page through all entries of a content type. Aurora caps `limit` at 100, so
    * anything that can exceed that must paginate instead of asking for more.
+   * Prefer `field` + `in` for parent/child selections (max 50 values per page
+   * request — callers must chunk larger IN-lists).
    */
   private async listAllEntries<T>(
     apiId: string,
-    query: { status?: string } = {},
+    query: Pick<ListEntriesQuery, "status" | "field" | "in" | "sort" | "order"> = {},
   ): Promise<T[]> {
     const pageSize = 100;
     const items: T[] = [];
@@ -164,6 +168,35 @@ export class TraceService {
       if (result.items.length < pageSize || items.length >= result.total) break;
     }
     return items;
+  }
+
+  /**
+   * Load comments whose `ticket` field matches any of the given ticket slugs.
+   * Uses Aurora `field`/`in` (chunked at 50) instead of scanning every comment.
+   */
+  private async listCommentsForTickets(
+    ticketSlugs: readonly string[],
+    query: { status?: string } = { status: "published" },
+  ): Promise<Comment[]> {
+    const unique = [
+      ...new Set(
+        ticketSlugs
+          .map((s) => s.trim())
+          .filter(Boolean),
+      ),
+    ];
+    if (unique.length === 0) return [];
+    const out: Comment[] = [];
+    for (let i = 0; i < unique.length; i += AURORA_FIELD_IN_MAX) {
+      const chunk = unique.slice(i, i + AURORA_FIELD_IN_MAX);
+      const items = await this.listAllEntries<Comment>("comment", {
+        ...query,
+        field: "ticket",
+        in: chunk,
+      });
+      out.push(...items);
+    }
+    return out;
   }
 
   async listProjects(): Promise<Project[]> {
@@ -746,15 +779,13 @@ export class TraceService {
     if (!project) throw new Error(`Project not found: ${input.project}`);
 
     const tickets = await this.listTickets({ project: input.project });
-    const comments = (
-      await this.client.listEntries<Comment>("comment", {
-        status: "published",
-        limit: 100,
-      })
-    ).items;
+    const comments = await this.listCommentsForTickets(
+      tickets.map((t) => t.slug),
+    );
     const commentsByTicket = new Map<string, Comment[]>();
     for (const comment of comments) {
-      const key = comment.fields.ticket;
+      const key = relationSlug(comment.fields.ticket);
+      if (!key) continue;
       const list = commentsByTicket.get(key) ?? [];
       list.push(comment);
       commentsByTicket.set(key, list);
@@ -855,16 +886,11 @@ export class TraceService {
       project: ticket.fields.project,
     });
     const comments = (
-      await this.client.listEntries<Comment>("comment", {
-        status: "published",
-        limit: 100,
-      })
-    ).items
-      .filter((c) => relationSlug(c.fields.ticket) === ticket!.slug)
-      .sort(
-        (a, b) =>
-          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-      );
+      await this.listCommentsForTickets([ticket.slug])
+    ).sort(
+      (a, b) =>
+        new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    );
     const childSlugs = new Set(
       listChildTickets(projectTickets, ticket.slug).map((c) => c.slug),
     );
@@ -1495,9 +1521,7 @@ export class TraceService {
     await this.ensureReady();
     const ticket = await this.resolveTicket(input.ticket);
     if (!ticket) throw new Error(`Ticket not found: ${input.ticket}`);
-    const existing = (
-      await this.client.listEntries<Comment>("comment", { limit: 100 })
-    ).items;
+    const existing = await this.listCommentsForTickets([ticket.slug], {});
     const slug = uniqueSlug(
       `${ticket.slug}-comment`,
       new Set(existing.map((c) => c.slug)),
