@@ -15,7 +15,6 @@ import {
   Position,
   ReactFlow,
   ReactFlowProvider,
-  addEdge,
   useEdgesState,
   useNodesState,
   type Connection,
@@ -74,8 +73,13 @@ type VersionRow = {
 
 const NODE_WIDTH = 176;
 const NODE_HEIGHT = 56;
+// Forward transitions leave on the right and enter on the left; backward
+// transitions (reject/reopen) use dedicated bottom handles so they can be
+// routed underneath the row without crossing through node boxes.
 const SOURCE_HANDLE_ID = "out";
 const TARGET_HANDLE_ID = "in";
+const BACK_SOURCE_HANDLE_ID = "back-out";
+const BACK_TARGET_HANDLE_ID = "back-in";
 
 type StageNodeData = {
   label: string;
@@ -97,6 +101,13 @@ function StageNode({ data, selected }: NodeProps) {
         id={TARGET_HANDLE_ID}
         className="workflow-node__handle"
       />
+      <Handle
+        type="target"
+        position={Position.Bottom}
+        id={BACK_TARGET_HANDLE_ID}
+        className="workflow-node__handle workflow-node__handle--back"
+        style={{ left: "35%" }}
+      />
       <span className="workflow-node__name">{stageData.label}</span>
       <span className="workflow-node__key">{stageData.key}</span>
       {stageData.gated ? (
@@ -107,6 +118,13 @@ function StageNode({ data, selected }: NodeProps) {
         position={Position.Right}
         id={SOURCE_HANDLE_ID}
         className="workflow-node__handle"
+      />
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        id={BACK_SOURCE_HANDLE_ID}
+        className="workflow-node__handle workflow-node__handle--back"
+        style={{ left: "65%" }}
       />
     </div>
   );
@@ -140,23 +158,31 @@ function stageNodes(
 function stageEdges(stages: WorkflowStage[]): Edge[] {
   const stageIndex = new Map(stages.map((stage, index) => [stage.key, index]));
   const edges: Edge[] = [];
+  let backEdgeCount = 0;
   for (const stage of stages) {
     for (const target of stage.transitions) {
       const isBackEdge =
         (stageIndex.get(target) ?? 0) <= (stageIndex.get(stage.key) ?? 0);
-      edges.push({
+      // Stagger each backward edge on a different offset so parallel
+      // reject/reopen arrows do not stack on top of each other.
+      const backOffset = isBackEdge ? 24 + backEdgeCount * 26 : undefined;
+      if (isBackEdge) backEdgeCount += 1;
+      const edge = {
         id: `${stage.key}->${target}`,
         source: stage.key,
         target,
-        sourceHandle: SOURCE_HANDLE_ID,
-        targetHandle: TARGET_HANDLE_ID,
+        sourceHandle: isBackEdge ? BACK_SOURCE_HANDLE_ID : SOURCE_HANDLE_ID,
+        targetHandle: isBackEdge ? BACK_TARGET_HANDLE_ID : TARGET_HANDLE_ID,
         type: "smoothstep",
+        pathOptions: { borderRadius: 10, offset: backOffset },
         markerEnd: { type: MarkerType.ArrowClosed },
+        zIndex: isBackEdge ? 1 : 2,
         style: {
           stroke: isBackEdge ? "var(--priority-medium)" : "var(--accent)",
           strokeDasharray: isBackEdge ? "6 4" : undefined,
         },
-      });
+      } as Edge;
+      edges.push(edge);
     }
   }
   return edges;
@@ -167,7 +193,13 @@ function layoutStagesLeftToRight(
 ): Map<string, { x: number; y: number }> {
   const graph = new dagre.graphlib.Graph();
   graph.setDefaultEdgeLabel(() => ({}));
-  graph.setGraph({ rankdir: "LR", nodesep: 40, ranksep: 90, marginx: 24, marginy: 24 });
+  graph.setGraph({
+    rankdir: "LR",
+    nodesep: 60,
+    ranksep: 140,
+    marginx: 24,
+    marginy: 48,
+  });
   for (const stage of stages) {
     graph.setNode(stage.key, { width: NODE_WIDTH, height: NODE_HEIGHT });
   }
@@ -259,22 +291,10 @@ function WorkflowEditorPanelInner({
   const onConnect = useCallback(
     (connection: Connection) => {
       if (!connection.source || !connection.target) return;
-      setEdges((eds) =>
-        addEdge(
-          {
-            ...connection,
-            id: `${connection.source}->${connection.target}`,
-            sourceHandle: SOURCE_HANDLE_ID,
-            targetHandle: TARGET_HANDLE_ID,
-            type: "smoothstep",
-            markerEnd: { type: MarkerType.ArrowClosed },
-            style: { stroke: "var(--accent)" },
-          },
-          eds,
-        ),
-      );
-      setStages((prev) =>
-        prev.map((stage) =>
+      // Rebuild edges from the updated stages so the new transition gets the
+      // same handle/routing treatment (forward vs. back) as the rest.
+      setStages((prev) => {
+        const next = prev.map((stage) =>
           stage.key === connection.source &&
           !stage.transitions.includes(connection.target!)
             ? {
@@ -282,8 +302,10 @@ function WorkflowEditorPanelInner({
                 transitions: [...stage.transitions, connection.target!],
               }
             : stage,
-        ),
-      );
+        );
+        setEdges(stageEdges(next));
+        return next;
+      });
     },
     [setEdges],
   );
