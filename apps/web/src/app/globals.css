@@ -100,6 +100,15 @@ h2 {
   border-bottom: 1px solid var(--border);
 }
 
+.projects-section + .connect {
+  margin-top: 2.75rem;
+  margin-bottom: 0;
+  padding-top: 2rem;
+  padding-bottom: 0;
+  border-top: 1px solid var(--border);
+  border-bottom: none;
+}
+
 .steps {
   margin: 0 0 1.5rem;
   padding-left: 1.25rem;

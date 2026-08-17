@@ -2,13 +2,16 @@ import type { HomepageConnectContent } from "@/lib/cms";
 
 export function ConnectInstructions({
   connect,
+  headingLevel = "h1",
 }: {
   connect: HomepageConnectContent;
+  headingLevel?: "h1" | "h2";
 }) {
+  const Heading = headingLevel;
   return (
     <section className="connect" aria-labelledby="connect-heading">
       <p className="eyebrow">{connect.eyebrow}</p>
-      <h1 id="connect-heading">{connect.heading}</h1>
+      <Heading id="connect-heading">{connect.heading}</Heading>
       <p className="lede">{connect.lede}</p>
 
       <ol className="steps">

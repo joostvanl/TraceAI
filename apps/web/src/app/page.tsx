@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { listProjects } from "@/lib/cms";
+import { ConnectInstructions } from "@/components/ConnectInstructions";
+import { getHomepageConnect, listProjects } from "@/lib/cms";
 import { getSessionIdentity } from "@/lib/session";
 import { createTraceServerClient } from "@/lib/traceai-server";
 
@@ -59,50 +60,56 @@ async function loadMyProjects(): Promise<{
 }
 
 export default async function HomePage() {
-  const { projects, error } = await loadMyProjects();
+  const [{ projects, error }, connect] = await Promise.all([
+    loadMyProjects(),
+    getHomepageConnect(),
+  ]);
 
   return (
-    <section className="projects-section" aria-labelledby="projects-heading">
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "baseline",
-          gap: "1rem",
-          flexWrap: "wrap",
-        }}
-      >
-        <h1 id="projects-heading">Projects</h1>
-        <Link href="/projects/new" className="btn primary">
-          New project
-        </Link>
-      </div>
-      <p className="lede">
-        Overview of work prepared and tracked by AI agents. Open a project to
-        follow the live board or add a wish to the backlog.
-      </p>
+    <>
+      <section className="projects-section" aria-labelledby="projects-heading">
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "baseline",
+            gap: "1rem",
+            flexWrap: "wrap",
+          }}
+        >
+          <h1 id="projects-heading">Projects</h1>
+          <Link href="/projects/new" className="btn primary">
+            New project
+          </Link>
+        </div>
+        <p className="lede">
+          Overview of work prepared and tracked by AI agents. Open a project to
+          follow the live board or add a wish to the backlog.
+        </p>
 
-      {error ? (
-        <div className="empty">Could not load projects: {error}</div>
-      ) : projects.length === 0 ? (
-        <div className="empty">
-          No projects yet.{" "}
-          <Link href="/projects/new">Create your first project</Link>.
-        </div>
-      ) : (
-        <div className="project-grid">
-          {projects.map((project) => (
-            <Link
-              key={project.slug}
-              href={`/projects/${project.slug}`}
-              className="project-card"
-            >
-              <h2>{project.name}</h2>
-              <p>{project.description || "No description."}</p>
-            </Link>
-          ))}
-        </div>
-      )}
-    </section>
+        {error ? (
+          <div className="empty">Could not load projects: {error}</div>
+        ) : projects.length === 0 ? (
+          <div className="empty">
+            No projects yet.{" "}
+            <Link href="/projects/new">Create your first project</Link>.
+          </div>
+        ) : (
+          <div className="project-grid">
+            {projects.map((project) => (
+              <Link
+                key={project.slug}
+                href={`/projects/${project.slug}`}
+                className="project-card"
+              >
+                <h2>{project.name}</h2>
+                <p>{project.description || "No description."}</p>
+              </Link>
+            ))}
+          </div>
+        )}
+      </section>
+      <ConnectInstructions connect={connect} headingLevel="h2" />
+    </>
   );
 }
