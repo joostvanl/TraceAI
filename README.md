@@ -57,14 +57,29 @@ pnpm --filter @traceai/web dev
 
 ## MCP (Cursor)
 
-Agents only need a TraceAI token. **Always** point `TRACEAI_API_URL` at the public API — loopback is rejected by the MCP server:
+**Preferred (hosted):** agents need only a TraceAI token — no TraceAI checkout, no local Node MCP process:
+
+```json
+{
+  "mcpServers": {
+    "traceai": {
+      "url": "https://traceai.joostvanleeuwaarden.com/mcp",
+      "headers": {
+        "Authorization": "Bearer trc_YOUR_TOKEN"
+      }
+    }
+  }
+}
+```
+
+**Maintainer / local stdio** (optional): run `@traceai/mcp` from a TraceAI checkout. Always point `TRACEAI_API_URL` at the public API — loopback is rejected by the MCP server:
 
 ```json
 {
   "mcpServers": {
     "traceai": {
       "command": "node",
-      "args": ["C:/Users/joost.vanleeuwaarden/webroot/TraceAI/packages/mcp/dist/index.js"],
+      "args": ["C:/Users/joost.vanleeuwaarden/webroot/TraceAI/packages/mcp/dist/stdio.js"],
       "env": {
         "TRACEAI_API_URL": "https://traceai.joostvanleeuwaarden.com",
         "TRACEAI_TOKEN": "trc_YOUR_TOKEN"
@@ -137,7 +152,7 @@ Because events are durable and shared, `TRACEAI_API_URL` and `NEXT_PUBLIC_TRACEA
 - `TRACEAI_EVENTS_DB` — path to the SQLite event store (default `data/traceai-events.sqlite`). For multi-instance deploys, point every worker at the **same** file (shared volume).
 - `TRACEAI_EVENTS_POLL_MS` — how often each worker checks the store for events written by another process (default `750`).
 
-Cursor sometimes leaves orphan `node …/packages/mcp/dist/index.js` processes after an MCP reload. Those keep the old `TRACEAI_API_URL` (historically localhost). The MCP server now **rejects** loopback URLs. Every tool result includes `api_base` — if it is not `https://traceai.joostvanleeuwaarden.com`, clean up and reload:
+Cursor sometimes leaves orphan `node …/packages/mcp/dist/stdio.js` processes after an MCP reload. Those keep the old `TRACEAI_API_URL` (historically localhost). The MCP server now **rejects** loopback URLs. Every tool result includes `api_base` — if it is not `https://traceai.joostvanleeuwaarden.com`, clean up and reload:
 
 ```bash
 node scripts/cleanup-traceai-mcp.mjs

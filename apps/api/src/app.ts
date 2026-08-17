@@ -37,6 +37,7 @@ import {
   requestIdMiddleware,
   type AppVariables,
 } from "./middleware.js";
+import { mountTraceAiMcp } from "./mcp.js";
 import { getNotificationStore } from "./notifications.js";
 import {
   resolveSelfServiceAuthUser,
@@ -284,15 +285,27 @@ export function createApp(deps: {
     "*",
     cors({
       origin: corsOrigins(),
-      allowMethods: ["GET", "POST", "PATCH", "OPTIONS"],
-      allowHeaders: ["Authorization", "Content-Type", "x-request-id"],
-      exposeHeaders: ["x-request-id"],
+      allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+      allowHeaders: [
+        "Authorization",
+        "Content-Type",
+        "Accept",
+        "x-request-id",
+        "mcp-session-id",
+        "mcp-protocol-version",
+        "last-event-id",
+      ],
+      exposeHeaders: ["x-request-id", "mcp-session-id"],
     }),
   );
 
   app.use("*", requestIdMiddleware());
 
   app.get("/health", (c) => c.json({ status: "ok", service: "traceai-api" }));
+
+  // Hosted MCP (Streamable HTTP) — Cursor remote config needs only URL + Bearer.
+  // Mounted outside `/v1/*` so auth errors stay MCP/HTTP-native; still requires trc_….
+  mountTraceAiMcp(app, deps.authStore);
 
   // Public SSE stream for read-only live boards (no bearer token).
   // Supports resume via `Last-Event-ID` header or `?after=<event_id>`: on

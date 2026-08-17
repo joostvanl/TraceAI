@@ -24,6 +24,9 @@ ingress:
     path: ^/v1(/|$)
     service: http://127.0.0.1:3847
   - hostname: traceai.joostvanleeuwaarden.com
+    path: ^/mcp(/|$)
+    service: http://127.0.0.1:3847
+  - hostname: traceai.joostvanleeuwaarden.com
     path: ^/health$
     service: http://127.0.0.1:3847
   - hostname: traceai.joostvanleeuwaarden.com

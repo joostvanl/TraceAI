@@ -19,6 +19,9 @@ importers:
       '@traceai/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@traceai/mcp':
+        specifier: workspace:*
+        version: link:../../packages/mcp
       hono:
         specifier: ^4.7.5
         version: 4.13.0

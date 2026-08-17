@@ -1,8 +1,9 @@
 /**
  * Kills orphan TraceAI MCP node processes so a Cursor reload starts clean.
  *
- * Cursor sometimes leaves old `node …/packages/mcp/dist/index.js` processes
- * running after an MCP toggle/reload. Those keep the previous TRACEAI_API_URL
+ * Cursor sometimes leaves old `node …/packages/mcp/dist/stdio.js` (or legacy
+ * `…/dist/index.js`) processes running after an MCP toggle/reload. Those keep
+ * the previous TRACEAI_API_URL (often loopback) and cause confusing 404s.
  * and silently write to the wrong API instance (breaking the live board).
  *
  *   node scripts/cleanup-traceai-mcp.mjs
@@ -15,7 +16,10 @@ function listPids() {
   if (process.platform === "win32") {
     const ps = `
 Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
-  Where-Object { $_.CommandLine -like '*TraceAI*packages*mcp*dist*index.js*' } |
+  Where-Object {
+    $_.CommandLine -like '*TraceAI*packages*mcp*dist*index.js*' -or
+    $_.CommandLine -like '*TraceAI*packages*mcp*dist*stdio.js*'
+  } |
   Select-Object -ExpandProperty ProcessId
 `;
     const out = execFileSync(
@@ -35,7 +39,7 @@ Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
     "bash",
     [
       "-lc",
-      "ps -ax -o pid=,command= | grep '[T]raceAI.*/packages/mcp/dist/index.js' | awk '{print $1}'",
+      "ps -ax -o pid=,command= | grep -E '[T]raceAI.*/packages/mcp/dist/(index|stdio)\\.js' | awk '{print $1}'",
     ],
     { encoding: "utf8" },
   );

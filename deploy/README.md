@@ -31,6 +31,7 @@ again. Secrets remain outside the git checkout.
 | LAN Web UI | http://192.168.1.91:3011 |
 | LAN API health | http://192.168.1.91:3847/health |
 | Public SSE | https://traceai.joostvanleeuwaarden.com/events?project=traceai |
+| Public MCP | https://traceai.joostvanleeuwaarden.com/mcp |
 
 ## Cloudflare tunnel
 
@@ -40,7 +41,7 @@ Hostname `traceai.joostvanleeuwaarden.com` is served by systemd unit
 `path` values are **Go regular expressions**, not shell globs. Use anchored
 prefixes only:
 
-- `^/events(/|$)`, `^/v1(/|$)`, `^/health$` → TraceAI API on `127.0.0.1:3847`
+- `^/events(/|$)`, `^/v1(/|$)`, `^/mcp(/|$)`, `^/health$` → TraceAI API on `127.0.0.1:3847`
 - everything else → TraceAI web on `127.0.0.1:3011`
 
 Do **not** write `/v1*` or `/events*`: in regex `1*` means “zero or more ones”,

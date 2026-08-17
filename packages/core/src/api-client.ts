@@ -7,6 +7,11 @@ export type TraceApiClientOptions = {
   humanProxySecret?: string;
   /** Signed human identity header value (web session proxy). */
   humanIdentityHeader?: string;
+  /**
+   * Optional fetch implementation. Hosted MCP uses this to route tool calls
+   * in-process through the Hono app (no HTTP loopback).
+   */
+  fetchImpl?: typeof fetch;
 };
 
 export class TraceApiError extends Error {
@@ -26,12 +31,14 @@ export class TraceApiClient {
   private readonly token: string;
   private readonly humanProxySecret?: string;
   private readonly humanIdentityHeader?: string;
+  private readonly fetchImpl: typeof fetch;
 
   constructor(options: TraceApiClientOptions) {
     this.apiUrl = options.apiUrl.replace(/\/$/, "");
     this.token = options.token;
     this.humanProxySecret = options.humanProxySecret?.trim() || undefined;
     this.humanIdentityHeader = options.humanIdentityHeader?.trim() || undefined;
+    this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
   private async request<T>(
@@ -51,7 +58,10 @@ export class TraceApiClient {
       }
     }
 
-    const res = await fetch(`${this.apiUrl}${path}`, { ...init, headers });
+    const res = await this.fetchImpl(`${this.apiUrl}${path}`, {
+      ...init,
+      headers,
+    });
     const text = await res.text();
     let body: unknown = null;
     if (text) {

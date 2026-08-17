@@ -536,7 +536,7 @@ const HOMEPAGE_CONNECT_FALLBACK: HomepageConnectContent = {
   steps: [
     {
       title: "Ensure the TraceAI API is reachable",
-      body: "Production (required for agents / MCP):\nhttps://traceai.joostvanleeuwaarden.com\n\nPoint TRACEAI_API_URL at that URL. A local API is only for developing TraceAI itself — agents should still use production.",
+      body: "Production (required for agents / MCP):\nhttps://traceai.joostvanleeuwaarden.com\n\nHosted MCP lives at the same host: https://traceai.joostvanleeuwaarden.com/mcp — no local TraceAI checkout required.",
     },
     {
       title: "Create a TraceAI API token",
@@ -544,7 +544,7 @@ const HOMEPAGE_CONNECT_FALLBACK: HomepageConnectContent = {
     },
     {
       title: "Register the TraceAI MCP server",
-      body: "Add TraceAI to Cursor (~/.cursor/mcp.json) or Claude Code MCP config. Point args at packages/mcp/dist/index.js in your TraceAI checkout, set TRACEAI_API_URL to the production URL, and replace trc_YOUR_TOKEN with your token (see MCP config template below).",
+      body: "Add TraceAI to Cursor (~/.cursor/mcp.json) or Claude Code as a remote MCP server. Use the hosted URL + Authorization Bearer header with your trc_… token (see MCP config template below). No Node.js TraceAI checkout is required.",
     },
     {
       title: "Reload MCP and start",
@@ -579,11 +579,9 @@ const HOMEPAGE_CONNECT_FALLBACK: HomepageConnectContent = {
   mcpConfig: `{
   "mcpServers": {
     "traceai": {
-      "command": "node",
-      "args": ["<path-to-TraceAI>/packages/mcp/dist/index.js"],
-      "env": {
-        "TRACEAI_API_URL": "https://traceai.joostvanleeuwaarden.com",
-        "TRACEAI_TOKEN": "trc_YOUR_TOKEN"
+      "url": "https://traceai.joostvanleeuwaarden.com/mcp",
+      "headers": {
+        "Authorization": "Bearer trc_YOUR_TOKEN"
       }
     }
   }
