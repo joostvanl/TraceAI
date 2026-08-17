@@ -1661,7 +1661,7 @@ export class TraceService {
 
   /**
    * Resolve a wiki page within a project by Aurora entry slug or logical slug
-   * (e.g. `home` → `acme--home` when namespaced).
+   * (e.g. `home` → `acme-wp-home` when namespaced).
    */
   async getWikiPageInProject(
     projectSlug: string,

@@ -1,5 +1,11 @@
-/** Separator between project slug and logical wiki page slug in Aurora entry slugs. */
-export const WIKI_ENTRY_SLUG_SEP = "--";
+/**
+ * Separator between project slug and logical wiki page slug in Aurora entry slugs.
+ * Must be URL-safe (no consecutive hyphens — Aurora rejects `--`).
+ */
+export const WIKI_ENTRY_SLUG_SEP = "-wp-";
+
+/** Legacy separator from TRA-66 first attempt; still recognized when resolving. */
+const WIKI_ENTRY_SLUG_SEP_LEGACY = "--";
 
 /**
  * Build a globally unique Aurora entry slug for a wiki page within a project.
@@ -13,8 +19,13 @@ export function wikiEntrySlug(project: string, logicalSlug: string): string {
   }
   const prefix = `${projectSlug}${WIKI_ENTRY_SLUG_SEP}`;
   if (logical.startsWith(prefix)) return logical;
-  if (logical.includes(WIKI_ENTRY_SLUG_SEP)) {
-    // Already an entry-style slug for another/same project — keep as-is.
+  const legacyPrefix = `${projectSlug}${WIKI_ENTRY_SLUG_SEP_LEGACY}`;
+  if (logical.startsWith(legacyPrefix)) return logical;
+  if (
+    logical.includes(WIKI_ENTRY_SLUG_SEP) ||
+    logical.includes(WIKI_ENTRY_SLUG_SEP_LEGACY)
+  ) {
+    // Already an entry-style slug — keep as-is.
     return logical;
   }
   return `${prefix}${logical}`;
@@ -30,6 +41,8 @@ export function wikiLogicalSlug(entrySlug: string, project: string): string {
   if (!slug) return slug;
   const prefix = `${projectSlug}${WIKI_ENTRY_SLUG_SEP}`;
   if (slug.startsWith(prefix)) return slug.slice(prefix.length);
+  const legacyPrefix = `${projectSlug}${WIKI_ENTRY_SLUG_SEP_LEGACY}`;
+  if (slug.startsWith(legacyPrefix)) return slug.slice(legacyPrefix.length);
   return slug;
 }
 

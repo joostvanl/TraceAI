@@ -8,10 +8,11 @@ import {
 } from "./wiki-slugs.js";
 
 describe("wikiEntrySlug / wikiLogicalSlug", () => {
-  it("round-trips namespaced slugs", () => {
+  it("round-trips namespaced slugs with URL-safe separator", () => {
     const entry = wikiEntrySlug("acme", "home");
-    assert.equal(entry, "acme--home");
+    assert.equal(entry, "acme-wp-home");
     assert.equal(wikiLogicalSlug(entry, "acme"), "home");
+    assert.ok(!entry.includes("--"), "Aurora rejects consecutive hyphens");
   });
 
   it("passes through legacy bare slugs", () => {
@@ -19,7 +20,11 @@ describe("wikiEntrySlug / wikiLogicalSlug", () => {
   });
 
   it("does not double-prefix", () => {
-    assert.equal(wikiEntrySlug("acme", "acme--home"), "acme--home");
+    assert.equal(wikiEntrySlug("acme", "acme-wp-home"), "acme-wp-home");
+  });
+
+  it("still resolves legacy -- separator", () => {
+    assert.equal(wikiLogicalSlug("acme--home", "acme"), "home");
   });
 });
 
@@ -42,7 +47,7 @@ describe("allocateWikiEntrySlug", () => {
         logicalSlug: "home",
         existingEntrySlugs: ["home"],
       }),
-      "acme--home",
+      "acme-wp-home",
     );
   });
 
@@ -51,14 +56,14 @@ describe("allocateWikiEntrySlug", () => {
       allocateWikiEntrySlug({
         project: "acme",
         logicalSlug: "home",
-        existingEntrySlugs: ["home", "acme--home"],
+        existingEntrySlugs: ["home", "acme-wp-home"],
       }),
     );
   });
 });
 
 describe("resolveWikiEntrySlugInProject", () => {
-  const pages = [{ slug: "home" }, { slug: "acme--architecture" }];
+  const pages = [{ slug: "home" }, { slug: "acme-wp-architecture" }];
 
   it("resolves exact entry slug", () => {
     assert.equal(
@@ -78,7 +83,7 @@ describe("resolveWikiEntrySlugInProject", () => {
         slugOrLogical: "architecture",
         pages,
       }),
-      "acme--architecture",
+      "acme-wp-architecture",
     );
   });
 
