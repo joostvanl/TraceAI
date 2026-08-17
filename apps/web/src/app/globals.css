@@ -1267,6 +1267,54 @@ h2 {
   min-height: 520px;
 }
 
+.workflow-node {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  justify-content: center;
+  width: 176px;
+  height: 56px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text);
+  box-sizing: border-box;
+}
+
+.workflow-node--gated {
+  border: 2px solid var(--priority-medium);
+}
+
+.workflow-node--selected {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.workflow-node__name {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.workflow-node__key {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-muted, #8a97a5);
+}
+
+.workflow-node__gate {
+  font-size: 10px;
+  color: var(--priority-medium);
+}
+
+.workflow-node__handle {
+  width: 9px;
+  height: 9px;
+  background: var(--accent);
+  border: 1px solid var(--bg-elevated);
+}
+
 .workflow-editor__panel {
   border: 1px solid var(--border);
   border-radius: 12px;

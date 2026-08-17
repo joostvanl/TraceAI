@@ -10,7 +10,9 @@ import {
 import {
   Background,
   Controls,
+  Handle,
   MiniMap,
+  Position,
   ReactFlow,
   ReactFlowProvider,
   addEdge,
@@ -20,9 +22,12 @@ import {
   type Edge,
   type Node,
   type NodeMouseHandler,
+  type NodeProps,
+  type NodeTypes,
   MarkerType,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import dagre from "@dagrejs/dagre";
 import {
   documentToCanvas,
   getEdgeScopedRules,
@@ -67,54 +72,122 @@ type VersionRow = {
   createdAt: string;
 };
 
+const NODE_WIDTH = 176;
+const NODE_HEIGHT = 56;
+const SOURCE_HANDLE_ID = "out";
+const TARGET_HANDLE_ID = "in";
+
+type StageNodeData = {
+  label: string;
+  key: string;
+  gated: boolean;
+};
+
+function StageNode({ data, selected }: NodeProps) {
+  const stageData = data as StageNodeData;
+  return (
+    <div
+      className={`workflow-node${stageData.gated ? " workflow-node--gated" : ""}${
+        selected ? " workflow-node--selected" : ""
+      }`}
+    >
+      <Handle
+        type="target"
+        position={Position.Left}
+        id={TARGET_HANDLE_ID}
+        className="workflow-node__handle"
+      />
+      <span className="workflow-node__name">{stageData.label}</span>
+      <span className="workflow-node__key">{stageData.key}</span>
+      {stageData.gated ? (
+        <span className="workflow-node__gate">human gate</span>
+      ) : null}
+      <Handle
+        type="source"
+        position={Position.Right}
+        id={SOURCE_HANDLE_ID}
+        className="workflow-node__handle"
+      />
+    </div>
+  );
+}
+
+const nodeTypes: NodeTypes = { stage: StageNode };
+
 function stageNodes(
   stages: WorkflowStage[],
   layoutNodes: Array<{ id: string; x: number; y: number }>,
 ): Node[] {
   const positions = new Map(layoutNodes.map((n) => [n.id, n]));
-  return stages.map((stage, index) => {
-    const pos = positions.get(stage.key) ?? {
-      id: stage.key,
-      x: 80 + (index % 3) * 240,
-      y: 80 + Math.floor(index / 3) * 120,
-    };
+  const fallback = layoutStagesLeftToRight(stages);
+  return stages.map((stage) => {
+    const pos = positions.get(stage.key) ?? fallback.get(stage.key)!;
     return {
       id: stage.key,
+      type: "stage",
       position: { x: pos.x, y: pos.y },
+      width: NODE_WIDTH,
+      height: NODE_HEIGHT,
       data: {
         label: stage.name,
         key: stage.key,
         gated: Boolean(stage.agent?.require_human_approval_on_exit),
-      },
-      style: {
-        border: stage.agent?.require_human_approval_on_exit
-          ? "2px solid var(--priority-medium)"
-          : "1px solid var(--border)",
-        background: "var(--bg-elevated)",
-        color: "var(--text)",
-        borderRadius: 8,
-        padding: "10px 14px",
-        minWidth: 140,
-        fontSize: 13,
-      },
+      } satisfies StageNodeData,
     };
   });
 }
 
 function stageEdges(stages: WorkflowStage[]): Edge[] {
+  const stageIndex = new Map(stages.map((stage, index) => [stage.key, index]));
   const edges: Edge[] = [];
   for (const stage of stages) {
     for (const target of stage.transitions) {
+      const isBackEdge =
+        (stageIndex.get(target) ?? 0) <= (stageIndex.get(stage.key) ?? 0);
       edges.push({
         id: `${stage.key}->${target}`,
         source: stage.key,
         target,
+        sourceHandle: SOURCE_HANDLE_ID,
+        targetHandle: TARGET_HANDLE_ID,
+        type: "smoothstep",
         markerEnd: { type: MarkerType.ArrowClosed },
-        style: { stroke: "var(--accent)" },
+        style: {
+          stroke: isBackEdge ? "var(--priority-medium)" : "var(--accent)",
+          strokeDasharray: isBackEdge ? "6 4" : undefined,
+        },
       });
     }
   }
   return edges;
+}
+
+function layoutStagesLeftToRight(
+  stages: WorkflowStage[],
+): Map<string, { x: number; y: number }> {
+  const graph = new dagre.graphlib.Graph();
+  graph.setDefaultEdgeLabel(() => ({}));
+  graph.setGraph({ rankdir: "LR", nodesep: 40, ranksep: 90, marginx: 24, marginy: 24 });
+  for (const stage of stages) {
+    graph.setNode(stage.key, { width: NODE_WIDTH, height: NODE_HEIGHT });
+  }
+  for (const stage of stages) {
+    for (const target of stage.transitions) {
+      if (stages.some((s) => s.key === target)) {
+        graph.setEdge(stage.key, target);
+      }
+    }
+  }
+  dagre.layout(graph);
+  const positions = new Map<string, { x: number; y: number }>();
+  for (const stage of stages) {
+    const node = graph.node(stage.key);
+    positions.set(stage.key, {
+      x: (node?.x ?? 0) - NODE_WIDTH / 2,
+      y: (node?.y ?? 0) - NODE_HEIGHT / 2,
+    });
+  }
+  return positions;
 }
 
 function linesToText(value: string[] | undefined): string {
@@ -191,6 +264,9 @@ function WorkflowEditorPanelInner({
           {
             ...connection,
             id: `${connection.source}->${connection.target}`,
+            sourceHandle: SOURCE_HANDLE_ID,
+            targetHandle: TARGET_HANDLE_ID,
+            type: "smoothstep",
             markerEnd: { type: MarkerType.ArrowClosed },
             style: { stroke: "var(--accent)" },
           },
@@ -274,6 +350,16 @@ function WorkflowEditorPanelInner({
       })),
     };
   }
+
+  const autoLayout = useCallback(() => {
+    const positions = layoutStagesLeftToRight(stages);
+    setNodes((nds) =>
+      nds.map((node) => {
+        const pos = positions.get(node.id);
+        return pos ? { ...node, position: { x: pos.x, y: pos.y } } : node;
+      }),
+    );
+  }, [stages, setNodes]);
 
   function buildCanvasPayload() {
     return {
@@ -547,6 +633,13 @@ function WorkflowEditorPanelInner({
           <button
             type="button"
             className="btn btn-secondary"
+            onClick={autoLayout}
+          >
+            Auto-layout
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
             onClick={() => setShowJson((v) => !v)}
           >
             {showJson ? "Verberg JSON" : "Toon JSON"}
@@ -592,6 +685,7 @@ function WorkflowEditorPanelInner({
           <ReactFlow
             nodes={nodes}
             edges={edges}
+            nodeTypes={nodeTypes}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
