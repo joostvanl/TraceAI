@@ -54,14 +54,20 @@ export type WorkflowStageAgentRules = {
   require_human_approval_on_exit?: boolean;
   /**
    * Target stage for an "approved" verdict. Defaults to the first transition
-   * that is not listed in human_reject_to.
+   * that is not listed in human_reject_to or human_dismiss_to.
    */
   human_approve_to?: string;
   /**
-   * Target stage key(s) for a "rejected" verdict. Reject transitions must
-   * include a "## Reden" section.
+   * Target stage key(s) for a "rejected" verdict. Empty/omitted means this
+   * gate has no reject outcome. Reject transitions must include "## Reden".
    */
   human_reject_to?: string[];
+  /**
+   * Optional target stage for a "dismissed" verdict (abandon / do not pursue).
+   * Omit on gates that should not offer Afzien. Dismiss transitions must
+   * include "## Reden".
+   */
+  human_dismiss_to?: string;
 };
 
 export type WorkflowStage = {
@@ -215,7 +221,11 @@ export function isTicketResolution(value: unknown): value is TicketResolution {
   );
 }
 
-export const TICKET_REVIEW_STATES = ["approved", "rejected"] as const;
+export const TICKET_REVIEW_STATES = [
+  "approved",
+  "rejected",
+  "dismissed",
+] as const;
 
 /** Human verdict on a review; the agent transitions on the back of it. */
 export type TicketReviewState = (typeof TICKET_REVIEW_STATES)[number];
@@ -348,7 +358,7 @@ export const DEFAULT_AGENT_POLICY: WorkflowAgentPolicy = {
     "Continue with '## Deze stap' describing what you completed and what the next stage should verify.",
     "List concrete artifacts (files, endpoints, commands) when relevant.",
     "Pass tokens_used: a non-negative integer estimate of LLM tokens (prompt+completion) spent on this step.",
-    "Stages with require_human_approval_on_exit need a human verdict (Goedkeuren/Afkeuren in the UI) before the agent may transition out.",
+    "Stages with require_human_approval_on_exit need a human verdict in the UI (configured outcomes: approved / rejected / dismissed as applicable) before the agent may transition out.",
   ],
   min_description_chars: 280,
   require_description_headings: [
@@ -377,17 +387,18 @@ export const DEFAULT_STAGES: WorkflowStage[] = [
   {
     key: "in_refinement",
     name: "In Refinement",
-    transitions: ["todo", "backlog"],
+    transitions: ["todo", "backlog", "done"],
     agent: {
       purpose: "Description is being sharpened into an executable playbook.",
       on_enter: [
         "Confirm the ticket is ready to be rewritten with Context/Goal/What to implement/Acceptance criteria.",
       ],
       on_exit: [
-        "Wait for the human verdict on the playbook (Goedkeuren/Afkeuren in the UI); only then transition.",
-        "When moving to To do, confirm the description is complete enough for a junior agent.",
-        "If the verdict is rejected, move the ticket back to Backlog and reference the reason (## Reden).",
-        "Pass tokens_estimate when leaving to To do.",
+        "Wait for the human verdict in the UI (outcomes configured on this stage); only then transition.",
+        "When moving to the approve target, confirm the description is complete enough for a junior agent.",
+        "If the verdict is rejected, move to the reject target and include ## Reden.",
+        "If the verdict is dismissed, move to the dismiss target with ## Reden and the Done enter requirements (resolution, ## Wiki).",
+        "Pass tokens_estimate when leaving toward a target that requires it.",
       ],
       require_comment_on_exit: true,
       require_tokens_estimate_on_exit_to: ["todo"],
@@ -395,20 +406,27 @@ export const DEFAULT_STAGES: WorkflowStage[] = [
       require_human_approval_on_exit: true,
       human_approve_to: "todo",
       human_reject_to: ["backlog"],
+      human_dismiss_to: "done",
     },
   },
   {
     key: "todo",
     name: "To do",
-    transitions: ["in_progress", "backlog", "in_refinement"],
+    transitions: ["in_progress", "backlog", "in_refinement", "done"],
     agent: {
-      purpose: "Ready to start; next up for an agent.",
+      purpose:
+        "Ready to start — human intake gate: approve to begin, or dismiss to close without work.",
       on_enter: ["Confirm dependencies are clear in the description."],
       on_exit: [
-        "When moving to In progress, describe the first implementation step and confirm that work can start.",
-        "When returning to Backlog or In Refinement, explain why the ticket is no longer ready.",
+        "Wait for the human intake verdict; only then transition.",
+        "When approved, describe the first implementation step and confirm work can start.",
+        "When dismissed, move to the dismiss target with ## Reden, an appropriate non-completed resolution, and ## Wiki.",
+        "When returning to Backlog or In Refinement (if allowed without this gate), explain why the ticket is no longer ready.",
       ],
       require_comment_on_exit: true,
+      require_human_approval_on_exit: true,
+      human_approve_to: "in_progress",
+      human_dismiss_to: "done",
     },
   },
   {
@@ -441,9 +459,10 @@ export const DEFAULT_STAGES: WorkflowStage[] = [
       require_comment_on_enter: true,
       require_comment_sections_on_enter: ["## Testverslag", "## Uitslag"],
       on_exit: [
-        "Wait for the human verdict (Goedkeuren/Afkeuren in the UI); only then transition.",
-        "If the verdict is rejected, move to To do and reference the reason (## Reden).",
-        "If the verdict is approved, move to Done, confirm acceptance criteria are met and include ## Wiki.",
+        "Wait for the human verdict in the UI (outcomes configured on this stage); only then transition.",
+        "If the verdict is rejected, move to the reject target and include ## Reden.",
+        "If approved toward Done with resolution completed, confirm acceptance criteria and ## Uitslag PASS.",
+        "When moving to Done, include the required ## Wiki section.",
       ],
       require_comment_on_exit: true,
       require_human_approval_on_exit: true,
@@ -542,6 +561,10 @@ function parseStageAgent(raw: unknown): WorkflowStageAgentRules | undefined {
     human_reject_to: Array.isArray(item.human_reject_to)
       ? item.human_reject_to.map((s) => String(s))
       : undefined,
+    human_dismiss_to:
+      item.human_dismiss_to != null && String(item.human_dismiss_to).trim()
+        ? String(item.human_dismiss_to).trim()
+        : undefined,
   };
 }
 
@@ -754,26 +777,38 @@ export function exitRequiresTokensEstimate(
 
 /**
  * Approve target for a human-gated stage. Prefer explicit `human_approve_to`,
- * otherwise the first transition not listed in `human_reject_to`.
+ * otherwise the first transition not listed as reject or dismiss.
  */
 export function humanApproveTarget(stage: WorkflowStage): string | null {
   const explicit = stage.agent?.human_approve_to?.trim();
   if (explicit && stage.transitions.includes(explicit)) return explicit;
-  const rejects = new Set(stage.agent?.human_reject_to ?? []);
-  return stage.transitions.find((t) => !rejects.has(t)) ?? null;
-}
-
-/** Reject target(s) for a human-gated stage. */
-export function humanRejectTargets(stage: WorkflowStage): string[] {
-  const configured = stage.agent?.human_reject_to ?? [];
-  const valid = configured.filter((t) => stage.transitions.includes(t));
-  if (valid.length) return valid;
-  const approve = humanApproveTarget(stage);
-  return stage.transitions.filter((t) => t !== approve);
+  const dismiss = humanDismissTarget(stage);
+  const reserved = new Set([
+    ...humanRejectTargets(stage),
+    ...(dismiss ? [dismiss] : []),
+  ]);
+  return stage.transitions.find((t) => !reserved.has(t)) ?? null;
 }
 
 /**
- * Where a human verdict may take a gated stage. `null` outside a gate.
+ * Reject target(s) for a human-gated stage. Only explicitly configured keys;
+ * empty/omitted means this gate has no reject outcome (no invented fallback).
+ */
+export function humanRejectTargets(stage: WorkflowStage): string[] {
+  const configured = stage.agent?.human_reject_to ?? [];
+  return configured.filter((t) => stage.transitions.includes(t));
+}
+
+/** Dismiss target for a human-gated stage, or null when not configured. */
+export function humanDismissTarget(stage: WorkflowStage): string | null {
+  const explicit = stage.agent?.human_dismiss_to?.trim();
+  if (explicit && stage.transitions.includes(explicit)) return explicit;
+  return null;
+}
+
+/**
+ * Where a human verdict may take a gated stage. `null` outside a gate or when
+ * that verdict outcome is not configured on the stage.
  */
 export function reviewVerdictTarget(
   stage: WorkflowStage,
@@ -781,6 +816,7 @@ export function reviewVerdictTarget(
 ): string | null {
   if (stage.agent?.require_human_approval_on_exit !== true) return null;
   if (verdict === "approved") return humanApproveTarget(stage);
+  if (verdict === "dismissed") return humanDismissTarget(stage);
   return humanRejectTargets(stage)[0] ?? null;
 }
 
@@ -804,13 +840,15 @@ export function validateHumanGateExit(input: {
   }
 
   const rejects = humanRejectTargets(input.fromStage);
+  const dismissTo = humanDismissTarget(input.fromStage);
   const rejecting = rejects.includes(input.toStage.key);
+  const dismissing = dismissTo === input.toStage.key;
 
   if (!input.asHuman) {
     const verdict = input.reviewState?.trim();
     if (!isTicketReviewState(verdict)) {
       errors.push(
-        `Stage "${input.fromStage.key}" is waiting for a human review verdict. Ask the reviewer to use Goedkeuren/Afkeuren in the TraceAI UI, then transition on the back of that verdict.`,
+        `Stage "${input.fromStage.key}" is waiting for a human review verdict. Ask the reviewer to use Goedkeuren/Afkeuren/Afzien in the TraceAI UI (as configured for this stage), then transition on the back of that verdict.`,
       );
       return errors;
     }
@@ -823,11 +861,11 @@ export function validateHumanGateExit(input: {
     }
   }
 
-  if (rejecting) {
+  if (rejecting || dismissing) {
     const comment = input.comment?.trim() ?? "";
     if (!normalizeHeading(comment).includes("## reden")) {
       errors.push(
-        `Rejecting from "${input.fromStage.key}" requires comment section "## Reden" with the rejection reason.`,
+        `Leaving "${input.fromStage.key}" towards "${input.toStage.key}" requires comment section "## Reden" with the reason.`,
       );
     }
   }
@@ -856,8 +894,30 @@ export function validateReviewVerdict(input: {
     );
     return errors;
   }
-  if (input.verdict === "rejected" && !input.comment?.trim()) {
-    errors.push("Rejecting a review requires a reason.");
+  if (input.verdict === "approved" && !humanApproveTarget(input.stage)) {
+    errors.push(
+      `Stage "${input.stage.key}" has no approve target configured for an approved verdict.`,
+    );
+  }
+  if (input.verdict === "rejected" && humanRejectTargets(input.stage).length === 0) {
+    errors.push(
+      `Stage "${input.stage.key}" has no reject target configured; rejected is not allowed.`,
+    );
+  }
+  if (input.verdict === "dismissed" && !humanDismissTarget(input.stage)) {
+    errors.push(
+      `Stage "${input.stage.key}" has no dismiss target configured; dismissed is not allowed.`,
+    );
+  }
+  if (
+    (input.verdict === "rejected" || input.verdict === "dismissed") &&
+    !input.comment?.trim()
+  ) {
+    errors.push(
+      input.verdict === "dismissed"
+        ? "Dismissing requires a reason."
+        : "Rejecting a review requires a reason.",
+    );
   }
   return errors;
 }

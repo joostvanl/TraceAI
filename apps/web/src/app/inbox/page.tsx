@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
   humanApproveTarget,
+  humanDismissTarget,
   humanRejectTargets,
   isTicketReviewState,
   listDescendantSlugs,
@@ -100,6 +101,7 @@ async function InboxTicketBody({
   const rejectTo = currentStage
     ? (humanRejectTargets(currentStage)[0] ?? null)
     : null;
+  const dismissTo = currentStage ? humanDismissTarget(currentStage) : null;
   const reviewState = ticket.fields.review_state;
   const verdict = isTicketReviewState(reviewState)
     ? {
@@ -159,7 +161,7 @@ async function InboxTicketBody({
             projectSlug={item.project}
             stageName={currentStage?.name ?? ticket.fields.stage}
             authenticated={authenticated}
-            gate={{ approveTo, rejectTo }}
+            gate={{ approveTo, rejectTo, dismissTo }}
             verdict={verdict}
             gatedChildCount={gatedChildCount}
           />

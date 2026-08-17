@@ -66,16 +66,29 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const verdict = body.verdict?.trim();
-  if (verdict !== "approved" && verdict !== "rejected") {
+  if (
+    verdict !== "approved" &&
+    verdict !== "rejected" &&
+    verdict !== "dismissed"
+  ) {
     return NextResponse.json(
-      { message: "verdict must be approved or rejected", code: "VALIDATION" },
+      {
+        message: "verdict must be approved, rejected, or dismissed",
+        code: "VALIDATION",
+      },
       { status: 400 },
     );
   }
   const comment = body.comment?.trim() ?? "";
-  if (verdict === "rejected" && !comment) {
+  if ((verdict === "rejected" || verdict === "dismissed") && !comment) {
     return NextResponse.json(
-      { message: "A rejection needs a reason", code: "VALIDATION" },
+      {
+        message:
+          verdict === "dismissed"
+            ? "Dismissing needs a reason"
+            : "A rejection needs a reason",
+        code: "VALIDATION",
+      },
       { status: 400 },
     );
   }

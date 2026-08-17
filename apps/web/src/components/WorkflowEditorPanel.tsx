@@ -976,12 +976,32 @@ function StageProperties({
                   agent: {
                     human_reject_to: event.target.value
                       ? [event.target.value]
-                      : undefined,
+                      : [],
                   },
                 })
               }
             >
-              <option value="">(auto)</option>
+              <option value="">(geen)</option>
+              {stage.transitions.map((key) => (
+                <option key={key} value={key}>
+                  {key}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Dismiss →
+            <select
+              value={agent.human_dismiss_to ?? ""}
+              onChange={(event) =>
+                onChange({
+                  agent: {
+                    human_dismiss_to: event.target.value || undefined,
+                  },
+                })
+              }
+            >
+              <option value="">(geen)</option>
               {stage.transitions.map((key) => (
                 <option key={key} value={key}>
                   {key}

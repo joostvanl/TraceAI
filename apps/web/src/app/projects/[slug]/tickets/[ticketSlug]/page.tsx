@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import {
   computeTokenRollup,
   humanApproveTarget,
+  humanDismissTarget,
   humanRejectTargets,
   isTicketReviewState,
   listChildTickets,
@@ -50,6 +51,7 @@ export default async function TicketPage({ params }: Props) {
     currentStage?.agent?.require_human_approval_on_exit === true;
   const approveTo = currentStage ? humanApproveTarget(currentStage) : null;
   const rejectTo = currentStage ? humanRejectTargets(currentStage)[0] ?? null : null;
+  const dismissTo = currentStage ? humanDismissTarget(currentStage) : null;
   const reviewState = ticket.fields.review_state;
   const verdict = isTicketReviewState(reviewState)
     ? {
@@ -219,7 +221,7 @@ export default async function TicketPage({ params }: Props) {
               projectSlug={slug}
               stageName={currentStage?.name ?? ticket.fields.stage}
               authenticated={Boolean(sessionUser)}
-              gate={{ approveTo, rejectTo }}
+              gate={{ approveTo, rejectTo, dismissTo }}
               verdict={verdict}
               gatedChildCount={gatedChildCount}
             />

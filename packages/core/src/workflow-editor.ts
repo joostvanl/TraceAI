@@ -8,7 +8,7 @@ import type {
   WorkflowStage,
   WorkflowStageAgentRules,
 } from "./types.js";
-import { humanApproveTarget, humanRejectTargets } from "./types.js";
+import { humanApproveTarget, humanDismissTarget, humanRejectTargets } from "./types.js";
 
 export type {
   TicketTemplate,
@@ -290,6 +290,7 @@ export function validateWorkflowDocument(
       const explicitApprove = stage.agent.human_approve_to?.trim();
       const approve = humanApproveTarget(stage);
       const rejects = humanRejectTargets(stage);
+      const dismiss = humanDismissTarget(stage);
       if (explicitApprove && !stage.transitions.includes(explicitApprove)) {
         issues.push({
           code: "HUMAN_APPROVE_INVALID",
@@ -313,11 +314,32 @@ export function validateWorkflowDocument(
           });
         }
       }
-      if (!configuredRejects.length && !rejects.length && stage.transitions.length < 2) {
+      const explicitDismiss = stage.agent.human_dismiss_to?.trim();
+      if (explicitDismiss && !stage.transitions.includes(explicitDismiss)) {
         issues.push({
-          code: "HUMAN_REJECT_INVALID",
-          message: `Stage "${stage.key}" heeft human gate maar geen reject-target.`,
-          path: `stages.${stage.key}.agent.human_reject_to`,
+          code: "HUMAN_DISMISS_INVALID",
+          message: `Stage "${stage.key}" dismiss-target "${explicitDismiss}" zit niet in transitions.`,
+          path: `stages.${stage.key}.agent.human_dismiss_to`,
+        });
+      }
+      if (!rejects.length && !dismiss && stage.transitions.length === 0) {
+        issues.push({
+          code: "HUMAN_OUTCOMES_INVALID",
+          message: `Stage "${stage.key}" heeft human gate zonder geldige transitions.`,
+          path: `stages.${stage.key}.agent`,
+        });
+      }
+      const outcomeTargets = [
+        approve,
+        ...rejects,
+        ...(dismiss ? [dismiss] : []),
+      ].filter(Boolean) as string[];
+      const uniqueOutcomes = new Set(outcomeTargets);
+      if (uniqueOutcomes.size !== outcomeTargets.length) {
+        issues.push({
+          code: "HUMAN_OUTCOMES_OVERLAP",
+          message: `Stage "${stage.key}" heeft overlappende human-gate targets (approve/reject/dismiss moeten distinct zijn).`,
+          path: `stages.${stage.key}.agent`,
         });
       }
       for (const target of stage.agent.require_tokens_estimate_on_exit_to ?? []) {
@@ -533,7 +555,7 @@ export function summarizeWorkflowBehaviour(doc: {
     const transitions =
       stage.transitions.length > 0 ? stage.transitions.join(", ") : "(geen)";
     const gate = stage.agent?.require_human_approval_on_exit
-      ? ` [human gate → approve:${humanApproveTarget(stage) ?? "?"} reject:${humanRejectTargets(stage).join("|") || "—"}]`
+      ? ` [human gate → approve:${humanApproveTarget(stage) ?? "?"} reject:${humanRejectTargets(stage).join("|") || "—"} dismiss:${humanDismissTarget(stage) ?? "—"}]`
       : "";
     lines.push(`- ${stage.name} (${stage.key}) → ${transitions}${gate}`);
   }
