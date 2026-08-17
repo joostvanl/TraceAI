@@ -1442,6 +1442,7 @@ h2 {
 .workflow-editor__props > label:has(textarea),
 .workflow-editor__panel-empty > label:has(textarea),
 .workflow-editor__props > .workflow-editor__check,
+.workflow-editor__props > .workflow-editor__rule-list,
 .workflow-editor__panel-empty > .workflow-editor__preview,
 .workflow-editor__panel-empty > .workflow-editor__versions,
 .workflow-editor__panel-empty > .workflow-editor__templates,
@@ -1491,6 +1492,54 @@ h2 {
 
 .workflow-editor__check input {
   width: auto;
+}
+
+.workflow-editor__rule-list {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+}
+
+.workflow-editor__rule-list-label {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.workflow-editor__rule-list-empty {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.workflow-editor__rule-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.workflow-editor__rule-row {
+  display: grid;
+  grid-template-columns: 1.5rem minmax(0, 1fr) auto;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.workflow-editor__rule-index {
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-align: right;
+}
+
+.workflow-editor__rule-row input {
+  margin: 0;
+}
+
+.workflow-editor__rule-remove,
+.workflow-editor__rule-add {
+  width: fit-content;
+  font-size: 0.8rem;
+  padding: 0.35rem 0.65rem;
 }
 
 .workflow-editor__issues {

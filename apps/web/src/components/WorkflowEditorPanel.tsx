@@ -222,16 +222,61 @@ function layoutStagesLeftToRight(
   return positions;
 }
 
-function linesToText(value: string[] | undefined): string {
-  return (value ?? []).join("\n");
-}
+function RuleListEditor({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string[] | undefined;
+  onChange: (next: string[] | undefined) => void;
+}) {
+  const rules = value ?? [];
 
-function textToLines(value: string): string[] | undefined {
-  const lines = value
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-  return lines.length ? lines : undefined;
+  function commit(next: string[]) {
+    const cleaned = next.map((line) => line.trim()).filter(Boolean);
+    onChange(cleaned.length ? cleaned : undefined);
+  }
+
+  return (
+    <div className="workflow-editor__rule-list">
+      <div className="workflow-editor__rule-list-label">{label}</div>
+      {rules.length === 0 ? (
+        <p className="workflow-editor__rule-list-empty muted">Geen regels</p>
+      ) : (
+        <ul className="workflow-editor__rule-rows">
+          {rules.map((rule, index) => (
+            <li key={index} className="workflow-editor__rule-row">
+              <span className="workflow-editor__rule-index">{index + 1}</span>
+              <input
+                value={rule}
+                onChange={(event) => {
+                  const next = [...rules];
+                  next[index] = event.target.value;
+                  onChange(next);
+                }}
+                onBlur={() => commit(rules)}
+              />
+              <button
+                type="button"
+                className="workflow-editor__rule-remove"
+                onClick={() => commit(rules.filter((_, i) => i !== index))}
+              >
+                Verwijder
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <button
+        type="button"
+        className="workflow-editor__rule-add"
+        onClick={() => onChange([...(value ?? []), ""])}
+      >
+        Regel toevoegen
+      </button>
+    </div>
+  );
 }
 
 export function WorkflowEditorPanel({
@@ -917,26 +962,16 @@ function StageProperties({
           rows={4}
         />
       </label>
-      <label>
-        on_enter (één per regel)
-        <textarea
-          value={linesToText(agent.on_enter)}
-          onChange={(event) =>
-            onChange({ agent: { on_enter: textToLines(event.target.value) } })
-          }
-          rows={6}
-        />
-      </label>
-      <label>
-        on_exit (één per regel)
-        <textarea
-          value={linesToText(agent.on_exit)}
-          onChange={(event) =>
-            onChange({ agent: { on_exit: textToLines(event.target.value) } })
-          }
-          rows={6}
-        />
-      </label>
+      <RuleListEditor
+        label="on_enter"
+        value={agent.on_enter}
+        onChange={(on_enter) => onChange({ agent: { on_enter } })}
+      />
+      <RuleListEditor
+        label="on_exit"
+        value={agent.on_exit}
+        onChange={(on_exit) => onChange({ agent: { on_exit } })}
+      />
       <label className="workflow-editor__check">
         <input
           type="checkbox"
