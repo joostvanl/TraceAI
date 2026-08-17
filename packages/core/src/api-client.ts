@@ -1,3 +1,5 @@
+import type { TicketReviewState } from "./types.js";
+
 export type TraceApiClientOptions = {
   apiUrl: string;
   token: string;
@@ -210,7 +212,7 @@ export class TraceApiClient {
   recordReviewVerdict(
     slug: string,
     body: {
-      verdict: "approved" | "rejected";
+      verdict: TicketReviewState;
       comment?: string;
       /** Signed-in reviewer, recorded instead of the proxy token name. */
       reviewer?: string;

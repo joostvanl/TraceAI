@@ -11,6 +11,7 @@ import {
   membershipSlug,
   parseWorkflowDocument,
   requiredRoleForAction,
+  TICKET_REVIEW_STATES,
   WorkflowValidationError,
   type ProjectRole,
   type Ticket,
@@ -982,7 +983,10 @@ export function createApp(deps: {
     }>();
     if (!body?.verdict) {
       return c.json(
-        { message: "verdict is required (approved | rejected)", code: "VALIDATION" },
+        {
+          message: `verdict is required (${TICKET_REVIEW_STATES.join(" | ")})`,
+          code: "VALIDATION",
+        },
         400,
       );
     }

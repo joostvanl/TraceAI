@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { TraceApiError } from "@traceai/core";
+import {
+  isTicketReviewState,
+  TICKET_REVIEW_STATES,
+  TraceApiError,
+} from "@traceai/core";
 import { getSessionIdentity, isLoginConfigured } from "@/lib/session";
 import { createTraceServerClient } from "@/lib/traceai-server";
 
@@ -66,29 +70,19 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const verdict = body.verdict?.trim();
-  if (
-    verdict !== "approved" &&
-    verdict !== "rejected" &&
-    verdict !== "dismissed"
-  ) {
+  if (!isTicketReviewState(verdict)) {
     return NextResponse.json(
       {
-        message: "verdict must be approved, rejected, or dismissed",
+        message: `verdict must be one of: ${TICKET_REVIEW_STATES.join(", ")}`,
         code: "VALIDATION",
       },
       { status: 400 },
     );
   }
   const comment = body.comment?.trim() ?? "";
-  if ((verdict === "rejected" || verdict === "dismissed") && !comment) {
+  if (verdict !== "approved" && !comment) {
     return NextResponse.json(
-      {
-        message:
-          verdict === "dismissed"
-            ? "Dismissing needs a reason"
-            : "A rejection needs a reason",
-        code: "VALIDATION",
-      },
+      { message: "This verdict needs a reason", code: "VALIDATION" },
       { status: 400 },
     );
   }

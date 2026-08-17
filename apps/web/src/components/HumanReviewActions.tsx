@@ -3,6 +3,7 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import type { TicketReviewState } from "@traceai/core";
 
 export type HumanGateInfo = {
   /** Stage key the agent moves to after an approved verdict. */
@@ -14,7 +15,7 @@ export type HumanGateInfo = {
 };
 
 export type ReviewVerdict = {
-  state: "approved" | "rejected" | "dismissed";
+  state: TicketReviewState;
   by: string | null;
   at: string | null;
 };
