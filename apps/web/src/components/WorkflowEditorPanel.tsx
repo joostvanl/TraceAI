@@ -341,6 +341,32 @@ function WorkflowEditorPanelInner({
     [stages, agentPolicy],
   );
 
+  // Selected transitions light up so it stays clear which arrow the property
+  // panel edits, even where several arrows run close together.
+  const renderedEdges = useMemo(
+    () =>
+      edges.map((edge) => {
+        const active =
+          edge.selected ||
+          (selection?.kind === "edge" && selection.id === edge.id);
+        if (!active) return edge;
+        return {
+          ...edge,
+          zIndex: 10,
+          style: {
+            ...edge.style,
+            stroke: "var(--accent-bright)",
+            strokeWidth: 3,
+          },
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: "var(--accent-bright)",
+          },
+        };
+      }),
+    [edges, selection],
+  );
+
   function layoutFromNodes() {
     return {
       nodes: nodes.map((node) => ({
@@ -684,7 +710,7 @@ function WorkflowEditorPanelInner({
         <div className="workflow-editor__canvas">
           <ReactFlow
             nodes={nodes}
-            edges={edges}
+            edges={renderedEdges}
             nodeTypes={nodeTypes}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
