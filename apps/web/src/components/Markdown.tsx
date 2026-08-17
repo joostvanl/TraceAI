@@ -8,7 +8,18 @@ export function Markdown({ content }: { content: string }) {
 
   return (
     <div className="markdown">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          table: ({ children }) => (
+            <div className="markdown-table-wrap">
+              <table>{children}</table>
+            </div>
+          ),
+        }}
+      >
+        {content}
+      </ReactMarkdown>
     </div>
   );
 }

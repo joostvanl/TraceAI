@@ -181,6 +181,21 @@ export class TraceApiClient {
     );
   }
 
+  reorderTickets(body: {
+    project: string;
+    stage: string;
+    ordered_slugs: string[];
+  }) {
+    return this.request<unknown>(
+      "/v1/tickets/reorder",
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+      { asHuman: Boolean(this.humanIdentityHeader) },
+    );
+  }
+
   transitionTicket(
     slug: string,
     toStage: string,

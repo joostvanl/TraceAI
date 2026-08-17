@@ -334,6 +334,35 @@ h2 {
   color: inherit;
 }
 
+.ticket-slot {
+  position: relative;
+}
+
+.ticket-card.ticket-reorderable {
+  cursor: grab;
+}
+
+.ticket-card.ticket-reorderable:active {
+  cursor: grabbing;
+}
+
+.ticket-card.ticket-dragging {
+  opacity: 0.45;
+}
+
+.ticket-drop-indicator {
+  height: 3px;
+  margin: 0 0 0.35rem;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.board-reorder-error {
+  margin: 0 0 0.75rem;
+  color: var(--priority-high, #c44);
+  font-size: 0.85rem;
+}
+
 .column-human-gate {
   border-color: rgba(201, 162, 39, 0.42);
 }
@@ -662,6 +691,37 @@ h2 {
 .markdown ol {
   margin: 0 0 0.85rem;
   padding-left: 1.25rem;
+}
+
+.markdown-table-wrap {
+  overflow-x: auto;
+  margin: 0 0 0.85rem;
+  max-width: 100%;
+}
+
+.markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.markdown th,
+.markdown td {
+  text-align: left;
+  padding: 0.55rem 0.65rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.markdown th {
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--bg);
+}
+
+.markdown tr:last-child td {
+  border-bottom: none;
 }
 
 .wiki-tree {

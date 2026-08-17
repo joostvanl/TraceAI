@@ -37,6 +37,7 @@ export default async function ProjectPage({ params }: Props) {
         tokensActual: ticket.fields.tokens_actual ?? null,
         resolution: ticket.fields.resolution ?? null,
         reviewState: ticket.fields.review_state || null,
+        sortOrder: ticket.fields.sort_order ?? null,
       }));
 
   const eventsUrl =
@@ -87,6 +88,7 @@ export default async function ProjectPage({ params }: Props) {
             lastStageKey={lastStageKey}
             initialTickets={initialTickets}
             eventsUrl={eventsUrl}
+            canReorder={Boolean(sessionUser)}
           />
         </>
       )}

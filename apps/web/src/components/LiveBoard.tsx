@@ -1,7 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type MouseEvent,
+} from "react";
+import { groupByStage, moveItem } from "@/lib/board-order";
 import { newestFirstCapped } from "@traceai/core";
 
 export type BoardTicket = {
@@ -19,6 +27,8 @@ export type BoardTicket = {
   resolution?: string | null;
   /** Human verdict on the current human-gated stage, if one was given. */
   reviewState?: string | null;
+  /** Vertical order within a stage (first column). */
+  sortOrder?: number | null;
 };
 
 export type BoardStage = {
@@ -41,6 +51,7 @@ type TicketEvent = {
     tokens_actual?: number | null;
     resolution?: string | null;
     review_state?: string | null;
+    sort_order?: number | null;
   };
   from_stage?: string;
   to_stage?: string;
@@ -54,6 +65,8 @@ type Props = {
   lastStageKey?: string;
   initialTickets: BoardTicket[];
   eventsUrl: string;
+  /** When true, first-column cards are vertically reorderable. */
+  canReorder?: boolean;
 };
 
 function formatTokenCount(value: number): string {
@@ -105,32 +118,13 @@ function reviewBadge(
   };
 }
 
-function groupByStage(
-  stages: BoardStage[],
-  tickets: BoardTicket[],
-  lastStageKey?: string,
-): Record<string, BoardTicket[]> {
-  const map: Record<string, BoardTicket[]> = {};
-  for (const stage of stages) map[stage.key] = [];
-  for (const ticket of tickets) {
-    if (!map[ticket.stage]) map[ticket.stage] = [];
-    map[ticket.stage].push(ticket);
-  }
-  if (lastStageKey && map[lastStageKey]) {
-    map[lastStageKey] = newestFirstCapped(
-      map[lastStageKey],
-      (t) => t.stageChangedAt,
-    );
-  }
-  return map;
-}
-
 export function LiveBoard({
   projectSlug,
   stages,
   lastStageKey,
   initialTickets,
   eventsUrl,
+  canReorder = false,
 }: Props) {
   const [tickets, setTickets] = useState<BoardTicket[]>(initialTickets);
   const [flashSlug, setFlashSlug] = useState<string | null>(null);
@@ -139,11 +133,26 @@ export function LiveBoard({
   );
   const [lastEventAt, setLastEventAt] = useState<string | null>(null);
   const [lastEventId, setLastEventId] = useState<string | null>(null);
+  const [draggingSlug, setDraggingSlug] = useState<string | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const [reorderError, setReorderError] = useState<string | null>(null);
+  const [persisting, setPersisting] = useState(false);
+  const suppressClickRef = useRef(false);
+  const dragFromIndexRef = useRef<number | null>(null);
 
-  const ticketsByStage = useMemo(
-    () => groupByStage(stages, tickets, lastStageKey),
-    [stages, tickets, lastStageKey],
-  );
+  const reorderableStageKey = stages[0]?.key;
+  const reorderEnabled = canReorder && Boolean(reorderableStageKey);
+
+  const ticketsByStage = useMemo(() => {
+    const map = groupByStage(stages, tickets, reorderableStageKey);
+    if (lastStageKey && map[lastStageKey]) {
+      map[lastStageKey] = newestFirstCapped(
+        map[lastStageKey],
+        (t) => t.stageChangedAt,
+      );
+    }
+    return map;
+  }, [stages, tickets, lastStageKey, reorderableStageKey]);
 
   // Events are now durable and cross-process: writes to any API instance land
   // in the shared store, and this stream replays anything missed on reconnect
@@ -215,6 +224,10 @@ export function LiveBoard({
             event.type === "ticket.transitioned"
               ? null
               : (event.ticket.review_state ?? null),
+          sortOrder:
+            event.ticket.sort_order !== undefined
+              ? event.ticket.sort_order
+              : (previous?.sortOrder ?? null),
         };
         return [...without, next];
       });
@@ -240,6 +253,143 @@ export function LiveBoard({
     };
   }, [eventsUrl, projectSlug]);
 
+  async function persistReorder(
+    stageKey: string,
+    ordered: BoardTicket[],
+    previousTickets: BoardTicket[],
+  ) {
+    setPersisting(true);
+    setReorderError(null);
+    try {
+      const res = await fetch("/api/tickets/reorder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project: projectSlug,
+          stage: stageKey,
+          ordered_slugs: ordered.map((t) => t.slug),
+        }),
+      });
+      if (!res.ok) {
+        const payload = (await res.json().catch(() => null)) as {
+          message?: string;
+        } | null;
+        throw new Error(payload?.message || `Reorder failed (${res.status})`);
+      }
+      // Apply canonical indices so local state matches the server.
+      setTickets((prev) => {
+        const orderBySlug = new Map(
+          ordered.map((t, index) => [t.slug, index] as const),
+        );
+        return prev.map((t) => {
+          const nextOrder = orderBySlug.get(t.slug);
+          if (nextOrder === undefined) return t;
+          return { ...t, sortOrder: nextOrder };
+        });
+      });
+    } catch (error) {
+      setTickets(previousTickets);
+      setReorderError(
+        error instanceof Error ? error.message : "Could not save new order",
+      );
+    } finally {
+      setPersisting(false);
+    }
+  }
+
+  function onCardDragStart(
+    event: DragEvent<HTMLAnchorElement>,
+    stageKey: string,
+    index: number,
+    slug: string,
+  ) {
+    if (!reorderEnabled || stageKey !== reorderableStageKey || persisting) {
+      event.preventDefault();
+      return;
+    }
+    dragFromIndexRef.current = index;
+    setDraggingSlug(slug);
+    setDropIndex(index);
+    setReorderError(null);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", slug);
+  }
+
+  function onCardDragOver(
+    event: DragEvent<HTMLElement>,
+    stageKey: string,
+    index: number,
+  ) {
+    if (!reorderEnabled || stageKey !== reorderableStageKey) return;
+    if (draggingSlug == null) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDropIndex(index);
+  }
+
+  function onColumnDragOver(event: DragEvent<HTMLElement>, stageKey: string) {
+    if (!reorderEnabled || stageKey !== reorderableStageKey) return;
+    if (draggingSlug == null) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+  }
+
+  function onCardDrop(
+    event: DragEvent<HTMLElement>,
+    stageKey: string,
+    toIndex: number,
+  ) {
+    event.preventDefault();
+    void finishDrop(stageKey, toIndex);
+  }
+
+  function onColumnDrop(event: DragEvent<HTMLElement>, stageKey: string) {
+    event.preventDefault();
+    const column = ticketsByStage[stageKey] ?? [];
+    void finishDrop(stageKey, Math.max(0, column.length - 1));
+  }
+
+  async function finishDrop(stageKey: string, toIndex: number) {
+    const fromIndex = dragFromIndexRef.current;
+    setDraggingSlug(null);
+    setDropIndex(null);
+    dragFromIndexRef.current = null;
+    if (
+      !reorderEnabled ||
+      stageKey !== reorderableStageKey ||
+      fromIndex == null ||
+      fromIndex === toIndex
+    ) {
+      return;
+    }
+    suppressClickRef.current = true;
+    const column = ticketsByStage[stageKey] ?? [];
+    const reordered = moveItem(column, fromIndex, toIndex);
+    if (reordered === column) return;
+
+    const previousTickets = tickets;
+    const optimistic = tickets.map((t) => {
+      const idx = reordered.findIndex((r) => r.slug === t.slug);
+      if (idx < 0) return t;
+      return { ...t, sortOrder: idx };
+    });
+    setTickets(optimistic);
+    await persistReorder(stageKey, reordered, previousTickets);
+  }
+
+  function onCardDragEnd() {
+    setDraggingSlug(null);
+    setDropIndex(null);
+    dragFromIndexRef.current = null;
+  }
+
+  function onCardClick(event: MouseEvent<HTMLAnchorElement>) {
+    if (suppressClickRef.current) {
+      event.preventDefault();
+      suppressClickRef.current = false;
+    }
+  }
+
   return (
     <div className="live-board">
       <div className="live-status" aria-live="polite">
@@ -257,16 +407,32 @@ export function LiveBoard({
             ? ` · last update ${new Date(lastEventAt).toLocaleTimeString()}`
             : null}
           {lastEventId ? ` · #${lastEventId}` : null}
+          {persisting ? " · saving order…" : null}
         </span>
       </div>
+      {reorderError ? (
+        <p className="board-reorder-error" role="alert">
+          {reorderError}
+        </p>
+      ) : null}
 
       <div className="board">
         {stages.map((stage) => {
           const columnTickets = ticketsByStage[stage.key] ?? [];
+          const isReorderColumn =
+            reorderEnabled && stage.key === reorderableStageKey;
           return (
             <section
               key={stage.key}
-              className={`column${stage.requiresHumanApproval ? " column-human-gate" : ""}`}
+              className={`column${stage.requiresHumanApproval ? " column-human-gate" : ""}${isReorderColumn ? " column-reorderable" : ""}`}
+              onDragOver={
+                isReorderColumn
+                  ? (e) => onColumnDragOver(e, stage.key)
+                  : undefined
+              }
+              onDrop={
+                isReorderColumn ? (e) => onColumnDrop(e, stage.key) : undefined
+              }
             >
               <div className="column-header">
                 <h2>{stage.name}</h2>
@@ -280,41 +446,73 @@ export function LiveBoard({
                   Empty
                 </p>
               ) : (
-                columnTickets.map((ticket) => {
+                columnTickets.map((ticket, index) => {
                   const tokens = tokenLabel(ticket);
                   const showResolution =
                     Boolean(ticket.resolution) &&
                     (lastStageKey == null || stage.key === lastStageKey);
                   const review = reviewBadge(stage, ticket);
+                  const isDragging = draggingSlug === ticket.slug;
+                  const showDropBefore =
+                    isReorderColumn &&
+                    dropIndex === index &&
+                    draggingSlug != null &&
+                    draggingSlug !== ticket.slug;
                   return (
-                  <Link
-                    key={ticket.slug}
-                    href={`/projects/${projectSlug}/tickets/${ticket.slug}`}
-                    className={`ticket-card${review ? ` ${review.cardClass}` : ""}${flashSlug === ticket.slug ? " ticket-flash" : ""}`}
-                  >
-                    {ticket.ticketKey ? (
-                      <div className="ticket-key">{ticket.ticketKey}</div>
-                    ) : null}
-                    <h3>{ticket.title}</h3>
-                    <div className="meta-row">
-                      <span className={`badge ${ticket.priority}`}>
-                        {ticket.priority}
-                      </span>
-                      {showResolution ? (
-                        <span className="badge">{ticket.resolution}</span>
+                    <div key={ticket.slug} className="ticket-slot">
+                      {showDropBefore ? (
+                        <div className="ticket-drop-indicator" aria-hidden />
                       ) : null}
-                      {review ? (
-                        <span className={`badge ${review.badgeClass}`}>
-                          {review.label}
-                        </span>
-                      ) : null}
-                      {tokens ? (
-                        <span className="muted" style={{ fontSize: "0.75rem" }}>
-                          {tokens}
-                        </span>
-                      ) : null}
+                      <Link
+                        href={`/projects/${projectSlug}/tickets/${ticket.slug}`}
+                        className={`ticket-card${review ? ` ${review.cardClass}` : ""}${flashSlug === ticket.slug ? " ticket-flash" : ""}${isReorderColumn ? " ticket-reorderable" : ""}${isDragging ? " ticket-dragging" : ""}`}
+                        draggable={isReorderColumn && !persisting}
+                        onDragStart={
+                          isReorderColumn
+                            ? (e) =>
+                                onCardDragStart(e, stage.key, index, ticket.slug)
+                            : undefined
+                        }
+                        onDragOver={
+                          isReorderColumn
+                            ? (e) => onCardDragOver(e, stage.key, index)
+                            : undefined
+                        }
+                        onDrop={
+                          isReorderColumn
+                            ? (e) => onCardDrop(e, stage.key, index)
+                            : undefined
+                        }
+                        onDragEnd={isReorderColumn ? onCardDragEnd : undefined}
+                        onClick={onCardClick}
+                      >
+                        {ticket.ticketKey ? (
+                          <div className="ticket-key">{ticket.ticketKey}</div>
+                        ) : null}
+                        <h3>{ticket.title}</h3>
+                        <div className="meta-row">
+                          <span className={`badge ${ticket.priority}`}>
+                            {ticket.priority}
+                          </span>
+                          {showResolution ? (
+                            <span className="badge">{ticket.resolution}</span>
+                          ) : null}
+                          {review ? (
+                            <span className={`badge ${review.badgeClass}`}>
+                              {review.label}
+                            </span>
+                          ) : null}
+                          {tokens ? (
+                            <span
+                              className="muted"
+                              style={{ fontSize: "0.75rem" }}
+                            >
+                              {tokens}
+                            </span>
+                          ) : null}
+                        </div>
+                      </Link>
                     </div>
-                  </Link>
                   );
                 })
               )}

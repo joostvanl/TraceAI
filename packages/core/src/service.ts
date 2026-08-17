@@ -4,6 +4,10 @@ import {
   type AuroraClientConfig,
 } from "./aurora.js";
 import {
+  assertNonNegativeIntegerSortOrder,
+  planTicketReorder,
+} from "./reorder.js";
+import {
   DEFAULT_STAGES,
   DEFAULT_WORKFLOW_DOCUMENT,
   canTransition,
@@ -1148,6 +1152,7 @@ export class TraceService {
       description?: string;
       priority?: Priority | string;
       tokens_estimate?: number;
+      sort_order?: number;
       resolution?: TicketResolution | string;
       parent?: string | null;
     },
@@ -1171,6 +1176,9 @@ export class TraceService {
       (!Number.isInteger(input.tokens_estimate) || input.tokens_estimate < 0)
     ) {
       throw new Error("tokens_estimate must be a non-negative integer");
+    }
+    if (input.sort_order != null) {
+      assertNonNegativeIntegerSortOrder(input.sort_order);
     }
     if (input.resolution != null) {
       assertNoErrors(
@@ -1209,12 +1217,48 @@ export class TraceService {
         ...(input.tokens_estimate != null
           ? { tokens_estimate: input.tokens_estimate }
           : {}),
+        ...(input.sort_order != null ? { sort_order: input.sort_order } : {}),
         ...(input.resolution != null ? { resolution: input.resolution } : {}),
         ...(parentSlug !== undefined ? { parent: parentSlug ?? "" } : {}),
       },
     });
     await this.ensurePublished("ticket", updated);
     return updated;
+  }
+
+  /**
+   * Persist vertical board order for one project stage. Sets `sort_order` to
+   * the index in `ordered_slugs` and returns only tickets whose order changed.
+   */
+  async reorderTickets(input: {
+    project: string;
+    stage: string;
+    ordered_slugs: string[];
+  }): Promise<Ticket[]> {
+    await this.ensureReady();
+    const projectTickets = await this.listTickets({ project: input.project });
+    const updates = planTicketReorder({
+      project: input.project,
+      stage: input.stage,
+      ordered_slugs: input.ordered_slugs,
+      tickets: projectTickets.map((t) => ({
+        slug: t.slug,
+        project: t.fields.project,
+        stage: t.fields.stage,
+        sort_order: t.fields.sort_order,
+      })),
+    });
+    const changed: Ticket[] = [];
+    for (const update of updates) {
+      const ticket = projectTickets.find((t) => t.slug === update.slug);
+      if (!ticket) continue;
+      const updated = await this.client.updateEntry<Ticket>("ticket", ticket.id, {
+        fields: { sort_order: update.sort_order },
+      });
+      await this.ensurePublished("ticket", updated);
+      changed.push(this.normalizeTicketRelations(updated));
+    }
+    return changed;
   }
 
   async transitionTicket(

@@ -217,6 +217,7 @@ function mapTicket(t: NonNullable<
     review_by: t.fields.review_by || null,
     review_at: t.fields.review_at || null,
     parent: t.fields.parent || null,
+    sort_order: t.fields.sort_order ?? null,
   };
 }
 
@@ -780,6 +781,7 @@ export function createApp(deps: {
           review_by: t.fields.review_by || null,
           review_at: t.fields.review_at || null,
           parent: t.fields.parent || null,
+          sort_order: t.fields.sort_order ?? null,
         };
       }),
     );
@@ -864,6 +866,7 @@ export function createApp(deps: {
       description?: string;
       priority?: string;
       tokens_estimate?: number;
+      sort_order?: number;
       resolution?: string;
       parent?: string | null;
     }>();
@@ -876,6 +879,48 @@ export function createApp(deps: {
       resourceId: ticket.slug,
     });
     return c.json(mapped);
+  });
+
+  app.post("/v1/tickets/reorder", requireScope("tickets:write"), async (c) => {
+    const body = await c.req.json<{
+      project?: string;
+      stage?: string;
+      ordered_slugs?: string[];
+    }>();
+    const project = body.project?.trim() ?? "";
+    const stage = body.stage?.trim() ?? "";
+    const ordered_slugs = body.ordered_slugs;
+    if (!project || !stage || !Array.isArray(ordered_slugs)) {
+      return c.json(
+        {
+          message: "project, stage, and ordered_slugs are required",
+          code: "VALIDATION",
+        },
+        400,
+      );
+    }
+    try {
+      const changed = await deps.service.reorderTickets({
+        project,
+        stage,
+        ordered_slugs,
+      });
+      const mapped = changed.map((t) => {
+        const row = mapTicket(t);
+        publishTicketEvent(ticketEventFromMapped("ticket.updated", row));
+        return row;
+      });
+      audit(c, {
+        action: "ticket.reorder",
+        resourceType: "project",
+        resourceId: project,
+        meta: { stage, count: mapped.length },
+      });
+      return c.json({ tickets: mapped });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return c.json({ message, code: "VALIDATION" }, 400);
+    }
   });
 
   app.post(

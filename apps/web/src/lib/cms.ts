@@ -170,6 +170,7 @@ export type BoardTicketSnapshot = {
   tokensActual: number | null;
   resolution: string | null;
   reviewState: string | null;
+  sortOrder: number | null;
 };
 
 function getTraceClient(): TraceApiClient | null {
@@ -202,6 +203,7 @@ export async function listBoardTicketsViaTraceAI(
       tokens_actual?: number | null;
       resolution?: string | null;
       review_state?: string | null;
+      sort_order?: number | null;
     }>;
     return rows.map((t) => ({
       slug: t.slug,
@@ -214,6 +216,7 @@ export async function listBoardTicketsViaTraceAI(
       tokensActual: t.tokens_actual ?? null,
       resolution: t.resolution ?? null,
       reviewState: t.review_state || null,
+      sortOrder: t.sort_order ?? null,
     }));
   } catch {
     return null;
