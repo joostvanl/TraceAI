@@ -247,9 +247,12 @@ function RuleListEditor({
         <ul className="workflow-editor__rule-rows">
           {rules.map((rule, index) => (
             <li key={index} className="workflow-editor__rule-row">
-              <span className="workflow-editor__rule-index">{index + 1}</span>
+              <span className="workflow-editor__rule-index" aria-hidden="true">
+                {index + 1}
+              </span>
               <input
                 value={rule}
+                aria-label={`${label} regel ${index + 1}`}
                 onChange={(event) => {
                   const next = [...rules];
                   next[index] = event.target.value;
@@ -259,7 +262,8 @@ function RuleListEditor({
               />
               <button
                 type="button"
-                className="workflow-editor__rule-remove"
+                className="btn btn-small btn-secondary workflow-editor__rule-remove"
+                aria-label={`Verwijder ${label} regel ${index + 1}`}
                 onClick={() => commit(rules.filter((_, i) => i !== index))}
               >
                 Verwijder
@@ -270,7 +274,7 @@ function RuleListEditor({
       )}
       <button
         type="button"
-        className="workflow-editor__rule-add"
+        className="btn btn-small btn-secondary"
         onClick={() => onChange([...(value ?? []), ""])}
       >
         Regel toevoegen
