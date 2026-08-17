@@ -747,7 +747,7 @@ function WorkflowEditorPanelInner({
                       summary: event.target.value,
                     }))
                   }
-                  rows={4}
+                  rows={5}
                 />
               </label>
               <h3>Gedrag</h3>
@@ -892,7 +892,7 @@ function StageProperties({
           onChange={(event) =>
             onChange({ agent: { purpose: event.target.value } })
           }
-          rows={2}
+          rows={4}
         />
       </label>
       <label>
@@ -902,7 +902,7 @@ function StageProperties({
           onChange={(event) =>
             onChange({ agent: { on_enter: textToLines(event.target.value) } })
           }
-          rows={3}
+          rows={6}
         />
       </label>
       <label>
@@ -912,7 +912,7 @@ function StageProperties({
           onChange={(event) =>
             onChange({ agent: { on_exit: textToLines(event.target.value) } })
           }
-          rows={3}
+          rows={6}
         />
       </label>
       <label className="workflow-editor__check">
@@ -1012,7 +1012,7 @@ function StageProperties({
           onChange={(event) =>
             onChange({ agent: { comment_template: event.target.value } })
           }
-          rows={4}
+          rows={6}
         />
       </label>
       <p className="muted">

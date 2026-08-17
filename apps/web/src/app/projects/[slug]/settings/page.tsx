@@ -9,12 +9,20 @@ import { createTraceServerClient } from "@/lib/traceai-server";
 
 export const dynamic = "force-dynamic";
 
+type SettingsTab = "workflow" | "members";
+
 type PageProps = {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ tab?: string }>;
 };
 
-export default async function ProjectSettingsPage({ params }: PageProps) {
+export default async function ProjectSettingsPage({
+  params,
+  searchParams,
+}: PageProps) {
   const { slug } = await params;
+  const { tab } = await searchParams;
+  const activeTab: SettingsTab = tab === "members" ? "members" : "workflow";
   const configured = await isLoginConfigured();
   if (!configured) redirect("/login");
   const identity = await getSessionIdentity();
@@ -88,31 +96,56 @@ export default async function ProjectSettingsPage({ params }: PageProps) {
         <span>Settings</span>
       </nav>
       <h1>Projectinstellingen</h1>
-      <p className="muted">
-        Leden/rollen en visuele workflow-editor (stages als blokken, transitions
-        als pijlen).
-      </p>
+
+      <nav className="settings-tabs" aria-label="Instellingen">
+        <Link
+          href={`/projects/${slug}/settings?tab=workflow`}
+          className={`settings-tab${activeTab === "workflow" ? " settings-tab--active" : ""}`}
+          aria-current={activeTab === "workflow" ? "page" : undefined}
+        >
+          Workflow
+        </Link>
+        <Link
+          href={`/projects/${slug}/settings?tab=members`}
+          className={`settings-tab${activeTab === "members" ? " settings-tab--active" : ""}`}
+          aria-current={activeTab === "members" ? "page" : undefined}
+        >
+          Leden
+        </Link>
+      </nav>
+
       {loadError ? <p className="form-error">{loadError}</p> : null}
 
-      {workflowPayload ? (
-        <WorkflowEditorPanel projectSlug={slug} initial={workflowPayload} />
+      {activeTab === "workflow" ? (
+        <section className="settings-tab-panel">
+          <p className="muted">
+            Visuele workflow-editor: stages als blokken, transitions als pijlen.
+            Dubbelklik een stage of pijl om de tekstuele eigenschappen onder het
+            canvas te bewerken.
+          </p>
+          {workflowPayload ? (
+            <WorkflowEditorPanel projectSlug={slug} initial={workflowPayload} />
+          ) : (
+            <p className="muted">Geen default workflow geconfigureerd.</p>
+          )}
+        </section>
       ) : (
-        <p className="muted">Geen default workflow geconfigureerd.</p>
+        <section className="settings-tab-panel">
+          <p className="muted">Leden en rollen voor dit project.</p>
+          <ProjectMembersPanel
+            projectSlug={slug}
+            members={members}
+            users={users}
+          />
+          {!identity.is_platform_admin && identity.mode !== "legacy" ? (
+            <p className="muted">
+              Nieuwe leden toevoegen vereist dat gebruikers al bestaan (via{" "}
+              <Link href="/admin/users">Admin · Gebruikers</Link>) en dat jij
+              project-admin bent.
+            </p>
+          ) : null}
+        </section>
       )}
-
-      <h2>Leden</h2>
-      <ProjectMembersPanel
-        projectSlug={slug}
-        members={members}
-        users={users}
-      />
-      {!identity.is_platform_admin && identity.mode !== "legacy" ? (
-        <p className="muted">
-          Nieuwe leden toevoegen vereist dat gebruikers al bestaan (via{" "}
-          <Link href="/admin/users">Admin · Gebruikers</Link>) en dat jij
-          project-admin bent.
-        </p>
-      ) : null}
     </div>
   );
 }
