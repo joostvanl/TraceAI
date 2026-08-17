@@ -3,8 +3,9 @@ import { notFound } from "next/navigation";
 import { Markdown } from "@/components/Markdown";
 import {
   getProject,
-  getWikiPage,
   listWikiPagesForProject,
+  resolveWikiPage,
+  wikiHrefSlug,
 } from "@/lib/cms";
 
 export const dynamic = "force-dynamic";
@@ -17,10 +18,10 @@ export default async function ProjectWikiPage({ params }: Props) {
   const { slug, pageSlug } = await params;
   const [project, page] = await Promise.all([
     getProject(slug),
-    getWikiPage(pageSlug),
+    resolveWikiPage(slug, pageSlug),
   ]);
 
-  if (!project || !page || page.fields.project !== slug) {
+  if (!project || !page) {
     notFound();
   }
 
@@ -50,7 +51,7 @@ export default async function ProjectWikiPage({ params }: Props) {
               {parent ? (
                 <Link
                   className="muted"
-                  href={`/projects/${slug}/wiki/${parent.slug}`}
+                  href={`/projects/${slug}/wiki/${wikiHrefSlug(slug, parent.slug)}`}
                   style={{ fontSize: "0.85rem" }}
                 >
                   Parent: {parent.fields.title}
@@ -77,7 +78,9 @@ export default async function ProjectWikiPage({ params }: Props) {
           <ul className="wiki-tree">
             {children.map((child) => (
               <li key={child.slug}>
-                <Link href={`/projects/${slug}/wiki/${child.slug}`}>
+                <Link
+                  href={`/projects/${slug}/wiki/${wikiHrefSlug(slug, child.slug)}`}
+                >
                   {child.fields.title}
                 </Link>
               </li>

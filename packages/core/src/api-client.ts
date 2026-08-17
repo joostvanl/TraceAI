@@ -87,6 +87,10 @@ export class TraceApiClient {
     return this.request<unknown[]>("/v1/projects");
   }
 
+  listMyProjects() {
+    return this.request<unknown[]>("/v1/me/projects");
+  }
+
   getProject(slug: string) {
     return this.request<unknown>(`/v1/projects/${encodeURIComponent(slug)}`);
   }
@@ -96,6 +100,8 @@ export class TraceApiClient {
     description?: string;
     slug?: string;
     seed_workflow?: boolean;
+    seed_wiki?: boolean;
+    owner_user?: string;
   }) {
     return this.request<unknown>("/v1/projects", {
       method: "POST",

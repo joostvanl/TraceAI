@@ -9,6 +9,12 @@ import {
   assertNonNegativeIntegerSortOrder,
   planTicketReorder,
 } from "./reorder.js";
+import { STANDARD_WORKER_WORKFLOW_DOCUMENT } from "./standard-worker-workflow.js";
+import {
+  allocateWikiEntrySlug,
+  resolveWikiEntrySlugInProject,
+  wikiLogicalSlug,
+} from "./wiki-slugs.js";
 import {
   DEFAULT_STAGES,
   DEFAULT_WORKFLOW_DOCUMENT,
@@ -239,8 +245,20 @@ export class TraceService {
     description?: string;
     slug?: string;
     seedWorkflow?: boolean;
-  }): Promise<{ project: Project; workflow: Workflow | null }> {
+    seedWiki?: boolean;
+    ownerUser?: string;
+  }): Promise<{
+    project: Project;
+    workflow: Workflow | null;
+    wiki_pages: WikiPage[];
+  }> {
     await this.ensureReady();
+    const ownerUser = input.ownerUser?.trim() || undefined;
+    if (ownerUser) {
+      const user = await this.getTraceaiUser(ownerUser);
+      if (!user) throw new Error(`User not found: ${ownerUser}`);
+    }
+
     const existing = await this.listProjects();
     const slug = uniqueSlug(
       input.slug ?? input.name,
@@ -262,14 +280,16 @@ export class TraceService {
 
     let workflow: Workflow | null = null;
     if (input.seedWorkflow !== false) {
-      const workflowSlug = `${slug}-default`;
+      const workflowSlug = `${slug}-standard-worker`;
       workflow = await this.client.createEntry<Workflow>("workflow", {
         slug: workflowSlug,
         status: "published",
         fields: {
-          name: "Default",
+          name: "Standard Worker",
           project: slug,
-          stages_json: serializeWorkflowDocument(DEFAULT_WORKFLOW_DOCUMENT),
+          stages_json: serializeWorkflowDocument(
+            STANDARD_WORKER_WORKFLOW_DOCUMENT,
+          ),
         },
       });
       await this.ensurePublished("workflow", workflow);
@@ -279,7 +299,77 @@ export class TraceService {
       await this.ensurePublished("project", project);
     }
 
-    return { project, workflow };
+    if (ownerUser) {
+      await this.setProjectMembership({
+        project: slug,
+        user: ownerUser,
+        role: "admin",
+      });
+    }
+
+    let wiki_pages: WikiPage[] = [];
+    if (input.seedWiki !== false) {
+      wiki_pages = await this.seedProjectHandbookWiki(slug);
+    }
+
+    return { project, workflow, wiki_pages };
+  }
+
+  /** Seed handbook root pages (Home … Design packs) for a new project. */
+  async seedProjectHandbookWiki(projectSlug: string): Promise<WikiPage[]> {
+    const seeds: Array<{ logical: string; title: string; body: string }> = [
+      {
+        logical: "home",
+        title: "Home",
+        body: `# Home\n\nWelcome to this TraceAI project handbook.\n\nStart with [Getting started](getting-started).\n`,
+      },
+      {
+        logical: "getting-started",
+        title: "Getting started",
+        body: `# Getting started\n\nHow to run agents and open the board for this project.\n`,
+      },
+      {
+        logical: "architecture",
+        title: "Architecture",
+        body: `# Architecture\n\nSystem overview and key technical decisions for this project.\n`,
+      },
+      {
+        logical: "product",
+        title: "Product & process",
+        body: `# Product & process\n\nProduct intent and how work moves through the workflow.\n`,
+      },
+      {
+        logical: "engineering",
+        title: "Engineering",
+        body: `# Engineering\n\nEngineering conventions and implementation notes.\n`,
+      },
+      {
+        logical: "operations",
+        title: "Operations",
+        body: `# Operations\n\nDeploy, monitor, and operate this project.\n`,
+      },
+      {
+        logical: "design-packs",
+        title: "Design packs",
+        body: `# Design packs\n\nParent index for per-ticket design packs. Keep detailed FO/TO/use cases/tests under children of this page.\n`,
+      },
+    ];
+
+    const pages: WikiPage[] = [];
+    for (let i = 0; i < seeds.length; i++) {
+      const seed = seeds[i]!;
+      pages.push(
+        await this.createWikiPage({
+          project: projectSlug,
+          title: seed.title,
+          body: seed.body,
+          slug: seed.logical,
+          sort_order: i,
+          updated_by: "system",
+        }),
+      );
+    }
+    return pages;
   }
 
   async listWorkflows(projectSlug?: string): Promise<Workflow[]> {
@@ -1569,31 +1659,64 @@ export class TraceService {
     return page ? this.normalizeWikiRelations(page) : null;
   }
 
+  /**
+   * Resolve a wiki page within a project by Aurora entry slug or logical slug
+   * (e.g. `home` → `acme--home` when namespaced).
+   */
+  async getWikiPageInProject(
+    projectSlug: string,
+    slugOrLogical: string,
+  ): Promise<WikiPage | null> {
+    await this.ensureReady();
+    const want = slugOrLogical.trim();
+    if (!want) return null;
+
+    const exact = await this.getWikiPage(want);
+    if (exact && exact.fields.project === projectSlug) return exact;
+
+    const pages = await this.listWikiPages({ project: projectSlug });
+    const entrySlug = resolveWikiEntrySlugInProject({
+      project: projectSlug,
+      slugOrLogical: want,
+      pages,
+    });
+    if (!entrySlug) return null;
+    if (entrySlug === want && exact) return exact;
+    return this.getWikiPage(entrySlug);
+  }
+
   private async assertWikiParent(
     project: string,
     parentSlug: string | null | undefined,
     selfSlug?: string,
-  ): Promise<void> {
-    if (parentSlug == null || parentSlug === "") return;
+  ): Promise<string | null> {
+    if (parentSlug == null || parentSlug === "") return null;
     const all = (
       await this.client.listEntries<WikiPage>(WIKI_PAGE_CONTENT_TYPE, {
         limit: 100,
       })
     ).items.map((p) => this.normalizeWikiRelations(p));
+    const projectPages = all.filter((p) => p.fields.project === project);
+    const resolvedParent =
+      resolveWikiEntrySlugInProject({
+        project,
+        slugOrLogical: parentSlug,
+        pages: projectPages,
+      }) ?? parentSlug;
     const bySlug = new Map(all.map((p) => [p.slug, p] as const));
-    const parent = bySlug.get(parentSlug);
+    const parent = bySlug.get(resolvedParent);
     if (!parent) throw new Error(`Parent wiki page not found: ${parentSlug}`);
     if (parent.fields.project !== project) {
       throw new Error(
         `Parent wiki page "${parentSlug}" belongs to a different project.`,
       );
     }
-    if (selfSlug && parentSlug === selfSlug) {
+    if (selfSlug && resolvedParent === selfSlug) {
       throw new Error("A wiki page cannot be its own parent.");
     }
-    if (!selfSlug) return;
+    if (!selfSlug) return resolvedParent;
     const seen = new Set<string>([selfSlug]);
-    let cursor: string | null = parentSlug;
+    let cursor: string | null = resolvedParent;
     while (cursor) {
       if (seen.has(cursor)) {
         throw new Error(
@@ -1604,6 +1727,7 @@ export class TraceService {
       const ancestor = bySlug.get(cursor);
       cursor = relationSlug(ancestor?.fields.parent);
     }
+    return resolvedParent;
   }
 
   async createWikiPage(input: {
@@ -1623,25 +1747,46 @@ export class TraceService {
       input.project,
     );
     if (!project) throw new Error(`Project not found: ${input.project}`);
-    await this.assertWikiParent(input.project, input.parent);
+    const parentEntrySlug = await this.assertWikiParent(
+      input.project,
+      input.parent,
+    );
     const existing = (
       await this.client.listEntries<WikiPage>(WIKI_PAGE_CONTENT_TYPE, {
         limit: 100,
       })
     ).items;
-    const slug =
+    const normalizedExisting = existing.map((p) =>
+      this.normalizeWikiRelations(p),
+    );
+    const logicalDesired =
       input.slug?.trim() ||
-      uniqueSlug(title, new Set(existing.map((p) => p.slug)));
-    if (existing.some((p) => p.slug === slug)) {
-      throw new Error(`Wiki page slug already exists: ${slug}`);
-    }
-    const siblings = existing
-      .map((p) => this.normalizeWikiRelations(p))
-      .filter(
-        (p) =>
-          p.fields.project === input.project &&
-          (p.fields.parent || null) === (input.parent || null),
+      uniqueSlug(
+        title,
+        new Set(
+          normalizedExisting
+            .filter((p) => p.fields.project === input.project)
+            .map((p) => wikiLogicalSlug(p.slug, input.project)),
+        ),
       );
+    const logicalInProject = normalizedExisting
+      .filter((p) => p.fields.project === input.project)
+      .some((p) => wikiLogicalSlug(p.slug, input.project) === logicalDesired);
+    if (logicalInProject) {
+      throw new Error(
+        `Wiki page slug already exists in project: ${logicalDesired}`,
+      );
+    }
+    const slug = allocateWikiEntrySlug({
+      project: input.project,
+      logicalSlug: logicalDesired,
+      existingEntrySlugs: existing.map((p) => p.slug),
+    });
+    const siblings = normalizedExisting.filter(
+      (p) =>
+        p.fields.project === input.project &&
+        (p.fields.parent || null) === (parentEntrySlug || null),
+    );
     const page = await this.client.createEntry<WikiPage>(
       WIKI_PAGE_CONTENT_TYPE,
       {
@@ -1651,7 +1796,7 @@ export class TraceService {
           title,
           body: input.body ?? "",
           project: input.project,
-          ...(input.parent ? { parent: input.parent } : {}),
+          ...(parentEntrySlug ? { parent: parentEntrySlug } : {}),
           sort_order:
             input.sort_order ??
             siblings.reduce(
@@ -1682,8 +1827,13 @@ export class TraceService {
       slug,
     );
     if (!page) throw new Error(`Wiki page not found: ${slug}`);
+    let parentEntrySlug: string | null | undefined;
     if (input.parent !== undefined) {
-      await this.assertWikiParent(page.fields.project, input.parent, slug);
+      parentEntrySlug = await this.assertWikiParent(
+        page.fields.project,
+        input.parent,
+        slug,
+      );
     }
     const updated = await this.client.updateEntry<WikiPage>(
       WIKI_PAGE_CONTENT_TYPE,
@@ -1693,7 +1843,7 @@ export class TraceService {
           ...(input.title != null ? { title: input.title.trim() } : {}),
           ...(input.body != null ? { body: input.body } : {}),
           ...(input.parent !== undefined
-            ? { parent: input.parent || "" }
+            ? { parent: parentEntrySlug || "" }
             : {}),
           ...(input.sort_order != null ? { sort_order: input.sort_order } : {}),
           ...(input.updated_by != null

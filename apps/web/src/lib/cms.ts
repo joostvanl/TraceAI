@@ -11,6 +11,7 @@ import {
   relationSlug,
   searchProjectContent,
   sortTicketsNewestFirst,
+  wikiLogicalSlug,
   type Comment,
   type Project,
   type ProjectInsights,
@@ -152,8 +153,12 @@ async function listCommentsForTickets(
 }
 
 export type WikiTreeNode = {
+  /** Logical slug used in wiki URLs. */
   slug: string;
+  /** Aurora entry slug (globally unique). */
+  entrySlug: string;
   title: string;
+  /** Parent Aurora entry slug (for tree wiring). */
   parent: string | null;
   children: WikiTreeNode[];
 };
@@ -187,19 +192,20 @@ export async function listWikiPagesForProject(projectSlug: string): Promise<{
       return a.fields.title.localeCompare(b.fields.title);
     });
 
-  const bySlug = new Map<string, WikiTreeNode>();
+  const byEntry = new Map<string, WikiTreeNode>();
   for (const page of pages) {
-    bySlug.set(page.slug, {
-      slug: page.slug,
+    byEntry.set(page.slug, {
+      slug: wikiLogicalSlug(page.slug, projectSlug),
+      entrySlug: page.slug,
       title: page.fields.title,
       parent: wikiRelationSlug(page.fields.parent),
       children: [],
     });
   }
   const roots: WikiTreeNode[] = [];
-  for (const node of bySlug.values()) {
-    if (node.parent && bySlug.has(node.parent)) {
-      bySlug.get(node.parent)!.children.push(node);
+  for (const node of byEntry.values()) {
+    if (node.parent && byEntry.has(node.parent)) {
+      byEntry.get(node.parent)!.children.push(node);
     } else {
       roots.push(node);
     }
@@ -213,6 +219,34 @@ export async function getWikiPage(slug: string): Promise<WikiPage | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Resolve wiki page by Aurora entry slug or logical slug within a project.
+ */
+export async function resolveWikiPage(
+  projectSlug: string,
+  slugOrLogical: string,
+): Promise<WikiPage | null> {
+  const want = slugOrLogical.trim();
+  if (!want) return null;
+
+  const exact = await getWikiPage(want);
+  if (exact && wikiRelationSlug(exact.fields.project) === projectSlug) {
+    return exact;
+  }
+
+  const { pages } = await listWikiPagesForProject(projectSlug);
+  const match = pages.find(
+    (p) =>
+      p.slug === want || wikiLogicalSlug(p.slug, projectSlug) === want,
+  );
+  return match ?? null;
+}
+
+/** Logical slug for wiki hrefs within a project. */
+export function wikiHrefSlug(projectSlug: string, entrySlug: string): string {
+  return wikiLogicalSlug(entrySlug, projectSlug);
 }
 
 /** Board card shape shared with `LiveBoard` (camelCase, source-agnostic). */

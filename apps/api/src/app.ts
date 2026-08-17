@@ -13,6 +13,7 @@ import {
   requiredRoleForAction,
   TICKET_REVIEW_STATES,
   WorkflowValidationError,
+  wikiLogicalSlug,
   type ProjectRole,
   type Ticket,
 } from "@traceai/core";
@@ -573,6 +574,21 @@ export function createApp(deps: {
     return c.json(projects.map(mapProject));
   });
 
+  app.get("/v1/me/projects", requireScope("projects:read"), async (c) => {
+    const human = resolveHumanIdentity(c);
+    if (!human) {
+      return c.json(
+        { message: "Human identity required", code: "UNAUTHORIZED" },
+        401,
+      );
+    }
+    const allowed = new Set(await projectsForHuman(deps.service, human));
+    const projects = (await deps.service.listProjects()).filter((p) =>
+      allowed.has(p.slug),
+    );
+    return c.json(projects.map(mapProject));
+  });
+
   app.get("/v1/projects/:slug", requireScope("projects:read"), async (c) => {
     const result = await deps.service.getProject(param(c, "slug"));
     if (!result) {
@@ -604,28 +620,54 @@ export function createApp(deps: {
       description?: string;
       slug?: string;
       seed_workflow?: boolean;
+      seed_wiki?: boolean;
+      owner_user?: string;
     }>();
     if (!body?.name?.trim()) {
       return c.json({ message: "name is required", code: "VALIDATION" }, 400);
     }
-    const result = await deps.service.createProject({
-      name: body.name,
-      description: body.description,
-      slug: body.slug,
-      seedWorkflow: body.seed_workflow,
-    });
-    audit(c, {
-      action: "project.create",
-      resourceType: "project",
-      resourceId: result.project.slug,
-    });
-    return c.json(
-      {
-        project: mapProject(result.project),
-        workflow: result.workflow ? mapWorkflow(result.workflow) : null,
-      },
-      201,
-    );
+    const human = resolveHumanIdentity(c);
+    const ownerUser =
+      body.owner_user?.trim() ||
+      (human?.slug && human.mode === "personal" ? human.slug : undefined);
+    try {
+      const result = await deps.service.createProject({
+        name: body.name,
+        description: body.description,
+        slug: body.slug,
+        seedWorkflow: body.seed_workflow,
+        seedWiki: body.seed_wiki,
+        ownerUser,
+      });
+      audit(c, {
+        action: "project.create",
+        resourceType: "project",
+        resourceId: result.project.slug,
+      });
+      if (ownerUser) {
+        audit(c, {
+          action: "project_membership.set",
+          resourceType: "project_membership",
+          resourceId: `${result.project.slug}:${ownerUser}`,
+        });
+      }
+      return c.json(
+        {
+          project: mapProject(result.project),
+          workflow: result.workflow ? mapWorkflow(result.workflow) : null,
+          wiki_pages: result.wiki_pages.map((p) => ({
+            slug: p.slug,
+            title: p.fields.title,
+            logical_slug: wikiLogicalSlug(p.slug, result.project.slug),
+          })),
+        },
+        201,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const status = message.includes("not found") ? 404 : 400;
+      return c.json({ message, code: "VALIDATION" }, status);
+    }
   });
 
   app.get(

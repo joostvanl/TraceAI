@@ -9,3 +9,5 @@ export * from "./relations.js";
 export * from "./review-inbox.js";
 export * from "./workflow-editor.js";
 export * from "./reorder.js";
+export * from "./wiki-slugs.js";
+export * from "./standard-worker-workflow.js";

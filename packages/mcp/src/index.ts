@@ -130,12 +130,17 @@ async function main() {
 
   server.tool(
     "create_project",
-    "Create a new project and optional default workflow",
+    "Create a new project with Standard Worker workflow (default), optional handbook wiki seed, and optional owner membership. Prefer this over inventing a second create tool.",
     {
       name: z.string().min(1),
       description: z.string().optional(),
       slug: z.string().optional(),
       seed_workflow: z.boolean().optional().default(true),
+      seed_wiki: z.boolean().optional().default(true),
+      owner_user: z
+        .string()
+        .optional()
+        .describe("traceai_user slug to grant admin membership"),
     },
     async (input) => {
       try {
