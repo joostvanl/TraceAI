@@ -5,5 +5,6 @@ export * from "./api-client.js";
 export * from "./insights.js";
 export * from "./ticket-links.js";
 export * from "./roles.js";
+export * from "./relations.js";
 export * from "./review-inbox.js";
 export * from "./workflow-editor.js";

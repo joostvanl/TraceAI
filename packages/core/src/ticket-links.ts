@@ -1,3 +1,4 @@
+import { relationSlug, relationSlugOrEmpty } from "./relations.js";
 import { isTicketKeyPattern, type Ticket } from "./types.js";
 
 export type TicketLinkRow = {
@@ -19,13 +20,17 @@ function asLinkRow(ticket: Ticket | TicketLinkRow): TicketLinkRow {
     return {
       slug: ticket.slug,
       ticket_key: ticket.fields.ticket_key ?? null,
-      project: ticket.fields.project,
-      parent: ticket.fields.parent ?? null,
+      project: relationSlugOrEmpty(ticket.fields.project),
+      parent: relationSlug(ticket.fields.parent),
       tokens_estimate: ticket.fields.tokens_estimate ?? null,
       tokens_actual: ticket.fields.tokens_actual ?? null,
     };
   }
-  return ticket;
+  return {
+    ...ticket,
+    project: relationSlugOrEmpty(ticket.project),
+    parent: relationSlug(ticket.parent),
+  };
 }
 
 /** Resolve a parent ref (slug or TRA-n) to a canonical slug within `rows`. */

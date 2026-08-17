@@ -13,7 +13,8 @@
     "create-user": "tsx src/cli/create-user.ts",
     "create-token": "tsx src/cli/create-token.ts",
     "backfill-ticket-keys": "tsx src/cli/backfill-ticket-keys.ts",
-    "migrate-app-login": "tsx src/cli/migrate-app-login.ts"
+    "migrate-app-login": "tsx src/cli/migrate-app-login.ts",
+    "migrate-relations": "tsx src/cli/migrate-relations.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.14.1",

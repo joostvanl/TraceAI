@@ -60,6 +60,7 @@ import {
   wouldRemoveLastPlatformAdmin,
   type ProjectRole,
 } from "./roles.js";
+import { relationSlug, relationSlugOrEmpty } from "./relations.js";
 import {
   buildReviewInboxItems,
   type ReviewInboxItem,
@@ -179,12 +180,12 @@ export class TraceService {
     await this.ensureReady();
     const project = await this.client.getEntryBySlug<Project>("project", slug);
     if (!project) return null;
-    const workflowSlug = project.fields.default_workflow;
+    const workflowSlug = relationSlug(project.fields.default_workflow);
     const workflow = workflowSlug
       ? await this.client.getEntryBySlug<Workflow>("workflow", workflowSlug)
       : (
           await this.client.listEntries<Workflow>("workflow", { limit: 100 })
-        ).items.find((w) => w.fields.project === slug) ?? null;
+        ).items.find((w) => relationSlug(w.fields.project) === slug) ?? null;
     const workflow_document = workflow
       ? parseWorkflowDocument(workflow.fields.stages_json)
       : null;
@@ -251,7 +252,9 @@ export class TraceService {
       limit: 100,
     });
     if (!projectSlug) return result.items;
-    return result.items.filter((w) => w.fields.project === projectSlug);
+    return result.items.filter(
+      (w) => relationSlug(w.fields.project) === projectSlug,
+    );
   }
 
   async getWorkflow(slug: string): Promise<{
@@ -624,6 +627,7 @@ export class TraceService {
       status: "published",
     });
     return items
+      .map((t) => this.normalizeTicketRelations(t))
       .filter((t) => t.fields.project === input.project)
       .filter((t) => (input.stage ? t.fields.stage === input.stage : true))
       .filter((t) => {
@@ -842,6 +846,7 @@ export class TraceService {
         ) ?? null;
     }
     if (!ticket) return null;
+    ticket = this.normalizeTicketRelations(ticket);
     const projectTickets = await this.listTickets({
       project: ticket.fields.project,
     });
@@ -851,7 +856,7 @@ export class TraceService {
         limit: 100,
       })
     ).items
-      .filter((c) => c.fields.ticket === ticket!.slug)
+      .filter((c) => relationSlug(c.fields.ticket) === ticket!.slug)
       .sort(
         (a, b) =>
           new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
@@ -1478,6 +1483,7 @@ export class TraceService {
       { status: "published", limit: 100 },
     );
     return result.items
+      .map((p) => this.normalizeWikiRelations(p))
       .filter((p) => p.fields.project === input.project)
       .sort((a, b) => {
         const so = (a.fields.sort_order ?? 0) - (b.fields.sort_order ?? 0);
@@ -1488,7 +1494,11 @@ export class TraceService {
 
   async getWikiPage(slug: string): Promise<WikiPage | null> {
     await this.ensureReady();
-    return this.client.getEntryBySlug<WikiPage>(WIKI_PAGE_CONTENT_TYPE, slug);
+    const page = await this.client.getEntryBySlug<WikiPage>(
+      WIKI_PAGE_CONTENT_TYPE,
+      slug,
+    );
+    return page ? this.normalizeWikiRelations(page) : null;
   }
 
   private async assertWikiParent(
@@ -1501,7 +1511,7 @@ export class TraceService {
       await this.client.listEntries<WikiPage>(WIKI_PAGE_CONTENT_TYPE, {
         limit: 100,
       })
-    ).items;
+    ).items.map((p) => this.normalizeWikiRelations(p));
     const bySlug = new Map(all.map((p) => [p.slug, p] as const));
     const parent = bySlug.get(parentSlug);
     if (!parent) throw new Error(`Parent wiki page not found: ${parentSlug}`);
@@ -1524,8 +1534,7 @@ export class TraceService {
       }
       seen.add(cursor);
       const ancestor = bySlug.get(cursor);
-      const next = ancestor?.fields.parent;
-      cursor = typeof next === "string" && next.length > 0 ? next : null;
+      cursor = relationSlug(ancestor?.fields.parent);
     }
   }
 
@@ -1558,11 +1567,13 @@ export class TraceService {
     if (existing.some((p) => p.slug === slug)) {
       throw new Error(`Wiki page slug already exists: ${slug}`);
     }
-    const siblings = existing.filter(
-      (p) =>
-        p.fields.project === input.project &&
-        (p.fields.parent || null) === (input.parent || null),
-    );
+    const siblings = existing
+      .map((p) => this.normalizeWikiRelations(p))
+      .filter(
+        (p) =>
+          p.fields.project === input.project &&
+          (p.fields.parent || null) === (input.parent || null),
+      );
     const page = await this.client.createEntry<WikiPage>(
       WIKI_PAGE_CONTENT_TYPE,
       {
@@ -1922,6 +1933,17 @@ export class TraceService {
       { fields },
     );
     await this.ensurePublished(TRACEAI_USER_CONTENT_TYPE, updated);
+
+    // Disabling a user cleans memberships so Aurora relations cannot dangle
+    // after a TraceAI-managed disable (there is no hard user delete today).
+    if (
+      nextStatus != null &&
+      nextStatus !== "active" &&
+      (user.fields.status || "active") === "active"
+    ) {
+      await this.removeMembershipsForUser(slug);
+    }
+
     return updated;
   }
 
@@ -1929,10 +1951,12 @@ export class TraceService {
     project?: string,
   ): Promise<ProjectMembership[]> {
     await this.ensureReady();
-    const items = await this.listAllEntries<ProjectMembership>(
-      PROJECT_MEMBERSHIP_CONTENT_TYPE,
-      { status: "published" },
-    );
+    const items = (
+      await this.listAllEntries<ProjectMembership>(
+        PROJECT_MEMBERSHIP_CONTENT_TYPE,
+        { status: "published" },
+      )
+    ).map((m) => this.normalizeMembershipRelations(m));
     if (!project) {
       return items.sort((a, b) => a.slug.localeCompare(b.slug));
     }
@@ -2044,6 +2068,58 @@ export class TraceService {
     if (!existing) return false;
     await this.client.deleteEntry(PROJECT_MEMBERSHIP_CONTENT_TYPE, existing.id);
     return true;
+  }
+
+  /** Remove every membership for a user (used when disabling the account). */
+  async removeMembershipsForUser(userSlug: string): Promise<number> {
+    const want = userSlug.trim();
+    if (!want) return 0;
+    const memberships = await this.listProjectMemberships();
+    let removed = 0;
+    for (const m of memberships) {
+      if (m.fields.user !== want) continue;
+      const ok = await this.removeProjectMembership(m.fields.project, want);
+      if (ok) removed += 1;
+    }
+    return removed;
+  }
+
+  private normalizeTicketRelations(ticket: Ticket): Ticket {
+    const parent = relationSlug(ticket.fields.parent);
+    return {
+      ...ticket,
+      fields: {
+        ...ticket.fields,
+        project: relationSlugOrEmpty(ticket.fields.project),
+        workflow: relationSlugOrEmpty(ticket.fields.workflow),
+        parent: parent,
+      },
+    };
+  }
+
+  private normalizeWikiRelations(page: WikiPage): WikiPage {
+    return {
+      ...page,
+      fields: {
+        ...page.fields,
+        project: relationSlugOrEmpty(page.fields.project),
+        parent: relationSlug(page.fields.parent),
+      },
+    };
+  }
+
+  private normalizeMembershipRelations(
+    membership: ProjectMembership,
+  ): ProjectMembership {
+    return {
+      ...membership,
+      fields: {
+        ...membership.fields,
+        project: relationSlugOrEmpty(membership.fields.project),
+        user: relationSlugOrEmpty(membership.fields.user),
+        role: String(membership.fields.role ?? ""),
+      },
+    };
   }
 
   private async ensurePublished(

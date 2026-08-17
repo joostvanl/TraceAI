@@ -198,8 +198,8 @@ export type TicketFields = {
   /** ISO datetime of the current verdict. */
   review_at?: string;
   /**
-   * Parent ticket slug in the same project (container with optional own work).
-   * Empty/omit for a root ticket. Input may be slug or TRA-n; stored as slug.
+   * Parent ticket (Aurora relation → `ticket`). Empty/omit for a root ticket.
+   * Input may be slug or TRA-n; stored/exposed as slug.
    */
   parent?: string | null;
 };
@@ -259,9 +259,9 @@ export type CommentFields = {
 export type WikiPageFields = {
   title: string;
   body?: string;
-  /** Project slug */
+  /** Aurora relation → `project` (slug at API boundary). */
   project: string;
-  /** Parent wiki page slug; omit/empty for root */
+  /** Aurora relation → `wiki_page`; omit/empty for root. */
   parent?: string | null;
   sort_order?: number;
   updated_by?: string;
@@ -300,11 +300,14 @@ export type TraceaiUserFields = {
 };
 
 /**
- * Project membership (Aurora `project_membership`): user slug ↔ project slug
- * with role `admin` | `editor` | `viewer`.
+ * Project membership (Aurora `project_membership`): Aurora `relation` fields
+ * to `project` / `traceai_user`, exposed to TraceAI as slug strings, plus
+ * role `admin` | `editor` | `viewer`.
  */
 export type ProjectMembershipFields = {
+  /** Aurora relation → `project` (slug string at API boundary). */
   project: string;
+  /** Aurora relation → `traceai_user` (slug string at API boundary). */
   user: string;
   role: string;
 };
