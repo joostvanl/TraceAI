@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { TraceApiClient } from "@traceai/core";
+import { TraceApiClient, TraceApiError } from "@traceai/core";
 import { z } from "zod";
 
 export const TRACEAI_MCP_NAME = "traceai";
@@ -23,11 +23,26 @@ function okWrite(data: unknown, apiBase: string) {
 
 function fail(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
+  const status = error instanceof TraceApiError ? error.status : undefined;
+  const code = error instanceof TraceApiError ? error.code : undefined;
   const hint = /(^|\s)404($|\s)|TraceAI API 404/.test(message)
     ? " (Hint: a bare 404 usually means this MCP process is stale or pointing at the wrong TRACEAI_API_URL. Verify the API is up at TRACEAI_API_URL and reload the TraceAI MCP server in Cursor. Do NOT fall back to writing Aurora directly — that bypasses TraceAI and breaks the live board.)"
     : "";
+  // 409 and 400 mean different things and call for different next moves; an
+  // agent that treats them alike either loops or gives up too early.
+  const classHint =
+    status === 409
+      ? " (Hint: the content changed under you — an anchor no longer matches uniquely. Re-read it (get_wiki_page) and patch again with a fresh anchor. Do NOT resend the same edits and do NOT fall back to a full body write.)"
+      : status === 400
+        ? " (Hint: the request itself is invalid — resending it unchanged will fail again. Correct the field or the edit first.)"
+        : "";
+  const prefix = status
+    ? `Error ${status}${code ? ` ${code}` : ""}: `
+    : "Error: ";
   return {
-    content: [{ type: "text" as const, text: `Error: ${message}${hint}` }],
+    content: [
+      { type: "text" as const, text: `${prefix}${message}${hint}${classHint}` },
+    ],
     isError: true,
   };
 }
@@ -494,11 +509,32 @@ export function registerTraceAiTools(
 
   server.tool(
     "update_wiki_page",
-    "Update a wiki page (title/body/parent/sort_order). Never use Aurora MCP for wiki entries.",
+    "Update a wiki page. PREFER `edits` over `body`: each edit replaces one exact fragment, so everything you did not touch stays byte-identical — no need to resend an 11k-character page to change one table row, and no risk of silently dropping a section you forgot. Use `body` only for a new page or a full rewrite. Each `old_string` must appear EXACTLY once (or set replace_all); copy it verbatim from get_wiki_page, including whitespace, and extend it until it is unique rather than guessing. Errors tell you what to do next: 409 = the page changed and your anchor is stale → re-read and patch again; 400 = your request is wrong → fix it, resending unchanged will fail again. Nothing is written when an edit fails. Never use Aurora MCP for wiki entries.",
     {
       slug: z.string(),
       title: z.string().min(1).optional(),
-      body: z.string().optional(),
+      body: z
+        .string()
+        .optional()
+        .describe("Full replacement Markdown. Mutually exclusive with edits"),
+      edits: z
+        .array(
+          z.object({
+            old_string: z
+              .string()
+              .min(1)
+              .describe("Exact fragment to replace; must match uniquely"),
+            new_string: z.string().describe("Replacement (empty string deletes)"),
+            replace_all: z
+              .boolean()
+              .optional()
+              .describe("Replace every occurrence instead of requiring one"),
+          }),
+        )
+        .optional()
+        .describe(
+          "Patch fragments of the page body, applied in order. Preferred over body",
+        ),
       parent: z.string().nullable().optional(),
       sort_order: z.number().int().optional(),
     },

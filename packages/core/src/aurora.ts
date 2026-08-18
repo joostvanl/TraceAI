@@ -26,6 +26,23 @@ export type ListEntriesQuery = {
 /** Aurora caps `in` to 50 values per request. */
 export const AURORA_FIELD_IN_MAX = 50;
 
+/**
+ * One literal find/replace on a string field, applied server-side by Aurora.
+ * `old_string` must match exactly once unless `replace_all` is set; Aurora
+ * answers 409 CONFLICT when it matches zero times or ambiguously.
+ */
+export type FieldEdit = {
+  old_string: string;
+  new_string: string;
+  replace_all?: boolean;
+};
+
+/** Per-field result of an applied `field_edits` request. */
+export type FieldEditSummary = {
+  applied?: number;
+  fields?: Record<string, { length?: number }>;
+};
+
 export function buildEntriesSearchParams(
   query: ListEntriesQuery,
   defaults: { locale: string; limit?: number },
@@ -210,6 +227,11 @@ export class AuroraManagementClient {
     });
   }
 
+  /**
+   * Partial entry update. `fields` replaces whole field values; `field_edits`
+   * patches *within* a string field, applied atomically by Aurora (CMS-53).
+   * The same field may not appear in both.
+   */
   updateEntry<T>(
     apiId: string,
     entryId: string,
@@ -217,6 +239,7 @@ export class AuroraManagementClient {
       slug?: string;
       status?: "draft" | "published";
       fields?: Record<string, unknown>;
+      field_edits?: Record<string, FieldEdit[]>;
     },
   ) {
     return this.request<T>(

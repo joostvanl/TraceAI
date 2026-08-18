@@ -6,6 +6,7 @@ import type { AuthStore } from "@traceai/auth";
 import { hasScope } from "@traceai/auth";
 import type { TraceService } from "@traceai/core";
 import {
+  AuroraApiError,
   computeTokenRollup,
   isProjectRole,
   membershipSlug,
@@ -14,6 +15,7 @@ import {
   TICKET_REVIEW_STATES,
   WorkflowValidationError,
   wikiLogicalSlug,
+  type FieldEdit,
   type ProjectRole,
   type Ticket,
 } from "@traceai/core";
@@ -261,6 +263,67 @@ function mapWikiPage(
     sort_order: p.fields.sort_order ?? null,
     updated_by: p.fields.updated_by ?? null,
     updatedAt: p.updatedAt,
+  };
+}
+
+/** Validate an `edits` payload before it reaches Aurora. */
+function parseFieldEdits(
+  raw: unknown,
+): { edits: FieldEdit[] } | { error: string } {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return {
+      error: "edits must be a non-empty array of { old_string, new_string }.",
+    };
+  }
+  const edits: FieldEdit[] = [];
+  for (const [i, item] of raw.entries()) {
+    if (!item || typeof item !== "object") {
+      return { error: `edits[${i}] must be an object.` };
+    }
+    const edit = item as Record<string, unknown>;
+    if (typeof edit.old_string !== "string" || !edit.old_string) {
+      return { error: `edits[${i}].old_string must be a non-empty string.` };
+    }
+    if (typeof edit.new_string !== "string") {
+      return { error: `edits[${i}].new_string must be a string.` };
+    }
+    if (
+      edit.replace_all !== undefined &&
+      typeof edit.replace_all !== "boolean"
+    ) {
+      return { error: `edits[${i}].replace_all must be a boolean.` };
+    }
+    edits.push({
+      old_string: edit.old_string,
+      new_string: edit.new_string,
+      ...(edit.replace_all !== undefined
+        ? { replace_all: edit.replace_all }
+        : {}),
+    });
+  }
+  return { edits };
+}
+
+/** Aurora statuses that are expected outcomes, not server faults. */
+function isPassThroughStatus(status: number): status is 400 | 409 {
+  return status === 400 || status === 409;
+}
+
+/** Keep Aurora's own message, code and issues so the agent can act on them. */
+function auroraErrorBody(error: AuroraApiError) {
+  const body = (error.body ?? {}) as Record<string, unknown>;
+  return {
+    message: typeof body.message === "string" ? body.message : error.message,
+    code:
+      typeof body.code === "string"
+        ? body.code
+        : error.status === 409
+          ? "CONFLICT"
+          : "VALIDATION_FAILED",
+    ...(Array.isArray(body.issues) ? { issues: body.issues } : {}),
+    ...(typeof body.requestId === "string"
+      ? { aurora_request_id: body.requestId }
+      : {}),
   };
 }
 
@@ -1247,20 +1310,60 @@ export function createApp(deps: {
     const body = await c.req.json<{
       title?: string;
       body?: string;
+      edits?: unknown;
       parent?: string | null;
       sort_order?: number;
     }>();
-    const page = await deps.service.updateWikiPage(param(c, "slug"), {
-      ...body,
-      updated_by: actor.name,
-    });
+
+    let edits: FieldEdit[] | undefined;
+    if (body?.edits !== undefined) {
+      const parsed = parseFieldEdits(body.edits);
+      if ("error" in parsed) {
+        return c.json({ message: parsed.error, code: "VALIDATION" }, 400);
+      }
+      edits = parsed.edits;
+      if (body.body != null) {
+        return c.json(
+          {
+            message: "Pass either body (full replace) or edits (patch), not both.",
+            code: "VALIDATION",
+          },
+          400,
+        );
+      }
+    }
+
+    let result: Awaited<ReturnType<TraceService["updateWikiPage"]>>;
+    try {
+      result = await deps.service.updateWikiPage(param(c, "slug"), {
+        ...body,
+        edits,
+        updated_by: actor.name,
+      });
+    } catch (error) {
+      // Aurora separates "your anchor is stale" (409) from "your request is
+      // wrong" (400). Both are expected outcomes and must reach the agent as
+      // themselves: a 409 means re-read and retry, a 400 means retrying is
+      // pointless. Collapsing either into a 500 sends agents the wrong way.
+      if (error instanceof AuroraApiError && isPassThroughStatus(error.status)) {
+        return c.json(auroraErrorBody(error), error.status as 400 | 409);
+      }
+      throw error;
+    }
+
+    const page = result.page;
     audit(c, {
       action: "wiki.update",
       resourceType: "wiki_page",
       resourceId: page.slug,
       meta: { project: page.fields.project },
     });
-    return c.json(mapWikiPage(page));
+    return c.json({
+      ...mapWikiPage(page),
+      ...(result.applied_edits != null
+        ? { applied_edits: result.applied_edits }
+        : {}),
+    });
   });
 
   app.get("/v1/workflows", requireScope("workflows:read"), async (c) => {

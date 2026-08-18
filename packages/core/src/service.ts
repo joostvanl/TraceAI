@@ -3,6 +3,8 @@ import {
   AuroraApiError,
   AuroraManagementClient,
   type AuroraClientConfig,
+  type FieldEdit,
+  type FieldEditSummary,
   type ListEntriesQuery,
 } from "./aurora.js";
 import { listAllEntries as listAllEntriesShared } from "./list-all-entries.js";
@@ -1868,17 +1870,31 @@ export class TraceService {
     return page;
   }
 
+  /**
+   * Update a wiki page. `body` replaces the whole Markdown value; `edits`
+   * patches fragments of it via Aurora's atomic `field_edits` (CMS-53) so
+   * untouched text stays byte-identical and a stale anchor fails loudly.
+   *
+   * The two are mutually exclusive: this service never reads the body to patch
+   * it itself, because a client cannot make read-modify-write atomic.
+   */
   async updateWikiPage(
     slug: string,
     input: {
       title?: string;
       body?: string;
+      edits?: FieldEdit[];
       parent?: string | null;
       sort_order?: number;
       updated_by?: string;
     },
-  ): Promise<WikiPage> {
+  ): Promise<{ page: WikiPage; applied_edits?: number }> {
     await this.ensureReady();
+    if (input.edits && input.body != null) {
+      throw new Error(
+        "Pass either body (full replace) or edits (patch), not both.",
+      );
+    }
     const page = await this.client.getEntryBySlug<WikiPage>(
       WIKI_PAGE_CONTENT_TYPE,
       slug,
@@ -1892,25 +1908,24 @@ export class TraceService {
         slug,
       );
     }
-    const updated = await this.client.updateEntry<WikiPage>(
-      WIKI_PAGE_CONTENT_TYPE,
-      page.id,
-      {
-        fields: {
-          ...(input.title != null ? { title: input.title.trim() } : {}),
-          ...(input.body != null ? { body: input.body } : {}),
-          ...(input.parent !== undefined
-            ? { parent: parentEntrySlug || "" }
-            : {}),
-          ...(input.sort_order != null ? { sort_order: input.sort_order } : {}),
-          ...(input.updated_by != null
-            ? { updated_by: input.updated_by }
-            : {}),
-        },
+    const updated = await this.client.updateEntry<
+      WikiPage & { fieldEditSummary?: FieldEditSummary }
+    >(WIKI_PAGE_CONTENT_TYPE, page.id, {
+      fields: {
+        ...(input.title != null ? { title: input.title.trim() } : {}),
+        ...(input.body != null ? { body: input.body } : {}),
+        ...(input.parent !== undefined
+          ? { parent: parentEntrySlug || "" }
+          : {}),
+        ...(input.sort_order != null ? { sort_order: input.sort_order } : {}),
+        ...(input.updated_by != null ? { updated_by: input.updated_by } : {}),
       },
-    );
+      ...(input.edits ? { field_edits: { body: input.edits } } : {}),
+    });
     await this.ensurePublished(WIKI_PAGE_CONTENT_TYPE, updated);
-    return updated;
+    // Aurora also reports a per-field length; it is wrong today (CMS-53), so
+    // only the applied count is surfaced.
+    return { page: updated, applied_edits: updated.fieldEditSummary?.applied };
   }
 
   /**
