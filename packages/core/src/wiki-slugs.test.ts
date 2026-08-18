@@ -1,7 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  allocateWikiEntrySlug,
   resolveWikiEntrySlugInProject,
   wikiEntrySlug,
   wikiLogicalSlug,
@@ -25,40 +24,6 @@ describe("wikiEntrySlug / wikiLogicalSlug", () => {
 
   it("still resolves legacy -- separator", () => {
     assert.equal(wikiLogicalSlug("acme--home", "acme"), "home");
-  });
-});
-
-describe("allocateWikiEntrySlug", () => {
-  it("uses bare slug when globally free", () => {
-    assert.equal(
-      allocateWikiEntrySlug({
-        project: "acme",
-        logicalSlug: "getting-started",
-        existingEntrySlugs: ["home"],
-      }),
-      "getting-started",
-    );
-  });
-
-  it("namespaces when bare slug is taken", () => {
-    assert.equal(
-      allocateWikiEntrySlug({
-        project: "acme",
-        logicalSlug: "home",
-        existingEntrySlugs: ["home"],
-      }),
-      "acme-wp-home",
-    );
-  });
-
-  it("throws when namespaced slug also exists", () => {
-    assert.throws(() =>
-      allocateWikiEntrySlug({
-        project: "acme",
-        logicalSlug: "home",
-        existingEntrySlugs: ["home", "acme-wp-home"],
-      }),
-    );
   });
 });
 

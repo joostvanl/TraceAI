@@ -47,27 +47,6 @@ export function wikiLogicalSlug(entrySlug: string, project: string): string {
 }
 
 /**
- * Choose an Aurora entry slug for a new wiki page.
- * Prefer a bare logical slug when globally free; otherwise namespace with project.
- */
-export function allocateWikiEntrySlug(input: {
-  project: string;
-  logicalSlug: string;
-  existingEntrySlugs: Iterable<string>;
-}): string {
-  const logical = input.logicalSlug.trim();
-  const existing = new Set(
-    [...input.existingEntrySlugs].map((s) => s.trim()).filter(Boolean),
-  );
-  if (!existing.has(logical)) return logical;
-  const namespaced = wikiEntrySlug(input.project, logical);
-  if (existing.has(namespaced)) {
-    throw new Error(`Wiki page slug already exists: ${namespaced}`);
-  }
-  return namespaced;
-}
-
-/**
  * Find an entry slug in a project by exact entry slug or logical slug.
  */
 export function resolveWikiEntrySlugInProject(input: {

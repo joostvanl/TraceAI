@@ -744,32 +744,38 @@ export class TraceService {
     parent?: string | null;
   }): Promise<Ticket[]> {
     await this.ensureReady();
-    const matches = (raw: Ticket[]) =>
+    // Fall back on the *project* filter only. Deciding it after the stage and
+    // parent filters would rescan every ticket whenever a query legitimately
+    // matches nothing — an empty column is not a failed server-side filter.
+    const inProject = (raw: Ticket[]) =>
       raw
         .map((t) => this.normalizeTicketRelations(t))
-        .filter((t) => t.fields.project === input.project)
-        .filter((t) => (input.stage ? t.fields.stage === input.stage : true))
-        .filter((t) => {
-          if (input.parent === undefined) return true;
-          const parent = t.fields.parent || null;
-          if (input.parent === null || input.parent === "") {
-            return parent == null || parent === "";
-          }
-          return parent === input.parent;
-        })
-        .sort((a, b) => (a.fields.sort_order ?? 0) - (b.fields.sort_order ?? 0));
+        .filter((t) => t.fields.project === input.project);
 
-    const scoped = matches(
+    let tickets = inProject(
       await this.listAllEntries<Ticket>("ticket", {
         status: "published",
         field: "project",
         in: [input.project],
       }),
     );
-    if (scoped.length > 0) return scoped;
-    return matches(
-      await this.listAllEntries<Ticket>("ticket", { status: "published" }),
-    );
+    if (tickets.length === 0) {
+      tickets = inProject(
+        await this.listAllEntries<Ticket>("ticket", { status: "published" }),
+      );
+    }
+
+    return tickets
+      .filter((t) => (input.stage ? t.fields.stage === input.stage : true))
+      .filter((t) => {
+        if (input.parent === undefined) return true;
+        const parent = t.fields.parent || null;
+        if (input.parent === null || input.parent === "") {
+          return parent == null || parent === "";
+        }
+        return parent === input.parent;
+      })
+      .sort((a, b) => (a.fields.sort_order ?? 0) - (b.fields.sort_order ?? 0));
   }
 
   /**
@@ -1210,7 +1216,7 @@ export class TraceService {
     const projectTickets = await this.listTickets({ project: input.project });
     const parentSlug =
       input.parent !== undefined
-        ? validateTicketParent({
+        ? await this.validateParentRefInProject({
             tickets: projectTickets,
             project: input.project,
             parentRef: input.parent,
@@ -1245,6 +1251,38 @@ export class TraceService {
   private async resolveTicket(slugOrKey: string): Promise<Ticket | null> {
     const found = await this.getTicket(slugOrKey);
     return found?.ticket ?? null;
+  }
+
+  /**
+   * Validate a parent ref against the project's own tickets.
+   *
+   * The scoped list cannot tell "belongs to another project" from "does not
+   * exist", so a miss is re-checked with a targeted lookup before reporting.
+   */
+  private async validateParentRefInProject(input: {
+    tickets: Ticket[];
+    project: string;
+    parentRef: string | null;
+    selfSlug?: string;
+  }): Promise<string | null> {
+    try {
+      return validateTicketParent({
+        tickets: input.tickets,
+        project: input.project,
+        parentRef: input.parentRef,
+        selfSlug: input.selfSlug,
+      });
+    } catch (error) {
+      const notFound =
+        error instanceof Error &&
+        error.message.startsWith("Parent ticket not found");
+      if (!notFound || !input.parentRef) throw error;
+      const foreign = await this.resolveTicket(input.parentRef);
+      if (!foreign) throw error;
+      throw new Error(
+        `Parent ticket "${foreign.slug}" belongs to a different project.`,
+      );
+    }
   }
 
   async updateTicket(
@@ -1299,7 +1337,7 @@ export class TraceService {
     let parentSlug: string | null | undefined;
     if (input.parent !== undefined) {
       const siblings = await this.listTickets({ project: ticket.fields.project });
-      parentSlug = validateTicketParent({
+      parentSlug = await this.validateParentRefInProject({
         tickets: siblings,
         project: ticket.fields.project,
         selfSlug: ticket.slug,
