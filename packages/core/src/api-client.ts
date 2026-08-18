@@ -220,20 +220,29 @@ export class TraceApiClient {
       tokens_estimate?: number;
       tokens_used?: number;
       resolution?: string;
+      expected_stage?: string;
+      expected_review_state?: string | null;
       asHuman?: boolean;
     },
   ) {
+    const payload: Record<string, unknown> = {
+      to_stage: toStage,
+      comment,
+      tokens_estimate: tokens?.tokens_estimate,
+      tokens_used: tokens?.tokens_used,
+      resolution: tokens?.resolution,
+    };
+    if (tokens?.expected_stage !== undefined) {
+      payload.expected_stage = tokens.expected_stage;
+    }
+    if (tokens && "expected_review_state" in tokens) {
+      payload.expected_review_state = tokens.expected_review_state;
+    }
     return this.request<unknown>(
       `/v1/tickets/${encodeURIComponent(slug)}/transition`,
       {
         method: "POST",
-        body: JSON.stringify({
-          to_stage: toStage,
-          comment,
-          tokens_estimate: tokens?.tokens_estimate,
-          tokens_used: tokens?.tokens_used,
-          resolution: tokens?.resolution,
-        }),
+        body: JSON.stringify(payload),
       },
       { asHuman: tokens?.asHuman === true },
     );

@@ -23,6 +23,7 @@ export const STANDARD_WORKER_WORKFLOW_DOCUMENT: WorkflowDocument = {
       "Continue with '## Deze stap' describing what you completed, why the transition is appropriate, and what the next stage should verify.",
       "List concrete artifacts (files, endpoints, commands, wiki slugs) when relevant.",
       "Pass tokens_used: a non-negative integer estimate of LLM tokens (prompt+completion) spent on this step.",
+      "Call get_ticket immediately before transition_ticket. Pass expected_stage (current stage). When the current stage has require_human_approval_on_exit, also pass expected_review_state (current review_state, or null). Workflows with require_expected_stage_on_transition refuse the call without the required fields. On STAGE_CONFLICT, read the error body; do not retry the same transition.",
       "Stages with require_human_approval_on_exit need a human verdict (Goedkeuren/Afkeuren in the UI) before the agent may transition out. Exit requirements that name targets (require_*_on_exit_to) apply only to those destinations.",
       "Wiki writes only via TraceAI MCP (create_wiki_page / update_wiki_page). Never Aurora MCP for wiki.",
     ],
@@ -34,6 +35,7 @@ export const STANDARD_WORKER_WORKFLOW_DOCUMENT: WorkflowDocument = {
       "## Acceptance criteria",
     ],
     require_tokens_used_on_transition: true,
+    require_expected_stage_on_transition: true,
   },
   stages: [
     {

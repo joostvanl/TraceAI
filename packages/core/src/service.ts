@@ -64,6 +64,7 @@ import {
   type WorkflowStage,
   lastStageKey,
 } from "./types.js";
+import { enforceExpectedTransition } from "./stage-conflict.js";
 import {
   computeTokenRollup,
   listChildTickets,
@@ -1407,6 +1408,10 @@ export class TraceService {
       tokens_estimate?: number;
       tokens_used?: number;
       resolution?: TicketResolution | string;
+      expected_stage?: string;
+      expected_review_state?: string | null;
+      /** True when expected_review_state was present on the request (including null). */
+      reviewStateProvided?: boolean;
       /** Set only by the human-proxy API path (web session). */
       asHuman?: boolean;
     },
@@ -1421,12 +1426,32 @@ export class TraceService {
     if (!workflow) throw new Error(`Workflow not found: ${ticket.fields.workflow}`);
     const doc = parseWorkflowDocument(workflow.fields.stages_json);
     const stages = doc.stages;
+    const fromStage = stages.find((s) => s.key === ticket.fields.stage);
+    await enforceExpectedTransition({
+      require: doc.agent_policy.require_expected_stage_on_transition === true,
+      asHuman: options?.asHuman === true,
+      gatedStage: fromStage?.agent?.require_human_approval_on_exit === true,
+      expected_stage: options?.expected_stage,
+      expected_review_state: options?.expected_review_state,
+      reviewStateProvided: options?.reviewStateProvided === true,
+      current_stage: ticket.fields.stage,
+      current_review_state: ticket.fields.review_state || null,
+      to_stage: toStage,
+      stage_entered_at: ticket.fields.stage_entered_at ?? null,
+      loadComments: async () => {
+        const comments = await this.listCommentsForTickets([ticket.slug]);
+        return comments.map((c) => ({
+          author: c.fields.author ?? "",
+          createdAt: c.createdAt,
+          body: c.fields.body ?? "",
+        }));
+      },
+    });
     if (!canTransition(stages, ticket.fields.stage, toStage)) {
       throw new Error(
         `Transition from "${ticket.fields.stage}" to "${toStage}" is not allowed`,
       );
     }
-    const fromStage = stages.find((s) => s.key === ticket.fields.stage);
     const targetStage = stages.find((s) => s.key === toStage);
     if (!fromStage || !targetStage) {
       throw new Error("Invalid workflow stage for transition");

@@ -183,9 +183,31 @@ describe("workflow token flags parsing", () => {
 
   it("defaults enable token tracking on the product workflow template", () => {
     assert.equal(DEFAULT_AGENT_POLICY.require_tokens_used_on_transition, true);
+    assert.equal(DEFAULT_AGENT_POLICY.require_expected_stage_on_transition, true);
     assert.equal(backlog.agent?.require_tokens_estimate_on_exit, undefined);
     assert.deepEqual(inRefinement.agent?.require_tokens_estimate_on_exit_to, [
       "todo",
     ]);
+  });
+
+  it("does not fall back require_expected_stage_on_transition to DEFAULT", () => {
+    const doc = parseWorkflowDocument(
+      JSON.stringify({
+        version: 2,
+        agent_policy: {
+          summary: "x",
+          ticket_description: [],
+          on_every_transition: [],
+        },
+        stages: [
+          {
+            key: "backlog",
+            name: "Backlog",
+            transitions: ["todo"],
+          },
+        ],
+      }),
+    );
+    assert.equal(doc.agent_policy.require_expected_stage_on_transition, undefined);
   });
 });

@@ -1,5 +1,6 @@
 export {
   createTraceAiMcpServer,
+  formatToolError,
   registerTraceAiTools,
   TRACEAI_MCP_NAME,
   TRACEAI_MCP_VERSION,

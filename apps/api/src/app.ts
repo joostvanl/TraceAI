@@ -8,10 +8,12 @@ import type { TraceService } from "@traceai/core";
 import {
   AuroraApiError,
   computeTokenRollup,
+  ExpectedStateRequiredError,
   isProjectRole,
   membershipSlug,
   parseWorkflowDocument,
   requiredRoleForAction,
+  StageConflictError,
   TICKET_REVIEW_STATES,
   WorkflowValidationError,
   wikiLogicalSlug,
@@ -1052,6 +1054,8 @@ export function createApp(deps: {
       const body = await c.req.json<{
         to_stage: string;
         comment?: string;
+        expected_stage?: string;
+        expected_review_state?: string | null;
         tokens_estimate?: number;
         tokens_used?: number;
         resolution?: string;
@@ -1080,51 +1084,83 @@ export function createApp(deps: {
       const fromStage = before.ticket.fields.stage;
       const actor = c.get("actor");
       const asHuman = isHumanProxyRequest(c);
-      const ticket = await deps.service.transitionTicket(slug, body.to_stage, {
-        comment: body.comment,
-        author: actor.name,
-        tokens_estimate: body.tokens_estimate,
-        tokens_used: body.tokens_used,
-        resolution: body.resolution,
-        asHuman,
-      });
-      publishTicketEvent(
-        ticketEventFromMapped("ticket.transitioned", mapTicket(ticket), {
-          from_stage: fromStage,
-          to_stage: ticket.fields.stage,
-        }),
-      );
-      // Scenario A/B: notify humans when an agent enters a gated stage.
-      if (!asHuman) {
-        const human = resolveHumanIdentity(c);
-        await notifyReviewRequested(deps.service, ticket, {
-          excludeRecipient: human?.slug ?? null,
+      try {
+        const ticket = await deps.service.transitionTicket(slug, body.to_stage, {
+          comment: body.comment,
+          author: actor.name,
+          tokens_estimate: body.tokens_estimate,
+          tokens_used: body.tokens_used,
+          resolution: body.resolution,
+          expected_stage: body.expected_stage,
+          expected_review_state: body.expected_review_state,
+          reviewStateProvided: Object.prototype.hasOwnProperty.call(
+            body,
+            "expected_review_state",
+          ),
+          asHuman,
         });
-      }
-      audit(c, {
-        action: asHuman ? "ticket.human_transition" : "ticket.transition",
-        resourceType: "ticket",
-        resourceId: ticket.slug,
-        meta: {
+        publishTicketEvent(
+          ticketEventFromMapped("ticket.transitioned", mapTicket(ticket), {
+            from_stage: fromStage,
+            to_stage: ticket.fields.stage,
+          }),
+        );
+        // Scenario A/B: notify humans when an agent enters a gated stage.
+        if (!asHuman) {
+          const human = resolveHumanIdentity(c);
+          await notifyReviewRequested(deps.service, ticket, {
+            excludeRecipient: human?.slug ?? null,
+          });
+        }
+        audit(c, {
+          action: asHuman ? "ticket.human_transition" : "ticket.transition",
+          resourceType: "ticket",
+          resourceId: ticket.slug,
+          meta: {
+            from_stage: fromStage,
+            to_stage: body.to_stage,
+            tokens_estimate: body.tokens_estimate ?? null,
+            tokens_used: body.tokens_used ?? null,
+            tokens_actual: ticket.fields.tokens_actual ?? null,
+            resolution: ticket.fields.resolution ?? null,
+            as_human: asHuman,
+          },
+        });
+        return c.json({
+          slug: ticket.slug,
+          ticket_key: ticket.fields.ticket_key ?? null,
+          stage: ticket.fields.stage,
+          title: ticket.fields.title,
           from_stage: fromStage,
-          to_stage: body.to_stage,
-          tokens_estimate: body.tokens_estimate ?? null,
-          tokens_used: body.tokens_used ?? null,
+          tokens_estimate: ticket.fields.tokens_estimate ?? null,
           tokens_actual: ticket.fields.tokens_actual ?? null,
           resolution: ticket.fields.resolution ?? null,
-          as_human: asHuman,
-        },
-      });
-      return c.json({
-        slug: ticket.slug,
-        ticket_key: ticket.fields.ticket_key ?? null,
-        stage: ticket.fields.stage,
-        title: ticket.fields.title,
-        from_stage: fromStage,
-        tokens_estimate: ticket.fields.tokens_estimate ?? null,
-        tokens_actual: ticket.fields.tokens_actual ?? null,
-        resolution: ticket.fields.resolution ?? null,
-      });
+        });
+      } catch (error) {
+        if (error instanceof StageConflictError) {
+          return c.json(
+            {
+              message: error.message,
+              code: error.code,
+              expected_stage: error.expected_stage,
+              current_stage: error.current_stage,
+              expected_review_state: error.expected_review_state,
+              review_state: error.review_state,
+              to_stage: error.to_stage,
+              stage_entered_at: error.stage_entered_at,
+              recent_comments: error.recent_comments,
+            },
+            409,
+          );
+        }
+        if (error instanceof ExpectedStateRequiredError) {
+          return c.json(
+            { message: error.message, code: "VALIDATION" },
+            400,
+          );
+        }
+        throw error;
+      }
     },
   );
 

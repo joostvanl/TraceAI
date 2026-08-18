@@ -94,6 +94,12 @@ export type WorkflowAgentPolicy = {
    * delta for that step). Accumulated into ticket tokens_actual.
    */
   require_tokens_used_on_transition?: boolean;
+  /**
+   * When true, agent transitions must include expected_stage (and
+   * expected_review_state on a human-gated stage). Missing → 400.
+   * Parse: omitted key means not required (compat). Human-proxy is exempt.
+   */
+  require_expected_stage_on_transition?: boolean;
 };
 
 export type WorkflowEditorLayoutNode = {
@@ -363,6 +369,7 @@ export const DEFAULT_AGENT_POLICY: WorkflowAgentPolicy = {
     "Continue with '## Deze stap' describing what you completed and what the next stage should verify.",
     "List concrete artifacts (files, endpoints, commands) when relevant.",
     "Pass tokens_used: a non-negative integer estimate of LLM tokens (prompt+completion) spent on this step.",
+    "Call get_ticket immediately before transition_ticket. Pass expected_stage (current stage). When the current stage has require_human_approval_on_exit, also pass expected_review_state (current review_state, or null). Workflows with require_expected_stage_on_transition refuse the call without the required fields. On STAGE_CONFLICT, read the error body; do not retry the same transition.",
     "Stages with require_human_approval_on_exit need a human verdict in the UI (configured outcomes: approved / rejected / dismissed as applicable) before the agent may transition out.",
   ],
   min_description_chars: 280,
@@ -373,6 +380,7 @@ export const DEFAULT_AGENT_POLICY: WorkflowAgentPolicy = {
     "## Acceptance criteria",
   ],
   require_tokens_used_on_transition: true,
+  require_expected_stage_on_transition: true,
 };
 
 export const DEFAULT_STAGES: WorkflowStage[] = [
@@ -617,6 +625,10 @@ function parseAgentPolicy(raw: unknown): WorkflowAgentPolicy {
     require_tokens_used_on_transition:
       typeof item.require_tokens_used_on_transition === "boolean"
         ? item.require_tokens_used_on_transition
+        : undefined,
+    require_expected_stage_on_transition:
+      typeof item.require_expected_stage_on_transition === "boolean"
+        ? item.require_expected_stage_on_transition
         : undefined,
   };
 }

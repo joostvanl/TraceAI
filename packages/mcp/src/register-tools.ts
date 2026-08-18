@@ -22,29 +22,45 @@ function okWrite(data: unknown, apiBase: string) {
 }
 
 function fail(error: unknown) {
+  return {
+    content: [{ type: "text" as const, text: formatToolError(error) }],
+    isError: true,
+  };
+}
+
+const WIKI_409_HINT =
+  " (Hint: the content changed under you — an anchor no longer matches uniquely. Re-read it (get_wiki_page) and patch again with a fresh anchor. Do NOT resend the same edits and do NOT fall back to a full body write.)";
+
+const STAGE_CONFLICT_HINT =
+  " (Hint: another actor moved this ticket or changed the verdict. Read current_stage, review_state and recent_comments above. Do NOT retry the same transition. Do NOT omit expected_stage to bypass the guard.)";
+
+const INVALID_400_HINT =
+  " (Hint: the request itself is invalid — resending it unchanged will fail again. Correct the field or the edit first.)";
+
+/** Exported so M1/M2 can unit-test without spinning an MCP server. */
+export function formatToolError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   const status = error instanceof TraceApiError ? error.status : undefined;
   const code = error instanceof TraceApiError ? error.code : undefined;
   const hint = /(^|\s)404($|\s)|TraceAI API 404/.test(message)
     ? " (Hint: a bare 404 usually means this MCP process is stale or pointing at the wrong TRACEAI_API_URL. Verify the API is up at TRACEAI_API_URL and reload the TraceAI MCP server in Cursor. Do NOT fall back to writing Aurora directly — that bypasses TraceAI and breaks the live board.)"
     : "";
-  // 409 and 400 mean different things and call for different next moves; an
-  // agent that treats them alike either loops or gives up too early.
-  const classHint =
-    status === 409
-      ? " (Hint: the content changed under you — an anchor no longer matches uniquely. Re-read it (get_wiki_page) and patch again with a fresh anchor. Do NOT resend the same edits and do NOT fall back to a full body write.)"
-      : status === 400
-        ? " (Hint: the request itself is invalid — resending it unchanged will fail again. Correct the field or the edit first.)"
-        : "";
+  let classHint = "";
+  let bodyDump = "";
+  if (code === "STAGE_CONFLICT") {
+    classHint = STAGE_CONFLICT_HINT;
+    if (error instanceof TraceApiError && error.body != null) {
+      bodyDump = `\n${JSON.stringify(error.body, null, 2)}`;
+    }
+  } else if (status === 409) {
+    classHint = WIKI_409_HINT;
+  } else if (status === 400) {
+    classHint = INVALID_400_HINT;
+  }
   const prefix = status
     ? `Error ${status}${code ? ` ${code}` : ""}: `
     : "Error: ";
-  return {
-    content: [
-      { type: "text" as const, text: `${prefix}${message}${hint}${classHint}` },
-    ],
-    isError: true,
-  };
+  return `${prefix}${message}${bodyDump}${hint}${classHint}`;
 }
 
 const stageAgentSchema = z
@@ -315,7 +331,7 @@ export function registerTraceAiTools(
 
   server.tool(
     "transition_ticket",
-    "Move a ticket to another workflow stage. ALWAYS pass comment with ## Vorige stap and ## Deze stap. Entering review ALSO requires ## Testverslag and ## Uitslag (PASS/FAIL). Token/resolution fields are required only when the workflow playbook says so (see get_workflow): tokens_used when agent_policy.require_tokens_used_on_transition; tokens_estimate when leaving a stage with require_tokens_estimate_on_exit; resolution when entering a stage with require_resolution_on_enter. A stage with require_human_approval_on_exit may only be left after a human recorded a verdict in the TraceAI UI: get_ticket then shows review_state approved (move to human_approve_to), rejected (move to a human_reject_to target, comment needs ## Reden) or dismissed (move to human_dismiss_to, comment needs ## Reden). Only the outcomes the stage actually configures are available. Without a verdict the transition is refused; the verdict is cleared once the ticket moves.",
+    "Move a ticket to another workflow stage. ALWAYS pass comment with ## Vorige stap and ## Deze stap. Entering review ALSO requires ## Testverslag and ## Uitslag (PASS/FAIL). Token/resolution fields are required only when the workflow playbook says so (see get_workflow): tokens_used when agent_policy.require_tokens_used_on_transition; tokens_estimate when leaving a stage with require_tokens_estimate_on_exit; resolution when entering a stage with require_resolution_on_enter. Call get_ticket immediately before this tool and pass expected_stage (the current stage). On a human-gated stage also pass expected_review_state (current review_state, or null). Workflows with require_expected_stage_on_transition refuse the call without those fields. On 409 STAGE_CONFLICT the error includes current_stage, review_state and recent_comments — do not retry the same transition. A stage with require_human_approval_on_exit may only be left after a human recorded a verdict in the TraceAI UI: get_ticket then shows review_state approved (move to human_approve_to), rejected (move to a human_reject_to target, comment needs ## Reden) or dismissed (move to human_dismiss_to, comment needs ## Reden). Only the outcomes the stage actually configures are available. Without a verdict the transition is refused; the verdict is cleared once the ticket moves.",
     {
       slug: z.string(),
       to_stage: z.string().describe("Target stage key"),
@@ -324,6 +340,18 @@ export function registerTraceAiTools(
         .min(40)
         .describe(
           "Markdown transition comment. Required sections depend on workflow agent rules.",
+        ),
+      expected_stage: z
+        .string()
+        .optional()
+        .describe(
+          "Stage you just read from get_ticket. Required when the workflow sets require_expected_stage_on_transition (agents). Mismatch → 409 STAGE_CONFLICT.",
+        ),
+      expected_review_state: z
+        .union([z.string(), z.null()])
+        .optional()
+        .describe(
+          "review_state you just read (or null). Required on human-gated stages when the workflow requires expected_stage. Pass null explicitly when you expect no verdict.",
         ),
       tokens_used: z
         .number()
@@ -358,6 +386,8 @@ export function registerTraceAiTools(
       slug,
       to_stage,
       comment,
+      expected_stage,
+      expected_review_state,
       tokens_used,
       tokens_estimate,
       resolution,
@@ -368,6 +398,10 @@ export function registerTraceAiTools(
             tokens_used,
             tokens_estimate,
             resolution,
+            expected_stage,
+            ...(expected_review_state !== undefined
+              ? { expected_review_state }
+              : {}),
           }),
           apiBase,
         );
