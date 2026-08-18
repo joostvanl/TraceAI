@@ -4,6 +4,8 @@ import {
   TraceApiClient,
   computeProjectInsights,
   lastStageKey,
+  listAllEntries,
+  listEntriesForProject,
   newestFirstCapped,
   paginateItems,
   parseStages,
@@ -13,6 +15,7 @@ import {
   sortTicketsNewestFirst,
   wikiLogicalSlug,
   type Comment,
+  type EntriesReader,
   type Project,
   type ProjectInsights,
   type SearchHit,
@@ -34,10 +37,11 @@ export function getPublicClient() {
   return new AuroraPublicClient({ apiUrl, siteKey, locale: "en-US" });
 }
 
-export async function listProjects(): Promise<Project[]> {
-  const client = getPublicClient();
-  const result = await client.listEntries<Project>("project", { limit: 100 });
-  return result.items;
+export async function listProjects(
+  client: EntriesReader = getPublicClient(),
+): Promise<Project[]> {
+  // Public Aurora already exposes published entries; omit status.
+  return listAllEntries<Project>(client, "project", {});
 }
 
 export async function getProject(slug: string): Promise<Project | null> {
@@ -58,26 +62,37 @@ export async function getWorkflow(slug: string): Promise<Workflow | null> {
 
 export async function listWorkflowsForProject(
   projectSlug: string,
+  client: EntriesReader = getPublicClient(),
 ): Promise<Workflow[]> {
-  const result = await getPublicClient().listEntries<Workflow>("workflow", {
-    limit: 100,
-  });
-  return result.items.filter((w) => w.fields.project === projectSlug);
+  return listEntriesForProject<Workflow>(
+    client,
+    "workflow",
+    projectSlug,
+    (w) => relationSlug(w.fields.project),
+  );
 }
 
 export async function listTicketsForProject(
   projectSlug: string,
+  client: EntriesReader = getPublicClient(),
 ): Promise<Ticket[]> {
-  const result = await getPublicClient().listEntries<Ticket>("ticket", {
-    limit: 100,
-  });
-  return result.items
-    .filter((t) => t.fields.project === projectSlug)
-    .sort((a, b) => (a.fields.sort_order ?? 0) - (b.fields.sort_order ?? 0));
+  const tickets = await listEntriesForProject<Ticket>(
+    client,
+    "ticket",
+    projectSlug,
+    (t) => relationSlug(t.fields.project),
+  );
+  return tickets.sort(
+    (a, b) => (a.fields.sort_order ?? 0) - (b.fields.sort_order ?? 0),
+  );
 }
 
-export async function getTicket(slugOrKey: string): Promise<Ticket | null> {
-  const client = getPublicClient();
+export async function getTicket(
+  slugOrKey: string,
+  client: EntriesReader & {
+    getEntry<T>(apiId: string, slug: string): Promise<T>;
+  } = getPublicClient(),
+): Promise<Ticket | null> {
   try {
     return await client.getEntry<Ticket>("ticket", slugOrKey);
   } catch {
@@ -86,11 +101,10 @@ export async function getTicket(slugOrKey: string): Promise<Ticket | null> {
   if (!isTicketKeyPattern(slugOrKey)) return null;
   const want = slugOrKey.trim().toUpperCase();
   try {
-    const result = await client.listEntries<Ticket>("ticket", { limit: 100 });
+    const all = await listAllEntries<Ticket>(client, "ticket", {});
     return (
-      result.items.find(
-        (t) => (t.fields.ticket_key ?? "").toUpperCase() === want,
-      ) ?? null
+      all.find((t) => (t.fields.ticket_key ?? "").toUpperCase() === want) ??
+      null
     );
   } catch {
     return null;
@@ -177,20 +191,25 @@ function wikiRelationSlug(value: unknown): string | null {
   return null;
 }
 
-export async function listWikiPagesForProject(projectSlug: string): Promise<{
+export async function listWikiPagesForProject(
+  projectSlug: string,
+  client: EntriesReader = getPublicClient(),
+): Promise<{
   pages: WikiPage[];
   tree: WikiTreeNode[];
 }> {
-  const result = await getPublicClient().listEntries<WikiPage>("wiki_page", {
-    limit: 100,
+  const pages = (
+    await listEntriesForProject<WikiPage>(
+      client,
+      "wiki_page",
+      projectSlug,
+      (p) => wikiRelationSlug(p.fields.project),
+    )
+  ).sort((a, b) => {
+    const so = (a.fields.sort_order ?? 0) - (b.fields.sort_order ?? 0);
+    if (so !== 0) return so;
+    return a.fields.title.localeCompare(b.fields.title);
   });
-  const pages = result.items
-    .filter((p) => wikiRelationSlug(p.fields.project) === projectSlug)
-    .sort((a, b) => {
-      const so = (a.fields.sort_order ?? 0) - (b.fields.sort_order ?? 0);
-      if (so !== 0) return so;
-      return a.fields.title.localeCompare(b.fields.title);
-    });
 
   const byEntry = new Map<string, WikiTreeNode>();
   for (const page of pages) {

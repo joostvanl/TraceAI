@@ -5,14 +5,16 @@ import {
   type AuroraClientConfig,
   type ListEntriesQuery,
 } from "./aurora.js";
+import { listAllEntries as listAllEntriesShared } from "./list-all-entries.js";
 import {
   assertNonNegativeIntegerSortOrder,
   planTicketReorder,
 } from "./reorder.js";
 import { STANDARD_WORKER_WORKFLOW_DOCUMENT } from "./standard-worker-workflow.js";
+import { allocateUniqueEntrySlug } from "./unique-entry-slug.js";
 import {
-  allocateWikiEntrySlug,
   resolveWikiEntrySlugInProject,
+  wikiEntrySlug,
   wikiLogicalSlug,
 } from "./wiki-slugs.js";
 import { selectWikiPages, sortWikiPages } from "./wiki-pages.js";
@@ -154,27 +156,14 @@ export class TraceService {
   }
 
   /**
-   * Page through all entries of a content type. Aurora caps `limit` at 100, so
-   * anything that can exceed that must paginate instead of asking for more.
-   * Prefer `field` + `in` for parent/child selections (max 50 values per page
-   * request — callers must chunk larger IN-lists).
+   * Page through all entries of a content type. Thin wrapper around the shared
+   * {@link listAllEntriesShared} helper (Aurora caps `limit` at 100).
    */
   private async listAllEntries<T>(
     apiId: string,
     query: Pick<ListEntriesQuery, "status" | "field" | "in" | "sort" | "order"> = {},
   ): Promise<T[]> {
-    const pageSize = 100;
-    const items: T[] = [];
-    for (let offset = 0; ; offset += pageSize) {
-      const result = await this.client.listEntries<T>(apiId, {
-        ...query,
-        limit: pageSize,
-        offset,
-      });
-      items.push(...result.items);
-      if (result.items.length < pageSize || items.length >= result.total) break;
-    }
-    return items;
+    return listAllEntriesShared(this.client, apiId, query);
   }
 
   /**
@@ -208,11 +197,7 @@ export class TraceService {
 
   async listProjects(): Promise<Project[]> {
     await this.ensureReady();
-    const result = await this.client.listEntries<Project>("project", {
-      status: "published",
-      limit: 100,
-    });
-    return result.items;
+    return this.listAllEntries<Project>("project", { status: "published" });
   }
 
   async getProject(slug: string): Promise<{
@@ -227,9 +212,7 @@ export class TraceService {
     const workflowSlug = relationSlug(project.fields.default_workflow);
     const workflow = workflowSlug
       ? await this.client.getEntryBySlug<Workflow>("workflow", workflowSlug)
-      : (
-          await this.client.listEntries<Workflow>("workflow", { limit: 100 })
-        ).items.find((w) => relationSlug(w.fields.project) === slug) ?? null;
+      : (await this.listWorkflows(slug))[0] ?? null;
     const workflow_document = workflow
       ? parseWorkflowDocument(workflow.fields.stages_json)
       : null;
@@ -260,10 +243,10 @@ export class TraceService {
       if (!user) throw new Error(`User not found: ${ownerUser}`);
     }
 
-    const existing = await this.listProjects();
-    const slug = uniqueSlug(
+    const slug = await allocateUniqueEntrySlug(
+      this.client,
+      "project",
       input.slug ?? input.name,
-      new Set(existing.map((p) => p.slug)),
     );
 
     // Create project first so workflow.project relation resolves.
@@ -375,13 +358,23 @@ export class TraceService {
 
   async listWorkflows(projectSlug?: string): Promise<Workflow[]> {
     await this.ensureReady();
-    const result = await this.client.listEntries<Workflow>("workflow", {
-      status: "published",
-      limit: 100,
-    });
-    if (!projectSlug) return result.items;
-    return result.items.filter(
-      (w) => relationSlug(w.fields.project) === projectSlug,
+    if (!projectSlug) {
+      return this.listAllEntries<Workflow>("workflow", { status: "published" });
+    }
+    const matches = (items: Workflow[]) =>
+      items.filter((w) => relationSlug(w.fields.project) === projectSlug);
+    const scoped = matches(
+      await this.listAllEntries<Workflow>("workflow", {
+        status: "published",
+        field: "project",
+        in: [projectSlug],
+      }),
+    );
+    if (scoped.length > 0) return scoped;
+    // Relation fields may be stored as objects; empty scoped result is
+    // indistinguishable from "no workflows", so confirm with a full scan.
+    return matches(
+      await this.listAllEntries<Workflow>("workflow", { status: "published" }),
     );
   }
 
@@ -409,10 +402,10 @@ export class TraceService {
     slug?: string;
   }): Promise<Workflow> {
     await this.ensureReady();
-    const existing = await this.listWorkflows();
-    const slug = uniqueSlug(
+    const slug = await allocateUniqueEntrySlug(
+      this.client,
+      "workflow",
       input.slug ?? `${input.project}-${input.name}`,
-      new Set(existing.map((w) => w.slug)),
     );
     const document =
       input.document ??
@@ -751,22 +744,32 @@ export class TraceService {
     parent?: string | null;
   }): Promise<Ticket[]> {
     await this.ensureReady();
-    const items = await this.listAllEntries<Ticket>("ticket", {
-      status: "published",
-    });
-    return items
-      .map((t) => this.normalizeTicketRelations(t))
-      .filter((t) => t.fields.project === input.project)
-      .filter((t) => (input.stage ? t.fields.stage === input.stage : true))
-      .filter((t) => {
-        if (input.parent === undefined) return true;
-        const parent = t.fields.parent || null;
-        if (input.parent === null || input.parent === "") {
-          return parent == null || parent === "";
-        }
-        return parent === input.parent;
-      })
-      .sort((a, b) => (a.fields.sort_order ?? 0) - (b.fields.sort_order ?? 0));
+    const matches = (raw: Ticket[]) =>
+      raw
+        .map((t) => this.normalizeTicketRelations(t))
+        .filter((t) => t.fields.project === input.project)
+        .filter((t) => (input.stage ? t.fields.stage === input.stage : true))
+        .filter((t) => {
+          if (input.parent === undefined) return true;
+          const parent = t.fields.parent || null;
+          if (input.parent === null || input.parent === "") {
+            return parent == null || parent === "";
+          }
+          return parent === input.parent;
+        })
+        .sort((a, b) => (a.fields.sort_order ?? 0) - (b.fields.sort_order ?? 0));
+
+    const scoped = matches(
+      await this.listAllEntries<Ticket>("ticket", {
+        status: "published",
+        field: "project",
+        in: [input.project],
+      }),
+    );
+    if (scoped.length > 0) return scoped;
+    return matches(
+      await this.listAllEntries<Ticket>("ticket", { status: "published" }),
+    );
   }
 
   /**
@@ -961,12 +964,9 @@ export class TraceService {
     let ticket = await this.client.getEntryBySlug<Ticket>("ticket", slugOrKey);
     if (!ticket && isTicketKeyPattern(slugOrKey)) {
       const want = slugOrKey.trim().toUpperCase();
-      const all = (
-        await this.client.listEntries<Ticket>("ticket", {
-          status: "published",
-          limit: 100,
-        })
-      ).items;
+      const all = await this.listAllEntries<Ticket>("ticket", {
+        status: "published",
+      });
       ticket =
         all.find(
           (t) => (t.fields.ticket_key ?? "").toUpperCase() === want,
@@ -1011,13 +1011,7 @@ export class TraceService {
     projectSlug: string,
   ): Promise<{ projectKey: string; ticketNumber: number; ticketKey: string }> {
     const used = new Set(
-      (
-        await this.client.listEntries<Ticket>("ticket", {
-          status: "published",
-          limit: 100,
-        })
-      ).items
-        .filter((t) => t.fields.project === projectSlug)
+      (await this.listTickets({ project: projectSlug }))
         .map((t) => Number(t.fields.ticket_number))
         .filter((n) => Number.isFinite(n) && n > 0),
     );
@@ -1080,19 +1074,11 @@ export class TraceService {
       ? ([
           await this.client.getEntryBySlug<Project>("project", projectSlug),
         ].filter(Boolean) as Project[])
-      : (
-          await this.client.listEntries<Project>("project", {
-            status: "published",
-            limit: 100,
-          })
-        ).items;
+      : await this.listProjects();
 
-    const allTickets = (
-      await this.client.listEntries<Ticket>("ticket", {
-        status: "published",
-        limit: 100,
-      })
-    ).items;
+    const allTickets = await this.listAllEntries<Ticket>("ticket", {
+      status: "published",
+    });
 
     let updated = 0;
     const touched: string[] = [];
@@ -1215,18 +1201,17 @@ export class TraceService {
       assertNoErrors(validateTicketDescription(description, doc.agent_policy));
     }
 
-    const existing = (
-      await this.client.listEntries<Ticket>("ticket", { limit: 100 })
-    ).items;
-    const slug = uniqueSlug(
+    const slug = await allocateUniqueEntrySlug(
+      this.client,
+      "ticket",
       input.slug ?? input.title,
-      new Set(existing.map((t) => t.slug)),
     );
 
+    const projectTickets = await this.listTickets({ project: input.project });
     const parentSlug =
       input.parent !== undefined
         ? validateTicketParent({
-            tickets: existing,
+            tickets: projectTickets,
             project: input.project,
             parentRef: input.parent,
           })
@@ -1246,8 +1231,7 @@ export class TraceService {
         stage,
         priority: input.priority ?? "medium",
         created_by: input.created_by ?? "agent",
-        sort_order: existing.filter((t) => t.fields.project === input.project)
-          .length,
+        sort_order: projectTickets.length,
         ticket_key: identity.ticketKey,
         ticket_number: identity.ticketNumber,
         stage_entered_at: now,
@@ -1314,12 +1298,7 @@ export class TraceService {
     }
     let parentSlug: string | null | undefined;
     if (input.parent !== undefined) {
-      const siblings = (
-        await this.client.listEntries<Ticket>("ticket", {
-          status: "published",
-          limit: 100,
-        })
-      ).items;
+      const siblings = await this.listTickets({ project: ticket.fields.project });
       parentSlug = validateTicketParent({
         tickets: siblings,
         project: ticket.fields.project,
@@ -1789,41 +1768,43 @@ export class TraceService {
       input.project,
       input.parent,
     );
-    const existing = (
-      await this.client.listEntries<WikiPage>(WIKI_PAGE_CONTENT_TYPE, {
-        limit: 100,
-      })
-    ).items;
-    const normalizedExisting = existing.map((p) =>
-      this.normalizeWikiRelations(p),
-    );
+    const projectPages = await this.loadProjectWikiPages(input.project);
     const logicalDesired =
       input.slug?.trim() ||
       uniqueSlug(
         title,
         new Set(
-          normalizedExisting
-            .filter((p) => p.fields.project === input.project)
-            .map((p) => wikiLogicalSlug(p.slug, input.project)),
+          projectPages.map((p) => wikiLogicalSlug(p.slug, input.project)),
         ),
       );
-    const logicalInProject = normalizedExisting
-      .filter((p) => p.fields.project === input.project)
-      .some((p) => wikiLogicalSlug(p.slug, input.project) === logicalDesired);
+    const logicalInProject = projectPages.some(
+      (p) => wikiLogicalSlug(p.slug, input.project) === logicalDesired,
+    );
     if (logicalInProject) {
       throw new Error(
         `Wiki page slug already exists in project: ${logicalDesired}`,
       );
     }
-    const slug = allocateWikiEntrySlug({
-      project: input.project,
-      logicalSlug: logicalDesired,
-      existingEntrySlugs: existing.map((p) => p.slug),
-    });
-    const siblings = normalizedExisting.filter(
-      (p) =>
-        p.fields.project === input.project &&
-        (p.fields.parent || null) === (parentEntrySlug || null),
+    const bareTaken = await this.client.getEntryBySlug(
+      WIKI_PAGE_CONTENT_TYPE,
+      logicalDesired,
+    );
+    let slug: string;
+    if (!bareTaken) {
+      slug = logicalDesired;
+    } else {
+      const namespaced = wikiEntrySlug(input.project, logicalDesired);
+      const namespacedTaken = await this.client.getEntryBySlug(
+        WIKI_PAGE_CONTENT_TYPE,
+        namespaced,
+      );
+      if (namespacedTaken) {
+        throw new Error(`Wiki page slug already exists: ${namespaced}`);
+      }
+      slug = namespaced;
+    }
+    const siblings = projectPages.filter(
+      (p) => (p.fields.parent || null) === (parentEntrySlug || null),
     );
     const page = await this.client.createEntry<WikiPage>(
       WIKI_PAGE_CONTENT_TYPE,

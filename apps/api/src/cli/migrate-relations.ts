@@ -10,6 +10,7 @@
  */
 import {
   isProjectRole,
+  listAllEntries,
   relationSlug,
   WIKI_PAGE_CONTENT_TYPE,
   type Ticket,
@@ -63,11 +64,10 @@ for (const m of memberships) {
   summary.memberships.rewritten += 1;
 }
 
-const tickets = await client.listEntries<Ticket>("ticket", {
+const tickets = await listAllEntries<Ticket>(client, "ticket", {
   status: "published",
-  limit: 100,
 });
-for (const t of tickets.items) {
+for (const t of tickets) {
   summary.tickets.checked += 1;
   const project = relationSlug(t.fields.project);
   const workflow = relationSlug(t.fields.workflow);
@@ -102,11 +102,10 @@ for (const t of tickets.items) {
   summary.tickets.rewritten += 1;
 }
 
-const wiki = await client.listEntries<WikiPage>(WIKI_PAGE_CONTENT_TYPE, {
+const wiki = await listAllEntries<WikiPage>(client, WIKI_PAGE_CONTENT_TYPE, {
   status: "published",
-  limit: 100,
 });
-for (const p of wiki.items) {
+for (const p of wiki) {
   summary.wiki.checked += 1;
   const project = relationSlug(p.fields.project);
   const parent = relationSlug(p.fields.parent);
