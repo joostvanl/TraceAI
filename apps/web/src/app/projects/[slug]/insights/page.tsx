@@ -6,6 +6,7 @@ import {
   listProjectHistoryPublic,
   searchProjectPublic,
 } from "@/lib/cms";
+import { requireProjectAccess } from "@/lib/project-access";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +33,7 @@ export default async function ProjectInsightsPage({
   searchParams,
 }: Props) {
   const { slug } = await params;
+  await requireProjectAccess(slug);
   const sp = await searchParams;
   const project = await getProject(slug);
   if (!project) notFound();

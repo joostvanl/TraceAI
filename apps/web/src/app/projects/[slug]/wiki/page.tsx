@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { WikiTreeNav } from "@/components/WikiTreeNav";
 import { getProject, listWikiPagesForProject } from "@/lib/cms";
+import { requireProjectAccess } from "@/lib/project-access";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,7 @@ type Props = {
 
 export default async function ProjectWikiIndexPage({ params }: Props) {
   const { slug } = await params;
+  await requireProjectAccess(slug);
   const project = await getProject(slug);
   if (!project) notFound();
 

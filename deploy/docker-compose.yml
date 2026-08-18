@@ -40,7 +40,6 @@ services:
       dockerfile: Dockerfile.web
       args:
         NEXT_PUBLIC_CMS_API_URL: ${NEXT_PUBLIC_CMS_API_URL:-https://aurora-api.joostvanleeuwaarden.com}
-        NEXT_PUBLIC_CMS_SITE_KEY: ${NEXT_PUBLIC_CMS_SITE_KEY}
         NEXT_PUBLIC_TRACEAI_EVENTS_URL: ${NEXT_PUBLIC_TRACEAI_EVENTS_URL:-http://192.168.1.91:3847/events}
     image: traceai-web:latest
     restart: unless-stopped
@@ -50,6 +49,9 @@ services:
     env_file:
       - .env
     environment:
+      # Aurora public read key. Runtime-only and unprefixed since TRA-81: a
+      # NEXT_PUBLIC_ name would be baked into the bundle at build time.
+      CMS_SITE_KEY: ${CMS_SITE_KEY:-}
       # Server-only write proxy for the New ticket form (not NEXT_PUBLIC).
       TRACEAI_API_URL: ${TRACEAI_API_URL:-http://api:3847}
       TRACEAI_TOKEN: ${TRACEAI_TOKEN:-}

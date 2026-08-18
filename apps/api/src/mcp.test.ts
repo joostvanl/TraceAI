@@ -156,6 +156,13 @@ describe("hosted MCP /mcp", () => {
             },
           ],
           getWorkflow: async () => null,
+          // Project access is membership-based since TRA-81, so listing projects
+          // now resolves the TraceAI user behind the token. This token has no
+          // matching user, so the filtered list is empty — that is the intended
+          // deny-by-default. This test is about api_base plumbing, not filtering.
+          listTraceaiUsers: async () => [],
+          getTraceaiUser: async () => null,
+          listProjectMemberships: async () => [],
         } as never,
       });
 

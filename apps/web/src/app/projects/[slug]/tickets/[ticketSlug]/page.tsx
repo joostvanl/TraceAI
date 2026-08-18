@@ -20,6 +20,7 @@ import {
   listCommentsForTicket,
   listTicketsForProject,
 } from "@/lib/cms";
+import { requireProjectAccess } from "@/lib/project-access";
 import { getSessionUser } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -30,6 +31,7 @@ type Props = {
 
 export default async function TicketPage({ params }: Props) {
   const { slug, ticketSlug } = await params;
+  await requireProjectAccess(slug);
   const [project, sessionUser, projectTickets] = await Promise.all([
     getProject(slug),
     getSessionUser(),

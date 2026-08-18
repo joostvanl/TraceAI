@@ -28,20 +28,26 @@ AURORA_WEBSITE_ID=cmsiyy8oy00quoc01zzam3t6p
 AURORA_LOCALE=en-US
 TRACEAI_CORS_ORIGINS=https://traceai.joostvanleeuwaarden.com,http://192.168.1.91:3011
 NEXT_PUBLIC_CMS_API_URL=https://aurora-api.joostvanleeuwaarden.com
-NEXT_PUBLIC_CMS_SITE_KEY=
+CMS_SITE_KEY=
 NEXT_PUBLIC_TRACEAI_EVENTS_URL=https://traceai.joostvanleeuwaarden.com/events
 TRACEAI_API_URL=http://api:3847
 TRACEAI_TOKEN=
 TRACEAI_SESSION_SECRET=
 EOF
   chmod 600 "$ENV_FILE"
-  fail "Created $ENV_FILE. Fill AURORA_USER_TOKEN, NEXT_PUBLIC_CMS_SITE_KEY, TRACEAI_TOKEN, and TRACEAI_SESSION_SECRET, then run this script again."
+  fail "Created $ENV_FILE. Fill AURORA_USER_TOKEN, CMS_SITE_KEY, TRACEAI_TOKEN, and TRACEAI_SESSION_SECRET, then run this script again."
 fi
 
 grep -Eq '^AURORA_USER_TOKEN=.+$' "$ENV_FILE" ||
   fail "AURORA_USER_TOKEN is missing in $ENV_FILE"
-grep -Eq '^NEXT_PUBLIC_CMS_SITE_KEY=.+$' "$ENV_FILE" ||
-  fail "NEXT_PUBLIC_CMS_SITE_KEY is missing in $ENV_FILE"
+# TRA-81 renamed the site key. Catch the old name explicitly: keeping it would
+# leave the web container without a key and take the public read path down.
+if grep -Eq '^NEXT_PUBLIC_CMS_SITE_KEY=.+$' "$ENV_FILE" &&
+  ! grep -Eq '^CMS_SITE_KEY=.+$' "$ENV_FILE"; then
+  fail "Rename NEXT_PUBLIC_CMS_SITE_KEY to CMS_SITE_KEY in $ENV_FILE (TRA-81: the key is server-only and is now read at runtime)"
+fi
+grep -Eq '^CMS_SITE_KEY=.+$' "$ENV_FILE" ||
+  fail "CMS_SITE_KEY is missing in $ENV_FILE"
 grep -Eq '^TRACEAI_TOKEN=trc_.+$' "$ENV_FILE" ||
   fail "TRACEAI_TOKEN (trc_…) is missing in $ENV_FILE — needed for the New ticket form"
 grep -Eq '^TRACEAI_SESSION_SECRET=.+$' "$ENV_FILE" ||

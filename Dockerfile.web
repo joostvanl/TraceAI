@@ -15,11 +15,13 @@ RUN pnpm install --frozen-lockfile
 
 FROM deps AS build
 COPY . .
+# CMS_SITE_KEY is deliberately *not* a build arg (TRA-81). A NEXT_PUBLIC_ value
+# is inlined into the bundle at build time; an unprefixed one is read from the
+# runtime environment, which is where a secret belongs. Every page is
+# force-dynamic, so the build needs no Aurora access.
 ARG NEXT_PUBLIC_CMS_API_URL=https://aurora-api.joostvanleeuwaarden.com
-ARG NEXT_PUBLIC_CMS_SITE_KEY
 ARG NEXT_PUBLIC_TRACEAI_EVENTS_URL=http://192.168.1.91:3847/events
 ENV NEXT_PUBLIC_CMS_API_URL=$NEXT_PUBLIC_CMS_API_URL
-ENV NEXT_PUBLIC_CMS_SITE_KEY=$NEXT_PUBLIC_CMS_SITE_KEY
 ENV NEXT_PUBLIC_TRACEAI_EVENTS_URL=$NEXT_PUBLIC_TRACEAI_EVENTS_URL
 RUN pnpm --filter @traceai/core build \
   && pnpm --filter @traceai/web build

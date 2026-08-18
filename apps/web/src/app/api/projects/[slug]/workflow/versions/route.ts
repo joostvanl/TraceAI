@@ -3,6 +3,7 @@ import { TraceApiError } from "@traceai/core";
 import { getSessionIdentity, isLoginConfigured } from "@/lib/session";
 import { createTraceServerClient } from "@/lib/traceai-server";
 import { getProject } from "@/lib/cms";
+import { hasProjectAccess } from "@/lib/project-access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,6 +27,14 @@ export async function GET(_request: Request, context: RouteContext) {
     );
   }
   const { slug } = await context.params;
+  // Workflow versions are project data; the API route they proxy to is not
+  // project-scoped (TRA-81).
+  if (!(await hasProjectAccess(slug, identity))) {
+    return NextResponse.json(
+      { message: "Project not found", code: "NOT_FOUND" },
+      { status: 404 },
+    );
+  }
   const project = await getProject(slug);
   const workflowSlug = project?.fields.default_workflow;
   if (!workflowSlug) {

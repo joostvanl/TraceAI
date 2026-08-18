@@ -7,11 +7,15 @@ import {
   type AuthStore,
   type Scope,
 } from "@traceai/auth";
+import type { Principal, ProjectAccess } from "./principal.js";
 
 export type AppVariables = {
   actor: AuthActor;
   requestId: string;
   authStore: AuthStore;
+  /** Set by the project-access middleware so routes need no second lookup. */
+  principal?: Principal;
+  projectAccess?: ProjectAccess;
 };
 
 export function requestIdMiddleware() {

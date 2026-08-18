@@ -28,11 +28,20 @@ import {
 const apiUrl =
   process.env.NEXT_PUBLIC_CMS_API_URL ??
   "https://aurora-api.joostvanleeuwaarden.com";
-const siteKey = process.env.NEXT_PUBLIC_CMS_SITE_KEY ?? "";
+// Server-only, and named accordingly (TRA-81): with a `NEXT_PUBLIC_` prefix a
+// single value-import of this module from a client component would inline the key
+// into the browser bundle, and anyone could then read all of Aurora directly.
+// `site-key.guard.test.ts` fails if the key reaches a client chunk.
+// Deliberately no `NEXT_PUBLIC_CMS_SITE_KEY` fallback: leaving the prefixed name
+// in the source keeps the leak path alive. Deploys must rename the variable, and
+// the error below says so rather than failing silently.
+const siteKey = process.env.CMS_SITE_KEY ?? "";
 
 export function getPublicClient() {
   if (!siteKey) {
-    throw new Error("NEXT_PUBLIC_CMS_SITE_KEY is not set");
+    throw new Error(
+      "CMS_SITE_KEY is not set (renamed from NEXT_PUBLIC_CMS_SITE_KEY in TRA-81)",
+    );
   }
   return new AuroraPublicClient({ apiUrl, siteKey, locale: "en-US" });
 }

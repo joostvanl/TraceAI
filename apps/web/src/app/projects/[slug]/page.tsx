@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { CreateTicketForm } from "@/components/CreateTicketForm";
 import { LiveBoard } from "@/components/LiveBoard";
 import { getProjectBoard, listBoardTicketsViaTraceAI } from "@/lib/cms";
+import { requireProjectAccess } from "@/lib/project-access";
 import { getSessionUser } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +14,7 @@ type Props = {
 
 export default async function ProjectPage({ params }: Props) {
   const { slug } = await params;
+  await requireProjectAccess(slug);
   const board = await getProjectBoard(slug);
   if (!board) notFound();
   const sessionUser = await getSessionUser();

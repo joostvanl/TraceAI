@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context, type Next } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
 import { timingSafeEqual } from "node:crypto";
@@ -42,6 +42,12 @@ import {
   type AppVariables,
 } from "./middleware.js";
 import { mountTraceAiMcp } from "./mcp.js";
+import {
+  allowedProjects,
+  mayAccessProject,
+  resolvePrincipal,
+  type Principal,
+} from "./principal.js";
 import { getNotificationStore } from "./notifications.js";
 import {
   resolveSelfServiceAuthUser,
@@ -139,22 +145,20 @@ async function notifyReviewRequested(
   }
 }
 
-async function projectsForHuman(
+/**
+ * Project slugs this request may touch. Replaces the old `projectsForHuman`:
+ * memberships now apply to agent tokens too, and a legacy login is no longer an
+ * implicit platform admin (TRA-81).
+ */
+async function accessibleProjectSlugs(
   service: TraceService,
-  identity: HumanIdentity,
+  principal: Principal,
 ): Promise<string[]> {
-  if (identity.is_platform_admin || identity.mode === "legacy") {
+  const access = await allowedProjects(service, principal);
+  if (access === "all") {
     return (await service.listProjects()).map((p) => p.slug);
   }
-  if (!identity.slug) return [];
-  const memberships = await service.listProjectMemberships();
-  return [
-    ...new Set(
-      memberships
-        .filter((m) => m.fields.user === identity.slug)
-        .map((m) => m.fields.project),
-    ),
-  ];
+  return [...access];
 }
 
 function mapTraceaiUser(
@@ -461,6 +465,37 @@ export function createApp(deps: {
 
   app.use("/v1/*", auth);
 
+  // Project-scoped authorization for every `/v1/projects/:slug` route.
+  // Deliberately middleware and not a per-route check: a route that forgets the
+  // check leaks, and so does every route added later (TRA-81). The guard test in
+  // project-access.guard.test.ts fails when a route escapes these patterns.
+  const projectAccessMiddleware = async (
+    c: Context<{ Variables: AppVariables }>,
+    next: Next,
+  ) => {
+    const projectSlug = c.req.param("slug");
+    if (!projectSlug) return next();
+    const principal = await resolvePrincipal({
+      service: deps.service,
+      human: resolveHumanIdentity(c),
+      actor: c.get("actor"),
+    });
+    const access = await allowedProjects(deps.service, principal);
+    if (!mayAccessProject(access, projectSlug)) {
+      // 404, never 403: a 403 confirms the project exists, and whether someone
+      // else's project exists is itself information.
+      return c.json({ message: "Project not found", code: "NOT_FOUND" }, 404);
+    }
+    c.set("principal", principal);
+    c.set("projectAccess", access);
+    await next();
+  };
+
+  // Both patterns are needed: `/:slug/*` does not match `/v1/projects/traceai`
+  // itself, and that route returns the project plus its agent_playbook.
+  app.use("/v1/projects/:slug", projectAccessMiddleware);
+  app.use("/v1/projects/:slug/*", projectAccessMiddleware);
+
   app.get("/v1/me", (c) => {
     const actor = c.get("actor");
     return c.json({
@@ -651,11 +686,24 @@ export function createApp(deps: {
     });
   });
 
+  // Cross-project list: the `:slug` middleware cannot help here, so filter
+  // explicitly. Agent tokens see their user's projects, not every project.
   app.get("/v1/projects", requireScope("projects:read"), async (c) => {
-    const projects = await deps.service.listProjects();
+    const access = await allowedProjects(
+      deps.service,
+      await resolvePrincipal({
+        service: deps.service,
+        human: resolveHumanIdentity(c),
+        actor: c.get("actor"),
+      }),
+    );
+    const projects = (await deps.service.listProjects()).filter((p) =>
+      mayAccessProject(access, p.slug),
+    );
     return c.json(projects.map(mapProject));
   });
 
+  // Kept as the web-facing alias; same filtering as /v1/projects.
   app.get("/v1/me/projects", requireScope("projects:read"), async (c) => {
     const human = resolveHumanIdentity(c);
     if (!human) {
@@ -664,9 +712,12 @@ export function createApp(deps: {
         401,
       );
     }
-    const allowed = new Set(await projectsForHuman(deps.service, human));
+    const access = await allowedProjects(
+      deps.service,
+      await resolvePrincipal({ service: deps.service, human, actor: c.get("actor") }),
+    );
     const projects = (await deps.service.listProjects()).filter((p) =>
-      allowed.has(p.slug),
+      mayAccessProject(access, p.slug),
     );
     return c.json(projects.map(mapProject));
   });
@@ -709,9 +760,22 @@ export function createApp(deps: {
       return c.json({ message: "name is required", code: "VALIDATION" }, 400);
     }
     const human = resolveHumanIdentity(c);
+    // The owner membership is what grants access to the new project (TRA-81 F2),
+    // so it has to be derived for agent tokens too — otherwise a token creates a
+    // project it can no longer see. resolvePrincipal maps the token back to its
+    // TraceAI user; a legacy human still has no personal slug and gets none.
+    const principal = await resolvePrincipal({
+      service: deps.service,
+      human,
+      actor: c.get("actor"),
+    });
     const ownerUser =
       body.owner_user?.trim() ||
-      (human?.slug && human.mode === "personal" ? human.slug : undefined);
+      (human
+        ? human.slug && human.mode === "personal"
+          ? human.slug
+          : undefined
+        : (principal.userSlug ?? undefined));
     try {
       const result = await deps.service.createProject({
         name: body.name,
@@ -1927,7 +1991,14 @@ export function createApp(deps: {
           403,
         );
       }
-      const projects = await projectsForHuman(deps.service, human);
+      const projects = await accessibleProjectSlugs(
+        deps.service,
+        await resolvePrincipal({
+          service: deps.service,
+          human,
+          actor: c.get("actor"),
+        }),
+      );
       const items = await deps.service.listReviewInbox(projects);
       return c.json({
         awaiting_verdict: items

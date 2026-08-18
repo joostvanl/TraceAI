@@ -4,6 +4,7 @@ import type { WorkflowDocument } from "@traceai/core";
 import { ProjectMembersPanel } from "@/components/ProjectMembersPanel";
 import { WorkflowEditorPanel } from "@/components/WorkflowEditorPanel";
 import { getProject } from "@/lib/cms";
+import { requireProjectAccess } from "@/lib/project-access";
 import { getSessionIdentity, isLoginConfigured } from "@/lib/session";
 import { createTraceServerClient } from "@/lib/traceai-server";
 
@@ -27,6 +28,7 @@ export default async function ProjectSettingsPage({
   if (!configured) redirect("/login");
   const identity = await getSessionIdentity();
   if (!identity) redirect("/login");
+  await requireProjectAccess(slug);
 
   const project = await getProject(slug);
   if (!project) notFound();

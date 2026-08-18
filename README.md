@@ -106,8 +106,11 @@ The API process holds `AURORA_USER_TOKEN` / `AURORA_MANAGEMENT_TOKEN` in its own
 
 ```
 NEXT_PUBLIC_CMS_API_URL=https://aurora-api.joostvanleeuwaarden.com
-NEXT_PUBLIC_CMS_SITE_KEY=your-site-key
 NEXT_PUBLIC_TRACEAI_EVENTS_URL=https://traceai.joostvanleeuwaarden.com/events
+
+# Server-only — Aurora public read key. Renamed from NEXT_PUBLIC_CMS_SITE_KEY in
+# TRA-81: the prefix would allow the key into the browser bundle.
+CMS_SITE_KEY=your-site-key
 
 # Server-only — New ticket form on the project board
 TRACEAI_API_URL=https://traceai.joostvanleeuwaarden.com

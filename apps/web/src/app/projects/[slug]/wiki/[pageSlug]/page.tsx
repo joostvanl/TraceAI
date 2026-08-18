@@ -7,6 +7,7 @@ import {
   resolveWikiPage,
   wikiHrefSlug,
 } from "@/lib/cms";
+import { requireProjectAccess } from "@/lib/project-access";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,7 @@ type Props = {
 
 export default async function ProjectWikiPage({ params }: Props) {
   const { slug, pageSlug } = await params;
+  await requireProjectAccess(slug);
   const [project, page] = await Promise.all([
     getProject(slug),
     resolveWikiPage(slug, pageSlug),

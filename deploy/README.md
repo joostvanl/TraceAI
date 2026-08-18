@@ -20,8 +20,14 @@ chmod +x ~/deploy-traceai.sh
 ```
 
 On its first run it creates `~/.config/traceai/traceai.env` and stops. Fill
-`AURORA_USER_TOKEN` and `NEXT_PUBLIC_CMS_SITE_KEY`, then run the same command
+`AURORA_USER_TOKEN` and `CMS_SITE_KEY`, then run the same command
 again. Secrets remain outside the git checkout.
+
+Upgrading from before TRA-81: rename `NEXT_PUBLIC_CMS_SITE_KEY` to
+`CMS_SITE_KEY` in that env file. The key is server-only and is now read at
+runtime instead of being baked into the image, so the old name leaves the web
+container without a key. The deploy script refuses to continue if it finds only
+the old name.
 
 ## URLs
 
