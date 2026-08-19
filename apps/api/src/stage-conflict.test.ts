@@ -10,6 +10,7 @@ import {
   StageConflictError,
 } from "@traceai/core";
 import { createApp } from "./app.js";
+import { projectMemberStubs } from "./test-support.js";
 
 const COMMENT =
   "## Vorige stap\nWas in todo.\n\n## Deze stap\nMoving to in progress.";
@@ -49,6 +50,7 @@ async function withApp(
     const app = createApp({
       authStore: store,
       service: {
+        ...projectMemberStubs({ email: "e@example.com", projects: ["traceai"] }),
         getTicket: async () => ({ ticket: fakeTicket() }),
         getProject: async () => null,
         ...service,

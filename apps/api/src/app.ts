@@ -12,6 +12,7 @@ import {
   isProjectRole,
   membershipSlug,
   parseWorkflowDocument,
+  relationSlug,
   requiredRoleForAction,
   StageConflictError,
   TICKET_REVIEW_STATES,
@@ -48,6 +49,11 @@ import {
   resolvePrincipal,
   type Principal,
 } from "./principal.js";
+import {
+  denyUnlessProjectVisible,
+  projectGuardMiddleware,
+  visibleForAccess,
+} from "./project-guard.js";
 import { getNotificationStore } from "./notifications.js";
 import {
   resolveSelfServiceAuthUser,
@@ -94,24 +100,61 @@ function resolveHumanIdentity(c: {
   );
 }
 
+/**
+ * Role check for whoever is acting — human or agent token (TRA-82).
+ *
+ * This used to start with `if (!identity) return null; // scopes already
+ * checked`, which meant agent tokens skipped role checks entirely: a token
+ * belonging to a `viewer` could manage memberships. Scopes say what kind of call
+ * a token may make; they say nothing about roles inside a project.
+ *
+ * Two behaviour changes ride along, both intended:
+ * - the `admin` scope escape lives *here* now, so exactly one place can override
+ *   a role denial. Having it in two places is how the agent hole survived.
+ * - a legacy shared login is no longer an implicit platform admin for roles.
+ *   TRA-81 removed that for membership; `resolvePrincipal` reports
+ *   `isPlatformAdmin: false` for legacy, so it now applies to roles too.
+ */
 async function enforceProjectRole(
   service: TraceService,
-  identity: HumanIdentity | null,
+  principal: Principal,
   projectSlug: string,
   required: ProjectRole,
 ): Promise<string | null> {
-  if (!identity) return null; // agent/token path: scopes already checked
+  if (principal.hasAdminScope) return null;
+  // Deny by default: no resolvable user means no role, so no write.
+  if (!principal.userSlug) return "Forbidden";
   try {
     await service.assertProjectRole({
       projectSlug,
-      userSlug: identity.slug,
-      isPlatformAdmin: identity.is_platform_admin || identity.mode === "legacy",
+      userSlug: principal.userSlug,
+      isPlatformAdmin: principal.isPlatformAdmin,
       required,
     });
     return null;
   } catch (error) {
     return error instanceof Error ? error.message : "Forbidden";
   }
+}
+
+/**
+ * The principal for this request. Prefers what the project-access middleware
+ * already resolved, then the lazy guard; both are memoized, so asking twice in
+ * one request costs one lookup.
+ */
+async function principalFor(
+  c: Context<{ Variables: AppVariables }>,
+  service: TraceService,
+): Promise<Principal> {
+  const existing = c.get("principal");
+  if (existing) return existing;
+  const guard = c.get("projectGuard");
+  if (guard) return guard.principal();
+  return resolvePrincipal({
+    service,
+    human: resolveHumanIdentity(c),
+    actor: c.get("actor"),
+  });
 }
 
 async function notifyReviewRequested(
@@ -469,18 +512,34 @@ export function createApp(deps: {
   // Deliberately middleware and not a per-route check: a route that forgets the
   // check leaks, and so does every route added later (TRA-81). The guard test in
   // project-access.guard.test.ts fails when a route escapes these patterns.
+  // Resolves the principal at most once per request, lazily, for every /v1 route
+  // (TRA-82). Routes whose project is not in the path have no middleware above
+  // them, so this is where they get their answer from.
+  app.use(
+    "/v1/*",
+    projectGuardMiddleware({
+      service: deps.service,
+      resolveHuman: resolveHumanIdentity,
+    }),
+  );
+
   const projectAccessMiddleware = async (
     c: Context<{ Variables: AppVariables }>,
     next: Next,
   ) => {
     const projectSlug = c.req.param("slug");
     if (!projectSlug) return next();
-    const principal = await resolvePrincipal({
-      service: deps.service,
-      human: resolveHumanIdentity(c),
-      actor: c.get("actor"),
-    });
-    const access = await allowedProjects(deps.service, principal);
+    const guard = c.get("projectGuard");
+    const principal = guard
+      ? await guard.principal()
+      : await resolvePrincipal({
+          service: deps.service,
+          human: resolveHumanIdentity(c),
+          actor: c.get("actor"),
+        });
+    const access = guard
+      ? await guard.access()
+      : await allowedProjects(deps.service, principal);
     if (!mayAccessProject(access, projectSlug)) {
       // 404, never 403: a 403 confirms the project exists, and whether someone
       // else's project exists is itself information.
@@ -495,6 +554,40 @@ export function createApp(deps: {
   // itself, and that route returns the project plus its agent_playbook.
   app.use("/v1/projects/:slug", projectAccessMiddleware);
   app.use("/v1/projects/:slug/*", projectAccessMiddleware);
+
+  /**
+   * Membership + role check for the `/v1/workflows/:slug/...` family (TRA-82).
+   * Their project comes from the workflow, not the path, so there are eight
+   * routes that each need the same three steps; one helper keeps them identical.
+   *
+   * A workflow with no project (`traceai-default`) is readable by everyone but
+   * writable only with the `admin` scope: there is no project to hold a role in,
+   * and deny-by-default is the safer answer for a shared resource.
+   */
+  const denyWorkflowAccess = async (
+    c: Context<{ Variables: AppVariables }>,
+    action: "read" | "write_workflow",
+  ): Promise<Response | null> => {
+    const existing = await deps.service.getWorkflow(param(c, "slug"));
+    if (!existing) {
+      return c.json({ message: "Workflow not found", code: "NOT_FOUND" }, 404);
+    }
+    const project = relationSlug(existing.workflow.fields.project);
+    const hidden = await denyUnlessProjectVisible(
+      c,
+      project,
+      "Workflow not found",
+    );
+    if (hidden) return hidden;
+    if (action === "read") return null;
+    const denied = await enforceProjectRole(
+      deps.service,
+      await principalFor(c, deps.service),
+      project ?? "",
+      requiredRoleForAction(action),
+    );
+    return denied ? c.json({ message: denied, code: "FORBIDDEN" }, 403) : null;
+  };
 
   app.get("/v1/me", (c) => {
     const actor = c.get("actor");
@@ -928,6 +1021,8 @@ export function createApp(deps: {
         400,
       );
     }
+    const hidden = await denyUnlessProjectVisible(c, project);
+    if (hidden) return hidden;
     const stage = c.req.query("stage") ?? undefined;
     const parentRaw = c.req.query("parent");
     const parent =
@@ -980,6 +1075,14 @@ export function createApp(deps: {
     if (!result) {
       return c.json({ message: "Ticket not found", code: "NOT_FOUND" }, 404);
     }
+    // Same message and status as a ticket that does not exist, so the answer
+    // does not reveal that this one does (TRA-81 F3).
+    const hidden = await denyUnlessProjectVisible(
+      c,
+      result.ticket.fields.project,
+      "Ticket not found",
+    );
+    if (hidden) return hidden;
     return c.json({
       ...mapTicket(result.ticket),
       tokens_estimate_rollup: result.tokens_estimate_rollup,
@@ -1017,9 +1120,11 @@ export function createApp(deps: {
         400,
       );
     }
+    const hidden = await denyUnlessProjectVisible(c, body.project);
+    if (hidden) return hidden;
     const denied = await enforceProjectRole(
       deps.service,
-      human,
+      await principalFor(c, deps.service),
       body.project,
       requiredRoleForAction("write_tickets"),
     );
@@ -1058,6 +1163,24 @@ export function createApp(deps: {
       resolution?: string;
       parent?: string | null;
     }>();
+    // Load first: the project of the ticket is what decides both checks, and
+    // this route had neither before TRA-82.
+    const existing = await deps.service.getTicket(param(c, "slug"));
+    if (!existing) {
+      return c.json({ message: "Ticket not found", code: "NOT_FOUND" }, 404);
+    }
+    const project = existing.ticket.fields.project;
+    const hidden = await denyUnlessProjectVisible(c, project, "Ticket not found");
+    if (hidden) return hidden;
+    const denied = await enforceProjectRole(
+      deps.service,
+      await principalFor(c, deps.service),
+      project,
+      requiredRoleForAction("write_tickets"),
+    );
+    if (denied) {
+      return c.json({ message: denied, code: "FORBIDDEN" }, 403);
+    }
     const ticket = await deps.service.updateTicket(param(c, "slug"), body);
     const mapped = mapTicket(ticket);
     publishTicketEvent(ticketEventFromMapped("ticket.updated", mapped));
@@ -1086,6 +1209,17 @@ export function createApp(deps: {
         },
         400,
       );
+    }
+    const hidden = await denyUnlessProjectVisible(c, project);
+    if (hidden) return hidden;
+    const denied = await enforceProjectRole(
+      deps.service,
+      await principalFor(c, deps.service),
+      project,
+      requiredRoleForAction("write_tickets"),
+    );
+    if (denied) {
+      return c.json({ message: denied, code: "FORBIDDEN" }, 403);
     }
     try {
       const changed = await deps.service.reorderTickets({
@@ -1144,6 +1278,21 @@ export function createApp(deps: {
       const before = await deps.service.getTicket(slug);
       if (!before) {
         return c.json({ message: "Ticket not found", code: "NOT_FOUND" }, 404);
+      }
+      const hidden = await denyUnlessProjectVisible(
+        c,
+        before.ticket.fields.project,
+        "Ticket not found",
+      );
+      if (hidden) return hidden;
+      const denied = await enforceProjectRole(
+        deps.service,
+        await principalFor(c, deps.service),
+        before.ticket.fields.project,
+        requiredRoleForAction("write_tickets"),
+      );
+      if (denied) {
+        return c.json({ message: denied, code: "FORBIDDEN" }, 403);
       }
       const fromStage = before.ticket.fields.stage;
       const actor = c.get("actor");
@@ -1261,9 +1410,15 @@ export function createApp(deps: {
     if (!existing) {
       return c.json({ message: "Ticket not found", code: "NOT_FOUND" }, 404);
     }
+    const hidden = await denyUnlessProjectVisible(
+      c,
+      existing.ticket.fields.project,
+      "Ticket not found",
+    );
+    if (hidden) return hidden;
     const denied = await enforceProjectRole(
       deps.service,
-      human,
+      await principalFor(c, deps.service),
       existing.ticket.fields.project,
       requiredRoleForAction("review"),
     );
@@ -1316,6 +1471,29 @@ export function createApp(deps: {
         400,
       );
     }
+    // Resolve the ticket before writing: its project decides both checks, and a
+    // comment on a ticket you cannot see must not be possible (TRA-82).
+    const target = await deps.service.getTicket(body.ticket);
+    if (!target) {
+      return c.json({ message: "Ticket not found", code: "NOT_FOUND" }, 404);
+    }
+    const hidden = await denyUnlessProjectVisible(
+      c,
+      target.ticket.fields.project,
+      "Ticket not found",
+    );
+    if (hidden) return hidden;
+    const denied = await enforceProjectRole(
+      deps.service,
+      await principalFor(c, deps.service),
+      target.ticket.fields.project,
+      // No separate "comment" action: extending the role model is out of scope
+      // for TRA-82, and a comment is an editor-level write like a ticket edit.
+      requiredRoleForAction("write_tickets"),
+    );
+    if (denied) {
+      return c.json({ message: denied, code: "FORBIDDEN" }, 403);
+    }
     const comment = await deps.service.addComment({
       ticket: body.ticket,
       body: body.body,
@@ -1352,6 +1530,8 @@ export function createApp(deps: {
         400,
       );
     }
+    const hidden = await denyUnlessProjectVisible(c, project);
+    if (hidden) return hidden;
     const includeBody = c.req.query("include_body") === "true";
     const parentQuery = c.req.query("parent");
     const page = await deps.service.listWikiPages({
@@ -1373,6 +1553,12 @@ export function createApp(deps: {
     if (!page) {
       return c.json({ message: "Wiki page not found", code: "NOT_FOUND" }, 404);
     }
+    const hidden = await denyUnlessProjectVisible(
+      c,
+      relationSlug(page.fields.project),
+      "Wiki page not found",
+    );
+    if (hidden) return hidden;
     return c.json(mapWikiPage(page));
   });
 
@@ -1391,6 +1577,17 @@ export function createApp(deps: {
         { message: "project and title are required", code: "VALIDATION" },
         400,
       );
+    }
+    const hiddenProject = await denyUnlessProjectVisible(c, body.project);
+    if (hiddenProject) return hiddenProject;
+    const deniedRole = await enforceProjectRole(
+      deps.service,
+      await principalFor(c, deps.service),
+      body.project,
+      requiredRoleForAction("write_wiki"),
+    );
+    if (deniedRole) {
+      return c.json({ message: deniedRole, code: "FORBIDDEN" }, 403);
     }
     const page = await deps.service.createWikiPage({
       ...body,
@@ -1433,6 +1630,27 @@ export function createApp(deps: {
       }
     }
 
+    const existing = await deps.service.getWikiPage(param(c, "slug"));
+    if (!existing) {
+      return c.json({ message: "Wiki page not found", code: "NOT_FOUND" }, 404);
+    }
+    const pageProject = relationSlug(existing.fields.project);
+    const hidden = await denyUnlessProjectVisible(
+      c,
+      pageProject,
+      "Wiki page not found",
+    );
+    if (hidden) return hidden;
+    const denied = await enforceProjectRole(
+      deps.service,
+      await principalFor(c, deps.service),
+      pageProject ?? "",
+      requiredRoleForAction("write_wiki"),
+    );
+    if (denied) {
+      return c.json({ message: denied, code: "FORBIDDEN" }, 403);
+    }
+
     let result: Awaited<ReturnType<TraceService["updateWikiPage"]>>;
     try {
       result = await deps.service.updateWikiPage(param(c, "slug"), {
@@ -1468,8 +1686,19 @@ export function createApp(deps: {
 
   app.get("/v1/workflows", requireScope("workflows:read"), async (c) => {
     const project = c.req.query("project") ?? undefined;
+    // Naming a project is the same question as asking for it directly, so it
+    // gets the same 404. Without a filter this is "what may I see", so it
+    // filters silently instead of refusing.
+    const hidden = await denyUnlessProjectVisible(c, project);
+    if (hidden) return hidden;
     const workflows = await deps.service.listWorkflows(project);
-    return c.json(workflows.map(mapWorkflow));
+    const guard = c.get("projectGuard");
+    const visible = guard
+      ? visibleForAccess(await guard.access(), workflows, (w) =>
+          relationSlug(w.fields.project),
+        )
+      : workflows;
+    return c.json(visible.map(mapWorkflow));
   });
 
   app.get("/v1/workflows/:slug", requireScope("workflows:read"), async (c) => {
@@ -1477,6 +1706,15 @@ export function createApp(deps: {
     if (!result) {
       return c.json({ message: "Workflow not found", code: "NOT_FOUND" }, 404);
     }
+    // A workflow without a project (`traceai-default`) belongs to nobody and
+    // stays readable; denyUnlessProjectVisible treats an empty slug as "no
+    // access question", so that falls out of the helper rather than a branch.
+    const hidden = await denyUnlessProjectVisible(
+      c,
+      relationSlug(result.workflow.fields.project),
+      "Workflow not found",
+    );
+    if (hidden) return hidden;
     return c.json({
       ...mapWorkflow(result.workflow),
       stages: result.stages,
@@ -1497,6 +1735,17 @@ export function createApp(deps: {
         { message: "name and project are required", code: "VALIDATION" },
         400,
       );
+    }
+    const hidden = await denyUnlessProjectVisible(c, body.project);
+    if (hidden) return hidden;
+    const denied = await enforceProjectRole(
+      deps.service,
+      await principalFor(c, deps.service),
+      body.project,
+      requiredRoleForAction("write_workflow"),
+    );
+    if (denied) {
+      return c.json({ message: denied, code: "FORBIDDEN" }, 403);
     }
     const workflow = await deps.service.createWorkflow(body);
     audit(c, {
@@ -1531,6 +1780,8 @@ export function createApp(deps: {
         };
         agent_policy?: Record<string, unknown>;
       }>();
+      const denied = await denyWorkflowAccess(c, "write_workflow");
+      if (denied) return denied;
       try {
         const workflow = await deps.service.updateWorkflow(param(c, "slug"), {
           name: body.name,
@@ -1570,6 +1821,8 @@ export function createApp(deps: {
     "/v1/workflows/:slug/draft",
     requireScope("workflows:write"),
     async (c) => {
+      const guarded = await denyWorkflowAccess(c, "write_workflow");
+      if (guarded) return guarded;
       const body = await c.req.json<{
         canvas?: Record<string, unknown>;
         pending?: Record<string, unknown>;
@@ -1616,6 +1869,8 @@ export function createApp(deps: {
     "/v1/workflows/:slug/activation-preview",
     requireScope("workflows:read"),
     async (c) => {
+      const guarded = await denyWorkflowAccess(c, "read");
+      if (guarded) return guarded;
       try {
         const preview = await deps.service.previewWorkflowActivation(
           param(c, "slug"),
@@ -1641,6 +1896,8 @@ export function createApp(deps: {
         migration?: Record<string, string>;
         activated_by?: string;
       }>();
+      const guarded = await denyWorkflowAccess(c, "write_workflow");
+      if (guarded) return guarded;
       const actor = c.get("actor");
       try {
         const result = await deps.service.activateWorkflow(param(c, "slug"), {
@@ -1681,6 +1938,8 @@ export function createApp(deps: {
     "/v1/workflows/:slug/versions",
     requireScope("workflows:read"),
     async (c) => {
+      const guarded = await denyWorkflowAccess(c, "read");
+      if (guarded) return guarded;
       const versions = await deps.service.listWorkflowVersions(param(c, "slug"));
       return c.json(
         versions.map((v) => ({
@@ -1697,6 +1956,8 @@ export function createApp(deps: {
     "/v1/workflows/:slug/versions/:versionId/restore",
     requireScope("workflows:write"),
     async (c) => {
+      const guarded = await denyWorkflowAccess(c, "write_workflow");
+      if (guarded) return guarded;
       const result = await deps.service.restoreWorkflowVersion(
         param(c, "slug"),
         param(c, "versionId"),
@@ -1731,6 +1992,8 @@ export function createApp(deps: {
         mode?: "fill_empty" | "confirm_overwrite" | "merge_headings";
         confirmed?: boolean;
       }>();
+      const guarded = await denyWorkflowAccess(c, "write_workflow");
+      if (guarded) return guarded;
       if (!body?.template_slug?.trim()) {
         return c.json(
           { message: "template_slug is required", code: "VALIDATION" },
@@ -1878,10 +2141,9 @@ export function createApp(deps: {
     requireScope("projects:read"),
     async (c) => {
       const project = param(c, "slug");
-      const human = resolveHumanIdentity(c);
       const denied = await enforceProjectRole(
         deps.service,
-        human,
+        await principalFor(c, deps.service),
         project,
         requiredRoleForAction("read"),
       );
@@ -1898,18 +2160,17 @@ export function createApp(deps: {
     requireScope("projects:write"),
     async (c) => {
       const project = param(c, "slug");
-      const human = resolveHumanIdentity(c);
+      // The `admin`-scope escape now lives inside enforceProjectRole (TRA-82),
+      // so a denial here is final. The second check that used to sit here let
+      // every token past the role check and is exactly what this ticket closes.
       const denied = await enforceProjectRole(
         deps.service,
-        human,
+        await principalFor(c, deps.service),
         project,
         requiredRoleForAction("manage_members"),
       );
       if (denied) {
-        // Token admins (no human identity) may still manage members.
-        if (human || !hasScope(c.get("actor").scopes, ["admin"])) {
-          return c.json({ message: denied, code: "FORBIDDEN" }, 403);
-        }
+        return c.json({ message: denied, code: "FORBIDDEN" }, 403);
       }
       const body = await c.req.json<{ user?: string; role?: string }>();
       if (!body?.user?.trim() || !isProjectRole(body.role)) {
@@ -1952,17 +2213,14 @@ export function createApp(deps: {
     async (c) => {
       const project = param(c, "slug");
       const user = param(c, "user");
-      const human = resolveHumanIdentity(c);
       const denied = await enforceProjectRole(
         deps.service,
-        human,
+        await principalFor(c, deps.service),
         project,
         requiredRoleForAction("manage_members"),
       );
       if (denied) {
-        if (human || !hasScope(c.get("actor").scopes, ["admin"])) {
-          return c.json({ message: denied, code: "FORBIDDEN" }, 403);
-        }
+        return c.json({ message: denied, code: "FORBIDDEN" }, 403);
       }
       const removed = await deps.service.removeProjectMembership(project, user);
       if (!removed) {

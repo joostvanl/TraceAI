@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { AuthStore } from "@traceai/auth";
 import { createApp } from "./app.js";
 import { ticketEventFromMapped } from "./events.js";
+import { projectMemberStubs } from "./test-support.js";
 
 function sampleTicketFields(overrides: Record<string, unknown> = {}) {
   return {
@@ -100,6 +101,7 @@ describe("POST /v1/tickets/reorder", () => {
       let called: unknown = null;
       const changed = [ticketEntry({ slug: "a", sort_order: 0 })];
       const service = {
+        ...projectMemberStubs({ email: "w@example.com", projects: ["traceai"] }),
         reorderTickets: async (input: unknown) => {
           called = input;
           return changed;
@@ -151,6 +153,9 @@ describe("POST /v1/tickets/reorder", () => {
       });
       let patchBody: unknown = null;
       const service = {
+        ...projectMemberStubs({ email: "p@example.com", projects: ["traceai"] }),
+        // PATCH now loads the ticket first: its project decides access (TRA-82).
+        getTicket: async () => ({ ticket: ticketEntry() }),
         updateTicket: async (_slug: string, body: unknown) => {
           patchBody = body;
           return ticketEntry({ sort_order: 7 });

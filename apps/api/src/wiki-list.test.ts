@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthStore, DEFAULT_AGENT_SCOPES } from "@traceai/auth";
 import { createApp } from "./app.js";
+import { projectMemberStubs } from "./test-support.js";
 
 function wikiEntry(slug: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -39,7 +40,10 @@ async function withApp(
     });
     const app = createApp({
       authStore: store,
-      service: { listWikiPages } as never,
+      service: {
+        ...projectMemberStubs({ email: "w@example.com", projects: ["traceai"] }),
+        listWikiPages,
+      } as never,
     });
     await fn(app, token.token);
   } finally {

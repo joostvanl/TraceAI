@@ -8,6 +8,7 @@ import {
   type Scope,
 } from "@traceai/auth";
 import type { Principal, ProjectAccess } from "./principal.js";
+import type { ProjectGuard } from "./project-guard.js";
 
 export type AppVariables = {
   actor: AuthActor;
@@ -16,6 +17,11 @@ export type AppVariables = {
   /** Set by the project-access middleware so routes need no second lookup. */
   principal?: Principal;
   projectAccess?: ProjectAccess;
+  /**
+   * Lazy principal/access resolver for every `/v1/*` route (TRA-82). Routes whose
+   * project is not in the path have no `principal` above, so they use this.
+   */
+  projectGuard?: ProjectGuard;
 };
 
 export function requestIdMiddleware() {

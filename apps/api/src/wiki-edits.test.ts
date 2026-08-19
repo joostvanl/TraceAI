@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { AuthStore, DEFAULT_AGENT_SCOPES } from "@traceai/auth";
 import { AuroraApiError } from "@traceai/core";
 import { createApp } from "./app.js";
+import { projectMemberStubs } from "./test-support.js";
 
 function wikiPage() {
   return {
@@ -39,7 +40,12 @@ async function withApp(
     });
     const app = createApp({
       authStore: store,
-      service: { updateWikiPage } as never,
+      service: {
+        ...projectMemberStubs({ email: "e@example.com", projects: ["traceai"] }),
+        // The route loads the page first: its project decides access (TRA-82).
+        getWikiPage: async () => wikiPage(),
+        updateWikiPage,
+      } as never,
     });
     await fn(app, token.token);
   } finally {
