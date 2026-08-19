@@ -22,3 +22,8 @@ data/
 *.sqlite-*
 bootstrap-token.txt
 .cursor/
+data/
+backup/
+scripts/probe-*.mjs
+scripts/local-from-recovery.mjs
+*.bak-pirestore

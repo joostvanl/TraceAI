@@ -7,6 +7,12 @@ import {
   type FieldEditSummary,
   type ListEntriesQuery,
 } from "./aurora.js";
+import {
+  ForbiddenError,
+  NotFoundError,
+  ValidationError,
+  assertNoErrors,
+} from "./trace-errors.js";
 import { listAllEntries as listAllEntriesShared } from "./list-all-entries.js";
 import {
   assertNonNegativeIntegerSortOrder,
@@ -86,13 +92,21 @@ import {
 import {
   computeProjectInsights,
   paginateItems,
-  searchProjectContent,
   sortTicketsNewestFirst,
   type Paginated,
   type ProjectInsights,
+} from "./insights.js";
+import {
+  ProjectIndexLruCache,
+  ProjectSearchIndex,
+  SEARCH_PROFILE_DEFAULTS,
   type SearchFilters,
   type SearchHit,
-} from "./insights.js";
+  type SearchMeta,
+  type SearchProfile,
+  type SearchTicketInput,
+  type SearchWikiInput,
+} from "./search-index.js";
 import {
   applyTicketTemplate,
   canvasToPendingDraft,
@@ -114,6 +128,9 @@ export { WorkflowValidationError } from "./workflow-editor.js";
 
 export type TraceServiceOptions = AuroraClientConfig & {
   websiteId?: string;
+  searchIndexTtlMs?: number;
+  searchIndexMaxProjects?: number;
+  now?: () => number;
 };
 
 function uniqueSlug(base: string, existing: Set<string>): string {
@@ -122,12 +139,6 @@ function uniqueSlug(base: string, existing: Set<string>): string {
   let i = 2;
   while (existing.has(`${candidate}-${i}`)) i += 1;
   return `${candidate}-${i}`;
-}
-
-function assertNoErrors(errors: string[]) {
-  if (errors.length) {
-    throw new Error(errors.join(" "));
-  }
 }
 
 function resolveProjectKey(project: Project): string {
@@ -140,11 +151,23 @@ function resolveProjectKey(project: Project): string {
 export class TraceService {
   readonly client: AuroraManagementClient;
   private readonly websiteId?: string;
+  private readonly now: () => number;
+  private readonly searchIndexes: ProjectIndexLruCache<ProjectSearchIndex>;
+  private readonly searchIndexBuilds = new Map<
+    string,
+    Promise<ProjectSearchIndex>
+  >();
   private ready: Promise<void> | null = null;
 
   constructor(options: TraceServiceOptions) {
     this.client = new AuroraManagementClient(options);
     this.websiteId = options.websiteId;
+    this.now = options.now ?? Date.now;
+    this.searchIndexes = new ProjectIndexLruCache(
+      options.searchIndexTtlMs ?? 300_000,
+      options.searchIndexMaxProjects ?? 2,
+      this.now,
+    );
   }
 
   async ensureReady() {
@@ -198,6 +221,102 @@ export class TraceService {
     return out;
   }
 
+  private ticketSearchInput(
+    ticket: Ticket,
+    comments: readonly Comment[] = [],
+  ): SearchTicketInput {
+    return {
+      slug: ticket.slug,
+      ticket_key: ticket.fields.ticket_key ?? null,
+      title: ticket.fields.title,
+      description: ticket.fields.description ?? "",
+      stage: ticket.fields.stage,
+      priority: ticket.fields.priority ?? "medium",
+      created_by: ticket.fields.created_by ?? null,
+      resolution: ticket.fields.resolution ?? null,
+      stage_entered_at: ticket.fields.stage_entered_at ?? null,
+      createdAt: ticket.createdAt,
+      updatedAt: ticket.updatedAt,
+      commentBodies: comments.map((comment) => comment.fields.body),
+      commentAuthors: comments
+        .map((comment) => comment.fields.author)
+        .filter((author): author is string => Boolean(author)),
+    };
+  }
+
+  private wikiSearchInput(page: WikiPage): SearchWikiInput {
+    return {
+      slug: page.slug,
+      title: page.fields.title,
+      body: page.fields.body ?? "",
+      updatedAt: page.updatedAt,
+    };
+  }
+
+  private invalidateSearchIndex(project: string): void {
+    this.searchIndexes.delete(project);
+    this.searchIndexBuilds.delete(project);
+  }
+
+  private async buildSearchIndex(
+    project: string,
+  ): Promise<ProjectSearchIndex> {
+    const tickets = await this.listTickets({ project });
+    const [comments, wikiPages] = await Promise.all([
+      this.listCommentsForTickets(tickets.map((ticket) => ticket.slug)),
+      this.loadProjectWikiPages(project),
+    ]);
+    const commentsByTicket = new Map<string, Comment[]>();
+    for (const comment of comments) {
+      const ticketSlug = relationSlug(comment.fields.ticket);
+      if (!ticketSlug) continue;
+      const grouped = commentsByTicket.get(ticketSlug) ?? [];
+      grouped.push(comment);
+      commentsByTicket.set(ticketSlug, grouped);
+    }
+    return new ProjectSearchIndex(
+      tickets.map((ticket) =>
+        this.ticketSearchInput(ticket, commentsByTicket.get(ticket.slug)),
+      ),
+      wikiPages.map((page) => this.wikiSearchInput(page)),
+    );
+  }
+
+  private async getSearchIndex(project: string): Promise<ProjectSearchIndex> {
+    const cached = this.searchIndexes.get(project);
+    if (cached) return cached.value;
+
+    let building = this.searchIndexBuilds.get(project);
+    if (!building) {
+      building = this.buildSearchIndex(project);
+      this.searchIndexBuilds.set(project, building);
+    }
+    try {
+      const built = await building;
+      this.searchIndexes.set(project, built);
+      return built;
+    } finally {
+      this.searchIndexBuilds.delete(project);
+    }
+  }
+
+  private async upsertSearchTicket(ticket: Ticket): Promise<void> {
+    const project = relationSlug(ticket.fields.project);
+    if (!project) return;
+    const cached = this.searchIndexes.get(project);
+    if (!cached) return;
+    const comments = await this.listCommentsForTickets([ticket.slug]);
+    cached.value.upsertTicket(this.ticketSearchInput(ticket, comments));
+  }
+
+  private upsertSearchWikiPage(page: WikiPage): void {
+    const project = relationSlug(page.fields.project);
+    if (!project) return;
+    const cached = this.searchIndexes.get(project);
+    if (!cached) return;
+    cached.value.upsertWikiPage(this.wikiSearchInput(page));
+  }
+
   async listProjects(): Promise<Project[]> {
     await this.ensureReady();
     return this.listAllEntries<Project>("project", { status: "published" });
@@ -243,7 +362,7 @@ export class TraceService {
     const ownerUser = input.ownerUser?.trim() || undefined;
     if (ownerUser) {
       const user = await this.getTraceaiUser(ownerUser);
-      if (!user) throw new Error(`User not found: ${ownerUser}`);
+      if (!user) throw new NotFoundError(`User not found: ${ownerUser}`);
     }
 
     const slug = await allocateUniqueEntrySlug(
@@ -440,7 +559,7 @@ export class TraceService {
   ): Promise<Workflow> {
     await this.ensureReady();
     const workflow = await this.client.getEntryBySlug<Workflow>("workflow", slug);
-    if (!workflow) throw new Error(`Workflow not found: ${slug}`);
+    if (!workflow) throw new NotFoundError(`Workflow not found: ${slug}`);
     const current = parseWorkflowDocument(workflow.fields.stages_json);
     let nextDoc: WorkflowDocument | null = null;
     if (input.document) {
@@ -519,7 +638,7 @@ export class TraceService {
   }> {
     await this.ensureReady();
     const workflow = await this.client.getEntryBySlug<Workflow>("workflow", slug);
-    if (!workflow) throw new Error(`Workflow not found: ${slug}`);
+    if (!workflow) throw new NotFoundError(`Workflow not found: ${slug}`);
     const current = parseWorkflowDocument(workflow.fields.stages_json);
     const pending = input.pending
       ? {
@@ -574,7 +693,7 @@ export class TraceService {
   }> {
     await this.ensureReady();
     const result = await this.getWorkflow(slug);
-    if (!result) throw new Error(`Workflow not found: ${slug}`);
+    if (!result) throw new NotFoundError(`Workflow not found: ${slug}`);
     const doc = result.workflow_document;
     const editable = effectiveEditableDocument(doc);
     const tickets = await this.listTickets({
@@ -616,7 +735,7 @@ export class TraceService {
   }> {
     await this.ensureReady();
     const workflow = await this.client.getEntryBySlug<Workflow>("workflow", slug);
-    if (!workflow) throw new Error(`Workflow not found: ${slug}`);
+    if (!workflow) throw new NotFoundError(`Workflow not found: ${slug}`);
     const current = parseWorkflowDocument(workflow.fields.stages_json);
     const editable = effectiveEditableDocument(current);
     const issues = validateWorkflowDocument(editable);
@@ -685,6 +804,10 @@ export class TraceService {
       },
     });
     await this.ensurePublished("workflow", updated);
+    if (migrated_tickets > 0) {
+      const projectSlug = relationSlug(workflow.fields.project);
+      if (projectSlug) this.invalidateSearchIndex(projectSlug);
+    }
     return {
       workflow: updated,
       workflow_document: parseWorkflowDocument(updated.fields.stages_json),
@@ -696,14 +819,14 @@ export class TraceService {
   async listWorkflowVersions(slug: string) {
     await this.ensureReady();
     const workflow = await this.client.getEntryBySlug<Workflow>("workflow", slug);
-    if (!workflow) throw new Error(`Workflow not found: ${slug}`);
+    if (!workflow) throw new NotFoundError(`Workflow not found: ${slug}`);
     return this.client.listEntryVersions("workflow", workflow.id);
   }
 
   async restoreWorkflowVersion(slug: string, versionId: string) {
     await this.ensureReady();
     const workflow = await this.client.getEntryBySlug<Workflow>("workflow", slug);
-    if (!workflow) throw new Error(`Workflow not found: ${slug}`);
+    if (!workflow) throw new NotFoundError(`Workflow not found: ${slug}`);
     // Snapshot current before restore (Aurora also snapshots on restore).
     try {
       await this.client.createEntryVersion("workflow", workflow.id, {
@@ -736,7 +859,7 @@ export class TraceService {
 
   async getWorkflowTemplates(slug: string): Promise<TicketTemplate[]> {
     const result = await this.getWorkflow(slug);
-    if (!result) throw new Error(`Workflow not found: ${slug}`);
+    if (!result) throw new NotFoundError(`Workflow not found: ${slug}`);
     const editable = effectiveEditableDocument(result.workflow_document);
     return editable.ticket_templates ?? [];
   }
@@ -871,79 +994,39 @@ export class TraceService {
     project: string;
     filters?: SearchFilters;
     includeWiki?: boolean;
+    profile?: SearchProfile;
+    includePreview?: boolean;
     limit?: number;
     offset?: number;
-  }): Promise<Paginated<SearchHit>> {
+  }): Promise<Paginated<SearchHit> & { meta: SearchMeta }> {
     await this.ensureReady();
     const project = await this.client.getEntryBySlug<Project>(
       "project",
       input.project,
     );
-    if (!project) throw new Error(`Project not found: ${input.project}`);
+    if (!project) throw new NotFoundError(`Project not found: ${input.project}`);
 
-    const tickets = await this.listTickets({ project: input.project });
-    const comments = await this.listCommentsForTickets(
-      tickets.map((t) => t.slug),
+    const index = await this.getSearchIndex(input.project);
+    const filters = {
+      ...input.filters,
+      ...(input.includeWiki === false ? { type: "ticket" as const } : {}),
+    };
+    const result = index.search(filters, {
+      profile: input.profile,
+      includePreview: input.includePreview,
+    });
+    const profile = input.profile ?? "balanced";
+    const page = paginateItems(
+      result.hits,
+      input.limit ?? SEARCH_PROFILE_DEFAULTS[profile].limit,
+      input.offset ?? 0,
     );
-    const commentsByTicket = new Map<string, Comment[]>();
-    for (const comment of comments) {
-      const key = relationSlug(comment.fields.ticket);
-      if (!key) continue;
-      const list = commentsByTicket.get(key) ?? [];
-      list.push(comment);
-      commentsByTicket.set(key, list);
-    }
-
-    const ticketInputs = tickets.map((t) => {
-      const ticketComments = commentsByTicket.get(t.slug) ?? [];
-      return {
-        slug: t.slug,
-        ticket_key: t.fields.ticket_key ?? null,
-        title: t.fields.title,
-        description: t.fields.description ?? "",
-        stage: t.fields.stage,
-        priority: t.fields.priority ?? "medium",
-        created_by: t.fields.created_by ?? null,
-        resolution: t.fields.resolution ?? null,
-        stage_entered_at: t.fields.stage_entered_at ?? null,
-        createdAt: t.createdAt,
-        updatedAt: t.updatedAt,
-        commentBodies: ticketComments.map((c) => c.fields.body),
-        commentAuthors: ticketComments
-          .map((c) => c.fields.author)
-          .filter((a): a is string => Boolean(a)),
-      };
-    });
-
-    let wikiPages: Array<{
-      slug: string;
-      title: string;
-      body?: string | null;
-      updatedAt?: string | null;
-    }> = [];
-    if (input.includeWiki !== false) {
-      // Search matches on page bodies, so it needs every page, not one slice.
-      wikiPages = (await this.loadProjectWikiPages(input.project)).map(
-        (p) => ({
-          slug: p.slug,
-          title: p.fields.title,
-          body: p.fields.body ?? "",
-          updatedAt: p.updatedAt,
-        }),
-      );
-    }
-
-    const hits = searchProjectContent({
-      tickets: ticketInputs,
-      wikiPages,
-      filters: input.filters,
-    });
-    return paginateItems(hits, input.limit ?? 25, input.offset ?? 0);
+    return { ...page, meta: result.meta };
   }
 
   async getProjectInsights(projectSlug: string): Promise<ProjectInsights> {
     const detail = await this.getProject(projectSlug);
-    if (!detail) throw new Error(`Project not found: ${projectSlug}`);
+    if (!detail) throw new NotFoundError(`Project not found: ${projectSlug}`);
     const tickets = await this.listTickets({ project: projectSlug });
     const doneStage = lastStageKey(detail.stages) ?? "done";
     return computeProjectInsights(
@@ -1030,7 +1113,7 @@ export class TraceService {
         "project",
         projectSlug,
       );
-      if (!project) throw new Error(`Project not found: ${projectSlug}`);
+      if (!project) throw new NotFoundError(`Project not found: ${projectSlug}`);
 
       const projectKey = resolveProjectKey(project);
       let candidate = Math.max(
@@ -1065,7 +1148,7 @@ export class TraceService {
       };
     }
 
-    throw new Error(
+    throw new ValidationError(
       `Could not allocate a ticket number for project ${projectSlug}`,
     );
   }
@@ -1154,6 +1237,7 @@ export class TraceService {
         "project",
         (await this.client.getEntryBySlug<Project>("project", project.slug))!,
       );
+      this.invalidateSearchIndex(project.slug);
       touched.push(project.slug);
     }
 
@@ -1173,32 +1257,32 @@ export class TraceService {
   }): Promise<Ticket> {
     await this.ensureReady();
     const projectCtx = await this.getProject(input.project);
-    if (!projectCtx) throw new Error(`Project not found: ${input.project}`);
+    if (!projectCtx) throw new NotFoundError(`Project not found: ${input.project}`);
 
     const workflowSlug =
       input.workflow ??
       projectCtx.project.fields.default_workflow ??
       projectCtx.workflow?.slug;
     if (!workflowSlug) {
-      throw new Error(`No workflow configured for project ${input.project}`);
+      throw new ValidationError(`No workflow configured for project ${input.project}`);
     }
 
     const workflow =
       projectCtx.workflow?.slug === workflowSlug
         ? projectCtx.workflow
         : (await this.getWorkflow(workflowSlug))?.workflow;
-    if (!workflow) throw new Error(`Workflow not found: ${workflowSlug}`);
+    if (!workflow) throw new NotFoundError(`Workflow not found: ${workflowSlug}`);
 
     const doc = parseWorkflowDocument(workflow.fields.stages_json);
     const stages = doc.stages;
     const stage = input.stage ?? firstStageKey(stages);
-    if (!stage) throw new Error("Workflow has no stages");
+    if (!stage) throw new ValidationError("Workflow has no stages");
 
     const title = input.title?.trim() ?? "";
-    if (!title) throw new Error("Ticket title is required");
+    if (!title) throw new ValidationError("Ticket title is required");
     const description = (input.description ?? "").trim();
     if (!description) {
-      throw new Error(
+      throw new ValidationError(
         "Ticket description is required (a short wish is enough for backlog)",
       );
     }
@@ -1248,6 +1332,7 @@ export class TraceService {
       },
     });
     await this.ensurePublished("ticket", ticket);
+    await this.upsertSearchTicket(ticket);
     return ticket;
   }
 
@@ -1282,7 +1367,7 @@ export class TraceService {
       if (!notFound || !input.parentRef) throw error;
       const foreign = await this.resolveTicket(input.parentRef);
       if (!foreign) throw error;
-      throw new Error(
+      throw new ValidationError(
         `Parent ticket "${foreign.slug}" belongs to a different project.`,
       );
     }
@@ -1302,7 +1387,7 @@ export class TraceService {
   ): Promise<Ticket> {
     await this.ensureReady();
     const ticket = await this.resolveTicket(slug);
-    if (!ticket) throw new Error(`Ticket not found: ${slug}`);
+    if (!ticket) throw new NotFoundError(`Ticket not found: ${slug}`);
     if (input.description != null) {
       const workflow = await this.client.getEntryBySlug<Workflow>(
         "workflow",
@@ -1318,7 +1403,7 @@ export class TraceService {
       input.tokens_estimate != null &&
       (!Number.isInteger(input.tokens_estimate) || input.tokens_estimate < 0)
     ) {
-      throw new Error("tokens_estimate must be a non-negative integer");
+      throw new ValidationError("tokens_estimate must be a non-negative integer");
     }
     if (input.sort_order != null) {
       assertNonNegativeIntegerSortOrder(input.sort_order);
@@ -1361,6 +1446,7 @@ export class TraceService {
       },
     });
     await this.ensurePublished("ticket", updated);
+    await this.upsertSearchTicket(updated);
     return updated;
   }
 
@@ -1418,12 +1504,12 @@ export class TraceService {
   ): Promise<Ticket> {
     await this.ensureReady();
     const ticket = await this.resolveTicket(slug);
-    if (!ticket) throw new Error(`Ticket not found: ${slug}`);
+    if (!ticket) throw new NotFoundError(`Ticket not found: ${slug}`);
     const workflow = await this.client.getEntryBySlug<Workflow>(
       "workflow",
       ticket.fields.workflow,
     );
-    if (!workflow) throw new Error(`Workflow not found: ${ticket.fields.workflow}`);
+    if (!workflow) throw new NotFoundError(`Workflow not found: ${ticket.fields.workflow}`);
     const doc = parseWorkflowDocument(workflow.fields.stages_json);
     const stages = doc.stages;
     const fromStage = stages.find((s) => s.key === ticket.fields.stage);
@@ -1448,13 +1534,13 @@ export class TraceService {
       },
     });
     if (!canTransition(stages, ticket.fields.stage, toStage)) {
-      throw new Error(
+      throw new ValidationError(
         `Transition from "${ticket.fields.stage}" to "${toStage}" is not allowed`,
       );
     }
     const targetStage = stages.find((s) => s.key === toStage);
     if (!fromStage || !targetStage) {
-      throw new Error("Invalid workflow stage for transition");
+      throw new ValidationError("Invalid workflow stage for transition");
     }
     assertNoErrors(
       validateHumanGateExit({
@@ -1535,6 +1621,7 @@ export class TraceService {
       fields,
     });
     await this.ensurePublished("ticket", updated);
+    await this.upsertSearchTicket(updated);
     return updated;
   }
 
@@ -1555,7 +1642,7 @@ export class TraceService {
   ): Promise<{ ticket: Ticket; cascaded: Ticket[] }> {
     await this.ensureReady();
     const ticket = await this.resolveTicket(slug);
-    if (!ticket) throw new Error(`Ticket not found: ${slug}`);
+    if (!ticket) throw new NotFoundError(`Ticket not found: ${slug}`);
     const updated = await this.writeReviewVerdict(ticket, {
       verdict: input.verdict,
       comment: input.comment,
@@ -1605,10 +1692,10 @@ export class TraceService {
       "workflow",
       ticket.fields.workflow,
     );
-    if (!workflow) throw new Error(`Workflow not found: ${ticket.fields.workflow}`);
+    if (!workflow) throw new NotFoundError(`Workflow not found: ${ticket.fields.workflow}`);
     const stages = parseWorkflowDocument(workflow.fields.stages_json).stages;
     const stage = stages.find((s) => s.key === ticket.fields.stage);
-    if (!stage) throw new Error("Invalid workflow stage for review verdict");
+    if (!stage) throw new ValidationError("Invalid workflow stage for review verdict");
     assertNoErrors(
       validateReviewVerdict({
         stage,
@@ -1646,6 +1733,7 @@ export class TraceService {
       },
     });
     await this.ensurePublished("ticket", updated);
+    await this.upsertSearchTicket(updated);
     return updated;
   }
 
@@ -1656,7 +1744,7 @@ export class TraceService {
   }): Promise<Comment> {
     await this.ensureReady();
     const ticket = await this.resolveTicket(input.ticket);
-    if (!ticket) throw new Error(`Ticket not found: ${input.ticket}`);
+    if (!ticket) throw new NotFoundError(`Ticket not found: ${input.ticket}`);
     const existing = await this.listCommentsForTickets([ticket.slug], {});
     const slug = uniqueSlug(
       `${ticket.slug}-comment`,
@@ -1672,6 +1760,7 @@ export class TraceService {
       },
     });
     await this.ensurePublished("comment", comment);
+    await this.upsertSearchTicket(ticket);
     return comment;
   }
 
@@ -1722,7 +1811,7 @@ export class TraceService {
       "project",
       input.project,
     );
-    if (!project) throw new Error(`Project not found: ${input.project}`);
+    if (!project) throw new NotFoundError(`Project not found: ${input.project}`);
 
     return selectWikiPages({
       pages: await this.loadProjectWikiPages(input.project),
@@ -1787,21 +1876,21 @@ export class TraceService {
       // project" stays distinguishable from "does not exist".
       const foreign = await this.getWikiPage(resolvedParent);
       if (foreign) {
-        throw new Error(
+        throw new ValidationError(
           `Parent wiki page "${parentSlug}" belongs to a different project.`,
         );
       }
-      throw new Error(`Parent wiki page not found: ${parentSlug}`);
+      throw new NotFoundError(`Parent wiki page not found: ${parentSlug}`);
     }
     if (selfSlug && resolvedParent === selfSlug) {
-      throw new Error("A wiki page cannot be its own parent.");
+      throw new ValidationError("A wiki page cannot be its own parent.");
     }
     if (!selfSlug) return resolvedParent;
     const seen = new Set<string>([selfSlug]);
     let cursor: string | null = resolvedParent;
     while (cursor) {
       if (seen.has(cursor)) {
-        throw new Error(
+        throw new ValidationError(
           `Setting parent "${parentSlug}" would create a cycle in the wiki tree.`,
         );
       }
@@ -1823,12 +1912,12 @@ export class TraceService {
   }): Promise<WikiPage> {
     await this.ensureReady();
     const title = input.title?.trim();
-    if (!title) throw new Error("title is required");
+    if (!title) throw new ValidationError("title is required");
     const project = await this.client.getEntryBySlug<Project>(
       "project",
       input.project,
     );
-    if (!project) throw new Error(`Project not found: ${input.project}`);
+    if (!project) throw new NotFoundError(`Project not found: ${input.project}`);
     const parentEntrySlug = await this.assertWikiParent(
       input.project,
       input.parent,
@@ -1846,7 +1935,7 @@ export class TraceService {
       (p) => wikiLogicalSlug(p.slug, input.project) === logicalDesired,
     );
     if (logicalInProject) {
-      throw new Error(
+      throw new ValidationError(
         `Wiki page slug already exists in project: ${logicalDesired}`,
       );
     }
@@ -1864,7 +1953,7 @@ export class TraceService {
         namespaced,
       );
       if (namespacedTaken) {
-        throw new Error(`Wiki page slug already exists: ${namespaced}`);
+        throw new ValidationError(`Wiki page slug already exists: ${namespaced}`);
       }
       slug = namespaced;
     }
@@ -1892,6 +1981,7 @@ export class TraceService {
       },
     );
     await this.ensurePublished(WIKI_PAGE_CONTENT_TYPE, page);
+    this.upsertSearchWikiPage(page);
     return page;
   }
 
@@ -1916,7 +2006,7 @@ export class TraceService {
   ): Promise<{ page: WikiPage; applied_edits?: number }> {
     await this.ensureReady();
     if (input.edits && input.body != null) {
-      throw new Error(
+      throw new ValidationError(
         "Pass either body (full replace) or edits (patch), not both.",
       );
     }
@@ -1924,7 +2014,7 @@ export class TraceService {
       WIKI_PAGE_CONTENT_TYPE,
       slug,
     );
-    if (!page) throw new Error(`Wiki page not found: ${slug}`);
+    if (!page) throw new NotFoundError(`Wiki page not found: ${slug}`);
     let parentEntrySlug: string | null | undefined;
     if (input.parent !== undefined) {
       parentEntrySlug = await this.assertWikiParent(
@@ -1948,6 +2038,7 @@ export class TraceService {
       ...(input.edits ? { field_edits: { body: input.edits } } : {}),
     });
     await this.ensurePublished(WIKI_PAGE_CONTENT_TYPE, updated);
+    this.upsertSearchWikiPage(updated);
     // Aurora also reports a per-field length; it is wrong today (CMS-53), so
     // only the applied count is surfaced.
     return { page: updated, applied_edits: updated.fieldEditSummary?.applied };
@@ -2155,8 +2246,8 @@ export class TraceService {
   }): Promise<TraceaiUser> {
     await this.ensureReady();
     const username = input.username.trim();
-    if (!username) throw new Error("username is required");
-    if (!input.password) throw new Error("password is required");
+    if (!username) throw new ValidationError("username is required");
+    if (!input.password) throw new ValidationError("password is required");
     const display_name = input.display_name.trim() || username;
     const existing = await this.listTraceaiUsers();
     if (
@@ -2164,7 +2255,7 @@ export class TraceService {
         (u) => u.fields.username.trim().toLowerCase() === username.toLowerCase(),
       )
     ) {
-      throw new Error(`User already exists: ${username}`);
+      throw new ValidationError(`User already exists: ${username}`);
     }
     const slug = uniqueSlug(
       input.slug?.trim() || username,
@@ -2201,7 +2292,7 @@ export class TraceService {
   ): Promise<TraceaiUser> {
     await this.ensureReady();
     const user = await this.getTraceaiUser(slug);
-    if (!user) throw new Error(`User not found: ${slug}`);
+    if (!user) throw new NotFoundError(`User not found: ${slug}`);
 
     const nextStatus =
       input.status != null ? input.status.trim() || "active" : undefined;
@@ -2221,7 +2312,7 @@ export class TraceService {
         },
       )
     ) {
-      throw new Error(
+      throw new ValidationError(
         "Cannot disable or demote the last active platform admin",
       );
     }
@@ -2298,7 +2389,7 @@ export class TraceService {
   }): Promise<ProjectRole | "platform_admin"> {
     if (input.isPlatformAdmin) return "platform_admin";
     if (!input.userSlug) {
-      throw new Error(
+      throw new ForbiddenError(
         `Missing project membership for role ${input.required} on ${input.projectSlug}`,
       );
     }
@@ -2307,7 +2398,7 @@ export class TraceService {
       input.userSlug,
     );
     if (!roleAtLeast(role, input.required)) {
-      throw new Error(
+      throw new ForbiddenError(
         `Requires project role ${input.required} on ${input.projectSlug} (have ${role ?? "none"})`,
       );
     }
@@ -2322,17 +2413,17 @@ export class TraceService {
     await this.ensureReady();
     const project = input.project.trim();
     const user = input.user.trim();
-    if (!project || !user) throw new Error("project and user are required");
+    if (!project || !user) throw new ValidationError("project and user are required");
     if (!isProjectRole(input.role)) {
-      throw new Error(`Invalid role: ${input.role}`);
+      throw new ValidationError(`Invalid role: ${input.role}`);
     }
     const projectEntry = await this.client.getEntryBySlug<Project>(
       "project",
       project,
     );
-    if (!projectEntry) throw new Error(`Project not found: ${project}`);
+    if (!projectEntry) throw new NotFoundError(`Project not found: ${project}`);
     const userEntry = await this.getTraceaiUser(user);
-    if (!userEntry) throw new Error(`User not found: ${user}`);
+    if (!userEntry) throw new NotFoundError(`User not found: ${user}`);
 
     const slug = membershipSlug(project, user);
     const existing = await this.client.getEntryBySlug<ProjectMembership>(

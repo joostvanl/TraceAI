@@ -1,57 +1,21 @@
 import type { TicketResolution } from "./types.js";
-
-export type SearchHitType = "ticket" | "wiki_page";
-
-export type SearchTicketInput = {
-  slug: string;
-  ticket_key?: string | null;
-  title: string;
-  description?: string | null;
-  stage: string;
-  priority?: string | null;
-  created_by?: string | null;
-  resolution?: string | null;
-  stage_entered_at?: string | null;
-  createdAt?: string | null;
-  updatedAt?: string | null;
-  commentBodies?: string[];
-  commentAuthors?: string[];
-};
-
-export type SearchWikiInput = {
-  slug: string;
-  title: string;
-  body?: string | null;
-  updatedAt?: string | null;
-};
-
-export type SearchFilters = {
-  q?: string;
-  type?: SearchHitType | "all";
-  stage?: string;
-  resolution?: string;
-  priority?: string;
-  /** Matches ticket created_by or any comment author. */
-  created_by?: string;
-  /** Inclusive lower bound (ISO) on stage_entered_at / createdAt / updatedAt. */
-  from?: string;
-  /** Inclusive upper bound (ISO). */
-  to?: string;
-};
-
-export type SearchHit = {
-  type: SearchHitType;
-  slug: string;
-  title: string;
-  snippet: string;
-  score: number;
-  ticket_key?: string | null;
-  stage?: string;
-  priority?: string | null;
-  resolution?: string | null;
-  stage_entered_at?: string | null;
-  created_by?: string | null;
-};
+import {
+  searchIndexedContent,
+  type SearchFilters,
+  type SearchHit,
+  type SearchOptions,
+  type SearchTicketInput,
+  type SearchWikiInput,
+} from "./search-index.js";
+export type {
+  SearchFilters,
+  SearchHit,
+  SearchHitType,
+  SearchOptions,
+  SearchProfile,
+  SearchTicketInput,
+  SearchWikiInput,
+} from "./search-index.js";
 
 export type Paginated<T> = {
   items: T[];
@@ -114,206 +78,19 @@ export type ProjectInsights = {
   review_returns: number;
 };
 
-function normalizeText(value: string | null | undefined): string {
-  return (value ?? "").toLowerCase();
-}
-
-function includesQuery(haystack: string, query: string): boolean {
-  if (!query) return true;
-  return normalizeText(haystack).includes(query);
-}
-
 function parseTime(value: string | null | undefined): number | null {
   if (!value) return null;
   const t = new Date(value).getTime();
   return Number.isFinite(t) ? t : null;
 }
 
-function inDateRange(
-  candidates: Array<string | null | undefined>,
-  from?: string,
-  to?: string,
-): boolean {
-  if (!from && !to) return true;
-  const fromT = from ? parseTime(from) : null;
-  const toT = to ? parseTime(to) : null;
-  for (const candidate of candidates) {
-    const t = parseTime(candidate);
-    if (t == null) continue;
-    if (fromT != null && t < fromT) continue;
-    if (toT != null && t > toT) continue;
-    return true;
-  }
-  // If filters are set but no usable timestamps, exclude.
-  return false;
-}
-
-function snippetAround(
-  text: string,
-  query: string,
-  maxLen = 160,
-): string {
-  const cleaned = text.replace(/\s+/g, " ").trim();
-  if (!cleaned) return "";
-  if (!query) {
-    return cleaned.length <= maxLen
-      ? cleaned
-      : `${cleaned.slice(0, maxLen - 1)}…`;
-  }
-  const lower = cleaned.toLowerCase();
-  const idx = lower.indexOf(query);
-  if (idx < 0) {
-    return cleaned.length <= maxLen
-      ? cleaned
-      : `${cleaned.slice(0, maxLen - 1)}…`;
-  }
-  const half = Math.floor((maxLen - query.length) / 2);
-  const start = Math.max(0, idx - half);
-  const end = Math.min(cleaned.length, start + maxLen);
-  const prefix = start > 0 ? "…" : "";
-  const suffix = end < cleaned.length ? "…" : "";
-  return `${prefix}${cleaned.slice(start, end)}${suffix}`;
-}
-
-function scoreTicket(ticket: SearchTicketInput, query: string): number {
-  if (!query) return 1;
-  let score = 0;
-  const key = normalizeText(ticket.ticket_key);
-  const title = normalizeText(ticket.title);
-  const desc = normalizeText(ticket.description);
-  if (key === query) score += 100;
-  else if (key.includes(query)) score += 50;
-  if (title === query) score += 40;
-  else if (title.includes(query)) score += 25;
-  if (desc.includes(query)) score += 10;
-  for (const body of ticket.commentBodies ?? []) {
-    if (includesQuery(body, query)) score += 5;
-  }
-  return score;
-}
-
-function scoreWiki(page: SearchWikiInput, query: string): number {
-  if (!query) return 1;
-  let score = 0;
-  const title = normalizeText(page.title);
-  const body = normalizeText(page.body);
-  if (title === query) score += 40;
-  else if (title.includes(query)) score += 25;
-  if (body.includes(query)) score += 10;
-  return score;
-}
-
-function ticketMatchesFilters(
-  ticket: SearchTicketInput,
-  filters: SearchFilters,
-): boolean {
-  if (filters.stage && ticket.stage !== filters.stage) return false;
-  if (filters.resolution && (ticket.resolution ?? "") !== filters.resolution) {
-    return false;
-  }
-  if (filters.priority && (ticket.priority ?? "medium") !== filters.priority) {
-    return false;
-  }
-  if (filters.created_by) {
-    const want = normalizeText(filters.created_by);
-    const authors = [
-      ticket.created_by,
-      ...(ticket.commentAuthors ?? []),
-    ].map(normalizeText);
-    if (!authors.some((a) => a && a.includes(want))) return false;
-  }
-  if (
-    !inDateRange(
-      [ticket.stage_entered_at, ticket.createdAt, ticket.updatedAt],
-      filters.from,
-      filters.to,
-    )
-  ) {
-    return false;
-  }
-  return true;
-}
-
-/**
- * In-memory project search over tickets (+ comments) and wiki pages.
- * Simple substring match — no external search engine.
- */
 export function searchProjectContent(input: {
   tickets: SearchTicketInput[];
   wikiPages?: SearchWikiInput[];
   filters?: SearchFilters;
+  options?: SearchOptions;
 }): SearchHit[] {
-  const filters = input.filters ?? {};
-  const query = normalizeText(filters.q).trim();
-  const type = filters.type ?? "all";
-  const hits: SearchHit[] = [];
-
-  if (type === "all" || type === "ticket") {
-    for (const ticket of input.tickets) {
-      if (!ticketMatchesFilters(ticket, filters)) continue;
-      const fields = [
-        ticket.ticket_key ?? "",
-        ticket.title,
-        ticket.description ?? "",
-        ...(ticket.commentBodies ?? []),
-      ];
-      if (query && !fields.some((f) => includesQuery(f, query))) continue;
-      const score = scoreTicket(ticket, query);
-      if (query && score <= 0) continue;
-      const haystack =
-        fields.find((f) => includesQuery(f, query)) ?? ticket.title;
-      hits.push({
-        type: "ticket",
-        slug: ticket.slug,
-        title: ticket.title,
-        snippet: snippetAround(haystack, query),
-        score,
-        ticket_key: ticket.ticket_key ?? null,
-        stage: ticket.stage,
-        priority: ticket.priority ?? "medium",
-        resolution: ticket.resolution ?? null,
-        stage_entered_at: ticket.stage_entered_at ?? null,
-        created_by: ticket.created_by ?? null,
-      });
-    }
-  }
-
-  if (type === "all" || type === "wiki_page") {
-    // Ticket-only filters do not apply to wiki hits.
-    const wikiFiltersActive =
-      Boolean(filters.stage) ||
-      Boolean(filters.resolution) ||
-      Boolean(filters.priority) ||
-      Boolean(filters.created_by);
-    if (!wikiFiltersActive) {
-      for (const page of input.wikiPages ?? []) {
-        if (filters.from || filters.to) {
-          if (!inDateRange([page.updatedAt], filters.from, filters.to)) {
-            continue;
-          }
-        }
-        const fields = [page.title, page.body ?? ""];
-        if (query && !fields.some((f) => includesQuery(f, query))) continue;
-        const score = scoreWiki(page, query);
-        if (query && score <= 0) continue;
-        const haystack =
-          fields.find((f) => includesQuery(f, query)) ?? page.title;
-        hits.push({
-          type: "wiki_page",
-          slug: page.slug,
-          title: page.title,
-          snippet: snippetAround(haystack, query),
-          score,
-        });
-      }
-    }
-  }
-
-  hits.sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score;
-    return a.title.localeCompare(b.title);
-  });
-  return hits;
+  return searchIndexedContent(input).hits;
 }
 
 export function paginateItems<T>(

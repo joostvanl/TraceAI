@@ -7,6 +7,7 @@ import { hasScope } from "@traceai/auth";
 import type { TraceService } from "@traceai/core";
 import {
   AuroraApiError,
+  AuroraNetworkError,
   computeTokenRollup,
   ExpectedStateRequiredError,
   isProjectRole,
@@ -16,6 +17,8 @@ import {
   requiredRoleForAction,
   StageConflictError,
   TICKET_REVIEW_STATES,
+  TraceError,
+  ValidationError,
   WorkflowValidationError,
   wikiLogicalSlug,
   type FieldEdit,
@@ -234,7 +237,7 @@ function mapMembership(
 
 function param(c: { req: { param: (k: string) => string | undefined } }, key: string): string {
   const value = c.req.param(key);
-  if (!value) throw new Error(`Missing path param: ${key}`);
+  if (!value) throw new ValidationError(`Missing path param: ${key}`);
   return value;
 }
 
@@ -869,44 +872,38 @@ export function createApp(deps: {
           ? human.slug
           : undefined
         : (principal.userSlug ?? undefined));
-    try {
-      const result = await deps.service.createProject({
-        name: body.name,
-        description: body.description,
-        slug: body.slug,
-        seedWorkflow: body.seed_workflow,
-        seedWiki: body.seed_wiki,
-        ownerUser,
-      });
+    const result = await deps.service.createProject({
+      name: body.name,
+      description: body.description,
+      slug: body.slug,
+      seedWorkflow: body.seed_workflow,
+      seedWiki: body.seed_wiki,
+      ownerUser,
+    });
+    audit(c, {
+      action: "project.create",
+      resourceType: "project",
+      resourceId: result.project.slug,
+    });
+    if (ownerUser) {
       audit(c, {
-        action: "project.create",
-        resourceType: "project",
-        resourceId: result.project.slug,
+        action: "project_membership.set",
+        resourceType: "project_membership",
+        resourceId: `${result.project.slug}:${ownerUser}`,
       });
-      if (ownerUser) {
-        audit(c, {
-          action: "project_membership.set",
-          resourceType: "project_membership",
-          resourceId: `${result.project.slug}:${ownerUser}`,
-        });
-      }
-      return c.json(
-        {
-          project: mapProject(result.project),
-          workflow: result.workflow ? mapWorkflow(result.workflow) : null,
-          wiki_pages: result.wiki_pages.map((p) => ({
-            slug: p.slug,
-            title: p.fields.title,
-            logical_slug: wikiLogicalSlug(p.slug, result.project.slug),
-          })),
-        },
-        201,
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const status = message.includes("not found") ? 404 : 400;
-      return c.json({ message, code: "VALIDATION" }, status);
     }
+    return c.json(
+      {
+        project: mapProject(result.project),
+        workflow: result.workflow ? mapWorkflow(result.workflow) : null,
+        wiki_pages: result.wiki_pages.map((p) => ({
+          slug: p.slug,
+          title: p.fields.title,
+          logical_slug: wikiLogicalSlug(p.slug, result.project.slug),
+        })),
+      },
+      201,
+    );
   });
 
   app.get(
@@ -921,34 +918,36 @@ export function createApp(deps: {
         typeParam === "ticket" || typeParam === "wiki_page" || typeParam === "all"
           ? typeParam
           : "all";
-      const limit = Number(c.req.query("limit") ?? 25);
+      const profileParam = c.req.query("profile");
+      const profile =
+        profileParam === "focused" ||
+        profileParam === "balanced" ||
+        profileParam === "broad"
+          ? profileParam
+          : "balanced";
+      const limitParam = c.req.query("limit");
+      const limit = limitParam == null ? undefined : Number(limitParam);
       const offset = Number(c.req.query("offset") ?? 0);
-      try {
-        const page = await deps.service.searchProject({
-          project: slug,
-          includeWiki: includeWiki && type !== "ticket",
-          limit,
-          offset,
-          filters: {
-            q: c.req.query("q") ?? undefined,
-            type: includeWiki ? type : "ticket",
-            stage: c.req.query("stage") ?? undefined,
-            resolution: c.req.query("resolution") ?? undefined,
-            priority: c.req.query("priority") ?? undefined,
-            created_by:
-              c.req.query("created_by") ?? c.req.query("actor") ?? undefined,
-            from: c.req.query("from") ?? undefined,
-            to: c.req.query("to") ?? undefined,
-          },
-        });
-        return c.json(page);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (/not found/i.test(message)) {
-          return c.json({ message, code: "NOT_FOUND" }, 404);
-        }
-        throw error;
-      }
+      const page = await deps.service.searchProject({
+        project: slug,
+        includeWiki: includeWiki && type !== "ticket",
+        profile,
+        includePreview: c.req.query("include_preview") !== "false",
+        limit,
+        offset,
+        filters: {
+          q: c.req.query("q") ?? undefined,
+          type: includeWiki ? type : "ticket",
+          stage: c.req.query("stage") ?? undefined,
+          resolution: c.req.query("resolution") ?? undefined,
+          priority: c.req.query("priority") ?? undefined,
+          created_by:
+            c.req.query("created_by") ?? c.req.query("actor") ?? undefined,
+          from: c.req.query("from") ?? undefined,
+          to: c.req.query("to") ?? undefined,
+        },
+      });
+      return c.json(page);
     },
   );
 
@@ -960,38 +959,30 @@ export function createApp(deps: {
       const stage = c.req.query("stage") ?? undefined;
       const limit = Number(c.req.query("limit") ?? 25);
       const offset = Number(c.req.query("offset") ?? 0);
-      try {
-        const page = await deps.service.listTicketHistory({
-          project: slug,
-          stage,
-          limit,
-          offset,
-        });
-        return c.json({
-          items: page.items.map(({ ticket: t }) => ({
-            slug: t.slug,
-            ticket_key: t.fields.ticket_key ?? null,
-            ticket_number: t.fields.ticket_number ?? null,
-            title: t.fields.title,
-            stage: t.fields.stage,
-            priority: t.fields.priority ?? "medium",
-            created_by: t.fields.created_by ?? null,
-            stage_entered_at: t.fields.stage_entered_at ?? null,
-            tokens_estimate: t.fields.tokens_estimate ?? null,
-            tokens_actual: t.fields.tokens_actual ?? null,
-            resolution: t.fields.resolution ?? null,
-          })),
-          total: page.total,
-          limit: page.limit,
-          offset: page.offset,
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (/not found/i.test(message)) {
-          return c.json({ message, code: "NOT_FOUND" }, 404);
-        }
-        throw error;
-      }
+      const page = await deps.service.listTicketHistory({
+        project: slug,
+        stage,
+        limit,
+        offset,
+      });
+      return c.json({
+        items: page.items.map(({ ticket: t }) => ({
+          slug: t.slug,
+          ticket_key: t.fields.ticket_key ?? null,
+          ticket_number: t.fields.ticket_number ?? null,
+          title: t.fields.title,
+          stage: t.fields.stage,
+          priority: t.fields.priority ?? "medium",
+          created_by: t.fields.created_by ?? null,
+          stage_entered_at: t.fields.stage_entered_at ?? null,
+          tokens_estimate: t.fields.tokens_estimate ?? null,
+          tokens_actual: t.fields.tokens_actual ?? null,
+          resolution: t.fields.resolution ?? null,
+        })),
+        total: page.total,
+        limit: page.limit,
+        offset: page.offset,
+      });
     },
   );
 
@@ -1000,16 +991,8 @@ export function createApp(deps: {
     requireScope("tickets:read"),
     async (c) => {
       const slug = param(c, "slug");
-      try {
-        const insights = await deps.service.getProjectInsights(slug);
-        return c.json({ project: slug, ...insights });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (/not found/i.test(message)) {
-          return c.json({ message, code: "NOT_FOUND" }, 404);
-        }
-        throw error;
-      }
+      const insights = await deps.service.getProjectInsights(slug);
+      return c.json({ project: slug, ...insights });
     },
   );
 
@@ -2424,14 +2407,52 @@ export function createApp(deps: {
   });
 
   app.onError((err, c) => {
+    if (err instanceof StageConflictError) {
+      return c.json(
+        {
+          message: err.message,
+          code: err.code,
+          expected_stage: err.expected_stage,
+          current_stage: err.current_stage,
+          expected_review_state: err.expected_review_state,
+          review_state: err.review_state,
+          to_stage: err.to_stage,
+          stage_entered_at: err.stage_entered_at,
+          recent_comments: err.recent_comments,
+        },
+        409,
+      );
+    }
+    if (err instanceof ExpectedStateRequiredError) {
+      return c.json({ message: err.message, code: err.code }, 400);
+    }
+    if (err instanceof WorkflowValidationError) {
+      return c.json(
+        { message: err.message, code: "VALIDATION", issues: err.issues },
+        400,
+      );
+    }
+    if (err instanceof TraceError) {
+      const body: Record<string, unknown> = {
+        message: err.message,
+        code: err.code,
+      };
+      if (err instanceof ValidationError && err.issues !== undefined) {
+        body.issues = err.issues;
+      }
+      return c.json(body, err.status as 400 | 403 | 404);
+    }
+    if (err instanceof AuroraNetworkError) {
+      return c.json({ message: err.message, code: "BAD_GATEWAY" }, 502);
+    }
+    if (err instanceof AuroraApiError) {
+      if (isPassThroughStatus(err.status)) {
+        return c.json(auroraErrorBody(err), err.status);
+      }
+      return c.json({ message: err.message, code: "BAD_GATEWAY" }, 502);
+    }
     const message = err instanceof Error ? err.message : String(err);
-    const status =
-      /not found/i.test(message)
-        ? 404
-        : /not allowed|forbidden|disabled|human approval/i.test(message)
-          ? 403
-          : 400;
-    return c.json({ message, code: "TRACE_ERROR" }, status);
+    return c.json({ message, code: "INTERNAL" }, 500);
   });
 
   return app;

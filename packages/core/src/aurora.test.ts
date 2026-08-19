@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   AURORA_FIELD_IN_MAX,
+  AuroraApiError,
+  AuroraNetworkError,
   buildEntriesSearchParams,
 } from "./aurora.js";
 
@@ -55,5 +57,17 @@ describe("buildEntriesSearchParams", () => {
         ),
       /at most 50/,
     );
+  });
+});
+
+describe("AuroraNetworkError", () => {
+  it("is an AuroraApiError recognized without a magic status 0", () => {
+    const err = new AuroraNetworkError("Aurora network error: DNS", {
+      cause: new TypeError("fetch failed"),
+    });
+    assert.equal(err.name, "AuroraNetworkError");
+    assert.equal(err.status, 502);
+    assert.ok(err instanceof AuroraApiError);
+    assert.ok(err.cause instanceof TypeError);
   });
 });

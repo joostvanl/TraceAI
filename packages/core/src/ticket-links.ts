@@ -1,4 +1,5 @@
 import { relationSlug, relationSlugOrEmpty } from "./relations.js";
+import { NotFoundError, ValidationError } from "./trace-errors.js";
 import { isTicketKeyPattern, type Ticket } from "./types.js";
 
 export type TicketLinkRow = {
@@ -152,15 +153,15 @@ export function validateTicketParent(input: {
 
   const parent = resolveTicketRef(input.tickets, raw);
   if (!parent) {
-    throw new Error(`Parent ticket not found: ${raw}`);
+    throw new NotFoundError(`Parent ticket not found: ${raw}`);
   }
   if (parent.project !== input.project) {
-    throw new Error(
+    throw new ValidationError(
       `Parent ticket "${parent.slug}" belongs to a different project.`,
     );
   }
   if (input.selfSlug && parent.slug === input.selfSlug) {
-    throw new Error("A ticket cannot be its own parent.");
+    throw new ValidationError("A ticket cannot be its own parent.");
   }
   if (!input.selfSlug) return parent.slug;
 
@@ -171,7 +172,7 @@ export function validateTicketParent(input: {
   let cursor: string | null = parent.slug;
   while (cursor) {
     if (seen.has(cursor)) {
-      throw new Error(
+      throw new ValidationError(
         `Setting parent "${parent.slug}" would create a cycle in the ticket tree.`,
       );
     }

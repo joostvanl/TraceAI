@@ -1,7 +1,9 @@
+import { ValidationError } from "./trace-errors.js";
+
 /** Shared validation for ticket `sort_order` writes. */
 export function assertNonNegativeIntegerSortOrder(value: number): void {
   if (!Number.isInteger(value) || value < 0) {
-    throw new Error("sort_order must be a non-negative integer");
+    throw new ValidationError("sort_order must be a non-negative integer");
   }
 }
 
@@ -29,10 +31,10 @@ export function planTicketReorder(input: {
 }): SortOrderUpdate[] {
   const { project, stage, ordered_slugs } = input;
   if (!Array.isArray(ordered_slugs) || ordered_slugs.length === 0) {
-    throw new Error("ordered_slugs must be a non-empty array");
+    throw new ValidationError("ordered_slugs must be a non-empty array");
   }
   if (new Set(ordered_slugs).size !== ordered_slugs.length) {
-    throw new Error("ordered_slugs must not contain duplicates");
+    throw new ValidationError("ordered_slugs must not contain duplicates");
   }
 
   const inStage = input.tickets.filter(
@@ -42,14 +44,14 @@ export function planTicketReorder(input: {
 
   for (const slug of ordered_slugs) {
     if (!bySlug.has(slug)) {
-      throw new Error(
+      throw new ValidationError(
         `Ticket not in project "${project}" stage "${stage}": ${slug}`,
       );
     }
   }
 
   if (ordered_slugs.length !== inStage.length) {
-    throw new Error(
+    throw new ValidationError(
       `ordered_slugs must include every ticket in stage "${stage}" (${inStage.length} expected, got ${ordered_slugs.length})`,
     );
   }

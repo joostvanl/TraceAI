@@ -8,6 +8,7 @@ import {
   ExpectedStateRequiredError,
   MISSING_EXPECTED_STAGE,
   StageConflictError,
+  ValidationError,
 } from "@traceai/core";
 import { createApp } from "./app.js";
 import { projectMemberStubs } from "./test-support.js";
@@ -188,11 +189,13 @@ describe("POST /v1/tickets/:slug/transition stale-state (TRA-73)", () => {
     );
   });
 
-  it("A5: ordinary not-allowed Error is not a 409", async () => {
+  it("A5: invalid transition ValidationError is 400, not 409 or 403", async () => {
     await withApp(
       {
         transitionTicket: async () => {
-          throw new Error('Transition from "todo" to "done" is not allowed');
+          throw new ValidationError(
+            'Transition from "todo" to "done" is not allowed',
+          );
         },
       },
       async (app, token) => {
@@ -200,7 +203,11 @@ describe("POST /v1/tickets/:slug/transition stale-state (TRA-73)", () => {
           to_stage: "done",
           comment: COMMENT,
         });
+        assert.equal(res.status, 400);
+        const body = (await res.json()) as { code?: string };
+        assert.equal(body.code, "VALIDATION");
         assert.notEqual(res.status, 409);
+        assert.notEqual(res.status, 403);
       },
     );
   });

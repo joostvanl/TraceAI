@@ -201,21 +201,19 @@ describe("PATCH /v1/wiki-pages/:slug with edits (TRA-70)", () => {
   });
 
   it("does not disguise an unexpected Aurora failure as a stale anchor", async () => {
-    // An upstream outage must never look like 409, or an agent will re-read and
-    // retry forever against a broken backend.
-    //
-    // Note: it currently surfaces as 400 TRACE_ERROR because the global
-    // onError handler maps every uncaught error to 400 by string-matching the
-    // message (app.ts). That is wrong for real faults but predates this ticket
-    // and is tracked separately — asserted here only as "not a conflict".
+    // Upstream outage must never look like 409, or an agent will re-read and
+    // retry forever against a broken backend. TRA-79 maps Aurora 5xx to 502.
     await withApp(
       async () => {
         throw new AuroraApiError("Aurora API 503", 503, null);
       },
       async (app, token) => {
         const res = await patch(app, token, { edits: oneEdit });
+        assert.equal(res.status, 502);
+        const body = (await res.json()) as { code?: string };
+        assert.equal(body.code, "BAD_GATEWAY");
         assert.notEqual(res.status, 409);
-        assert.notEqual(res.status, 200);
+        assert.notEqual(res.status, 400);
       },
     );
   });

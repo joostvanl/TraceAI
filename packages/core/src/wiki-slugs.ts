@@ -1,3 +1,5 @@
+import { ValidationError } from "./trace-errors.js";
+
 /**
  * Separator between project slug and logical wiki page slug in Aurora entry slugs.
  * Must be URL-safe (no consecutive hyphens — Aurora rejects `--`).
@@ -15,7 +17,7 @@ export function wikiEntrySlug(project: string, logicalSlug: string): string {
   const projectSlug = project.trim();
   const logical = logicalSlug.trim();
   if (!projectSlug || !logical) {
-    throw new Error("project and logicalSlug are required");
+    throw new ValidationError("project and logicalSlug are required");
   }
   const prefix = `${projectSlug}${WIKI_ENTRY_SLUG_SEP}`;
   if (logical.startsWith(prefix)) return logical;

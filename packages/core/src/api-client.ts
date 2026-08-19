@@ -151,7 +151,7 @@ export class TraceApiClient {
 
   searchProject(
     project: string,
-    query: Record<string, string | number | undefined> = {},
+    query: Record<string, string | number | boolean | undefined> = {},
   ) {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {

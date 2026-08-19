@@ -54,6 +54,11 @@ export function formatToolError(error: unknown): string {
     }
   } else if (status === 409) {
     classHint = WIKI_409_HINT;
+  } else if (status != null && status >= 500) {
+    classHint =
+      status === 502
+        ? " (Hint: server or Aurora/upstream fault — do not rewrite a correct request. Retry later or tell an operator.)"
+        : " (Hint: server/upstream fault — do not rewrite a correct request.)";
   } else if (status === 400) {
     classHint = INVALID_400_HINT;
   }
@@ -172,7 +177,7 @@ export function registerTraceAiTools(
 
   server.tool(
     "search_project",
-    "Search tickets (key/title/description/comments) and wiki (title/body) within one project. Supports filters: stage, resolution, priority, created_by/actor, from/to dates, type.",
+    "BM25 search over tickets (including Done and comments) and wiki within one project. Returns compact ranked hits; open only relevant results with get_ticket/get_wiki_page. Use focused for lookups, balanced by default, and broad only for inventories. Prefixes of 3+ letters match; 1–2 letter queries return no hits.",
     {
       project: z.string().describe("Project slug"),
       q: z.string().optional().describe("Free-text query"),
@@ -189,6 +194,14 @@ export function registerTraceAiTools(
         .describe("Ticket created_by or comment author"),
       from: z.string().optional().describe("ISO date lower bound"),
       to: z.string().optional().describe("ISO date upper bound"),
+      profile: z
+        .enum(["focused", "balanced", "broad"])
+        .optional()
+        .describe("Retrieval budget; defaults to balanced"),
+      include_preview: z
+        .boolean()
+        .optional()
+        .describe("Include compact snippets; defaults to true"),
       limit: z.number().int().positive().max(100).optional(),
       offset: z.number().int().nonnegative().optional(),
     },

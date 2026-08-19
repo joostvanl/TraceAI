@@ -392,6 +392,8 @@ export async function searchProjectPublic(
     created_by?: string;
     from?: string;
     to?: string;
+    profile?: "focused" | "balanced" | "broad";
+    include_preview?: boolean;
     limit?: number;
     offset?: number;
   } = {},
@@ -453,9 +455,19 @@ export async function searchProjectPublic(
       from: filters.from,
       to: filters.to,
     },
+    options: {
+      profile: filters.profile,
+      includePreview: filters.include_preview,
+    },
   });
 
-  return paginateItems(hits, filters.limit ?? 25, filters.offset ?? 0);
+  const defaultLimit =
+    filters.profile === "focused"
+      ? 8
+      : filters.profile === "broad"
+        ? 32
+        : 16;
+  return paginateItems(hits, filters.limit ?? defaultLimit, filters.offset ?? 0);
 }
 
 export async function listProjectHistoryPublic(

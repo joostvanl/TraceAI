@@ -1,3 +1,5 @@
+import { ValidationError } from "./trace-errors.js";
+
 export type AuroraClientConfig = {
   apiUrl: string;
   token: string;
@@ -62,12 +64,12 @@ export function buildEntriesSearchParams(
       .map((v) => String(v).trim())
       .filter(Boolean);
     if (values.length === 0) {
-      throw new Error(
+      throw new ValidationError(
         "Aurora listEntries field filter requires a non-empty `in` value list",
       );
     }
     if (values.length > AURORA_FIELD_IN_MAX) {
-      throw new Error(
+      throw new ValidationError(
         `Aurora listEntries field filter allows at most ${AURORA_FIELD_IN_MAX} values in \`in\` (got ${values.length})`,
       );
     }
@@ -85,6 +87,17 @@ export class AuroraApiError extends Error {
   ) {
     super(message);
     this.name = "AuroraApiError";
+  }
+}
+
+/** Fetch failed before a response (DNS, abort, network). Mapped to HTTP 502. */
+export class AuroraNetworkError extends AuroraApiError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, 502, null);
+    this.name = "AuroraNetworkError";
+    if (options?.cause !== undefined) {
+      this.cause = options.cause;
+    }
   }
 }
 
@@ -155,10 +168,18 @@ export class AuroraManagementClient {
       headers.set("Content-Type", "application/json");
     }
 
-    const res = await fetch(`${this.apiUrl}${path}`, {
-      ...init,
-      headers,
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${this.apiUrl}${path}`, {
+        ...init,
+        headers,
+      });
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      throw new AuroraNetworkError(`Aurora network error: ${detail}`, {
+        cause,
+      });
+    }
     const body = await parseJson(res);
     if (!res.ok) {
       throw new AuroraApiError(

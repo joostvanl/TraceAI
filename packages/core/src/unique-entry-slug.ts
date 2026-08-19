@@ -1,4 +1,5 @@
 import { slugify } from "./types.js";
+import { ValidationError } from "./trace-errors.js";
 
 /** Cap on getEntryBySlug probes when allocating a globally unique entry slug. */
 export const UNIQUE_ENTRY_SLUG_MAX_ATTEMPTS = 50;
@@ -24,7 +25,7 @@ export async function allocateUniqueEntrySlug(
   maxAttempts: number = UNIQUE_ENTRY_SLUG_MAX_ATTEMPTS,
 ): Promise<string> {
   if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
-    throw new Error("maxAttempts must be a positive integer");
+    throw new ValidationError("maxAttempts must be a positive integer");
   }
   const root = slugify(base);
   for (let n = 0; n < maxAttempts; n++) {
@@ -32,7 +33,7 @@ export async function allocateUniqueEntrySlug(
     const existing = await client.getEntryBySlug(apiId, candidate);
     if (!existing) return candidate;
   }
-  throw new Error(
+  throw new ValidationError(
     `Could not allocate a unique ${apiId} slug from "${base}" after ${maxAttempts} attempts`,
   );
 }

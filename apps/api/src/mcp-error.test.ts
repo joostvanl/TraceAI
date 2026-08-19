@@ -33,4 +33,27 @@ describe("formatToolError (TRA-73 / TRA-70)", () => {
     assert.equal(/STAGE_CONFLICT/.test(text), false);
     assert.equal(/recent_comments/.test(text), false);
   });
+
+  it("M3: 502 BAD_GATEWAY hints Aurora/upstream and has no INVALID_400 hint", () => {
+    const text = formatToolError(
+      new TraceApiError("Aurora API 503", 502, "BAD_GATEWAY"),
+    );
+    assert.match(text, /Error 502 BAD_GATEWAY/);
+    assert.match(text, /Aurora\/upstream/i);
+    assert.equal(/resending it unchanged will fail again/i.test(text), false);
+  });
+
+  it("M4: 500 INTERNAL hints server fault and has no INVALID_400 hint", () => {
+    const text = formatToolError(new TraceApiError("boom", 500, "INTERNAL"));
+    assert.match(text, /Error 500 INTERNAL/);
+    assert.match(text, /server\/upstream fault/i);
+    assert.equal(/resending it unchanged will fail again/i.test(text), false);
+  });
+
+  it("M2b: 400 keeps the invalid-request hint", () => {
+    const text = formatToolError(
+      new TraceApiError("title is required", 400, "VALIDATION"),
+    );
+    assert.match(text, /resending it unchanged will fail again/i);
+  });
 });

@@ -9,6 +9,7 @@ import type {
   WorkflowStageAgentRules,
 } from "./types.js";
 import { humanApproveTarget, humanDismissTarget, humanRejectTargets } from "./types.js";
+import { ValidationError } from "./trace-errors.js";
 
 export type {
   TicketTemplate,
@@ -514,7 +515,7 @@ export function applyTicketTemplate(
 
   if (options.mode === "confirm_overwrite") {
     if (existing && !options.confirmed) {
-      throw new Error(
+      throw new ValidationError(
         "Template zou bestaande description overschrijven; bevestig expliciet (confirmed=true).",
       );
     }
