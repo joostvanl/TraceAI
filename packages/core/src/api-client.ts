@@ -93,16 +93,33 @@ export class TraceApiClient {
     return body as T;
   }
 
+  // These three must forward the human identity whenever the client holds one.
+  // Since TRA-81 the API answers them per principal: without the identity it
+  // judges the web server's own token, which carries admin scope, so the caller
+  // would see every project and a membership check would be meaningless.
+  // `/v1/me/projects` outright requires it and returns 401 otherwise.
   listProjects() {
-    return this.request<unknown[]>("/v1/projects");
+    return this.request<unknown[]>(
+      "/v1/projects",
+      {},
+      { asHuman: Boolean(this.humanIdentityHeader) },
+    );
   }
 
   listMyProjects() {
-    return this.request<unknown[]>("/v1/me/projects");
+    return this.request<unknown[]>(
+      "/v1/me/projects",
+      {},
+      { asHuman: Boolean(this.humanIdentityHeader) },
+    );
   }
 
   getProject(slug: string) {
-    return this.request<unknown>(`/v1/projects/${encodeURIComponent(slug)}`);
+    return this.request<unknown>(
+      `/v1/projects/${encodeURIComponent(slug)}`,
+      {},
+      { asHuman: Boolean(this.humanIdentityHeader) },
+    );
   }
 
   createProject(body: {

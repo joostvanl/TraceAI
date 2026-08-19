@@ -57,7 +57,12 @@ export async function resolvePrincipal(input: {
     return {
       userSlug: human.slug,
       isPlatformAdmin: !legacy && human.is_platform_admin === true,
-      hasAdminScope,
+      // Deliberately NOT the carrying token's scope. On a human-proxy request the
+      // token belongs to the web server, not to the person, and that token holds
+      // `admin` scope in every deployment. Inheriting it granted every signed-in
+      // user access to every project, which made this whole measure a no-op in
+      // the UI. For a human, platform admin is the only escape.
+      hasAdminScope: false,
       source: "human-proxy",
     };
   }

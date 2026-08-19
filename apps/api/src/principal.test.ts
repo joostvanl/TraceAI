@@ -192,6 +192,32 @@ describe("resolvePrincipal + allowedProjects (TRA-81)", () => {
     assert.equal(mayAccessProject(access as Set<string>, "secret"), false);
   });
 
+  it("U2b: a human does not inherit the carrying token's admin scope", async () => {
+    // The web server proxies human requests with its OWN token, which holds
+    // `admin` scope in every deployment. Inheriting it would give every signed-in
+    // user access to every project - which is exactly what happened locally.
+    const svc = service({
+      users: [user("carstendlf")],
+      memberships: [membership("traceai", "joostvl")],
+      projects: ["traceai", "secret"],
+    });
+    const principal = await resolvePrincipal({
+      service: svc,
+      human: human({ slug: "carstendlf", is_platform_admin: false }),
+      actor: {
+        userId: "web",
+        email: "joost@traceai.local",
+        name: "web server",
+        tokenId: "t",
+        scopes: ["admin"],
+      },
+    });
+    assert.equal(principal.hasAdminScope, false, "the token's scope is not the human's");
+    const access = await allowedProjects(svc, principal);
+    assert.notEqual(access, "all");
+    assert.equal((access as Set<string>).size, 0, "no memberships means no projects");
+  });
+
   it("U6: admin scope is the documented escape", async () => {
     const svc = service({ users: [] });
     const principal = await resolvePrincipal({
