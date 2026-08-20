@@ -9,27 +9,19 @@ import {
   type DragEvent,
   type MouseEvent,
 } from "react";
+import {
+  UNMAPPED_STAGE_KEY,
+  newestFirstCapped,
+  remapStageForBoard,
+} from "@traceai/core";
 import { groupByStage, moveItem } from "@/lib/board-order";
-import { newestFirstCapped } from "@traceai/core";
+import {
+  applyBoardTicketEvent,
+  type BoardTicket,
+  type BoardTicketEvent,
+} from "@/lib/board-events";
 
-export type BoardTicket = {
-  slug: string;
-  /** Immutable display key, e.g. TRA-42 */
-  ticketKey?: string | null;
-  title: string;
-  stage: string;
-  priority: string;
-  /** When the ticket last entered its current stage (ISO). Used to sort last stage newest-first. */
-  stageChangedAt?: string;
-  tokensEstimate?: number | null;
-  tokensActual?: number | null;
-  /** Closure reason when set (typically on last stage). */
-  resolution?: string | null;
-  /** Human verdict on the current human-gated stage, if one was given. */
-  reviewState?: string | null;
-  /** Vertical order within a stage (first column). */
-  sortOrder?: number | null;
-};
+export type { BoardTicket } from "@/lib/board-events";
 
 export type BoardStage = {
   key: string;
@@ -37,29 +29,11 @@ export type BoardStage = {
   requiresHumanApproval?: boolean;
 };
 
-type TicketEvent = {
-  type: string;
-  project: string;
-  ticket: {
-    slug: string;
-    ticket_key?: string | null;
-    title: string;
-    stage: string;
-    priority?: string;
-    project: string;
-    tokens_estimate?: number | null;
-    tokens_actual?: number | null;
-    resolution?: string | null;
-    review_state?: string | null;
-    sort_order?: number | null;
-  };
-  from_stage?: string;
-  to_stage?: string;
-  at: string;
-};
-
 type Props = {
   projectSlug: string;
+  selectedWorkflow: string;
+  defaultWorkflow: string | null;
+  projectWorkflowSlugs: string[];
   stages: BoardStage[];
   /** Last workflow stage key — column shows only the newest tickets. */
   lastStageKey?: string;
@@ -120,6 +94,9 @@ function reviewBadge(
 
 export function LiveBoard({
   projectSlug,
+  selectedWorkflow,
+  defaultWorkflow,
+  projectWorkflowSlugs,
   stages,
   lastStageKey,
   initialTickets,
@@ -140,11 +117,31 @@ export function LiveBoard({
   const suppressClickRef = useRef(false);
   const dragFromIndexRef = useRef<number | null>(null);
 
-  const reorderableStageKey = stages[0]?.key;
-  const reorderEnabled = canReorder && Boolean(reorderableStageKey);
+  const liveStageKeys = useMemo(
+    () => stages.map((s) => s.key).filter((key) => key !== UNMAPPED_STAGE_KEY),
+    [stages],
+  );
+  const boardStages = useMemo(() => {
+    const hasOverflow = tickets.some(
+      (t) => remapStageForBoard(t.stage, liveStageKeys) === UNMAPPED_STAGE_KEY,
+    );
+    const without = stages.filter((s) => s.key !== UNMAPPED_STAGE_KEY);
+    return hasOverflow
+      ? [...without, { key: UNMAPPED_STAGE_KEY, name: "Onbekende stage" }]
+      : without;
+  }, [stages, tickets, liveStageKeys]);
+  const reorderableStageKey = boardStages[0]?.key;
+  const reorderEnabled =
+    canReorder &&
+    Boolean(reorderableStageKey) &&
+    reorderableStageKey !== UNMAPPED_STAGE_KEY;
 
   const ticketsByStage = useMemo(() => {
-    const map = groupByStage(stages, tickets, reorderableStageKey);
+    const displayTickets = tickets.map((t) => ({
+      ...t,
+      stage: remapStageForBoard(t.stage, liveStageKeys),
+    }));
+    const map = groupByStage(boardStages, displayTickets, reorderableStageKey);
     if (lastStageKey && map[lastStageKey]) {
       map[lastStageKey] = newestFirstCapped(
         map[lastStageKey],
@@ -152,7 +149,7 @@ export function LiveBoard({
       );
     }
     return map;
-  }, [stages, tickets, lastStageKey, reorderableStageKey]);
+  }, [boardStages, tickets, lastStageKey, reorderableStageKey, liveStageKeys]);
 
   // Events are now durable and cross-process: writes to any API instance land
   // in the shared store, and this stream replays anything missed on reconnect
@@ -181,9 +178,9 @@ export function LiveBoard({
     let flashTimer: ReturnType<typeof setTimeout> | undefined;
 
     const applyEvent = (raw: MessageEvent) => {
-      let event: TicketEvent;
+      let event: BoardTicketEvent;
       try {
-        event = JSON.parse(String(raw.data)) as TicketEvent;
+        event = JSON.parse(String(raw.data)) as BoardTicketEvent;
       } catch {
         return;
       }
@@ -196,41 +193,14 @@ export function LiveBoard({
       setLastEventAt(event.at ?? new Date().toISOString());
       setLiveState("live");
 
-      setTickets((prev) => {
-        const without = prev.filter((t) => t.slug !== event.ticket.slug);
-        if (event.type === "ticket.commented") {
-          // Keep placement; optional highlight only.
-          return prev;
-        }
-        const previous = prev.find((t) => t.slug === event.ticket.slug);
-        const next: BoardTicket = {
-          slug: event.ticket.slug,
-          ticketKey: event.ticket.ticket_key ?? previous?.ticketKey ?? null,
-          title: event.ticket.title,
-          stage: event.ticket.stage,
-          priority: event.ticket.priority ?? "medium",
-          stageChangedAt:
-            event.type === "ticket.transitioned" || !previous
-              ? (event.at ?? new Date().toISOString())
-              : previous.stageChangedAt,
-          tokensEstimate:
-            event.ticket.tokens_estimate ?? previous?.tokensEstimate ?? null,
-          tokensActual:
-            event.ticket.tokens_actual ?? previous?.tokensActual ?? null,
-          resolution: event.ticket.resolution ?? previous?.resolution ?? null,
-          // A transition always clears the verdict server-side; every other
-          // event carries the current one.
-          reviewState:
-            event.type === "ticket.transitioned"
-              ? null
-              : (event.ticket.review_state ?? null),
-          sortOrder:
-            event.ticket.sort_order !== undefined
-              ? event.ticket.sort_order
-              : (previous?.sortOrder ?? null),
-        };
-        return [...without, next];
-      });
+      setTickets((prev) =>
+        applyBoardTicketEvent(prev, event, {
+          projectSlug,
+          selectedWorkflow,
+          defaultWorkflow,
+          projectWorkflowSlugs,
+        }),
+      );
 
       setFlashSlug(event.ticket.slug);
       if (flashTimer) clearTimeout(flashTimer);
@@ -251,7 +221,7 @@ export function LiveBoard({
       if (flashTimer) clearTimeout(flashTimer);
       source.close();
     };
-  }, [eventsUrl, projectSlug]);
+  }, [eventsUrl, projectSlug, selectedWorkflow, defaultWorkflow, projectWorkflowSlugs]);
 
   async function persistReorder(
     stageKey: string,
@@ -261,13 +231,16 @@ export function LiveBoard({
     setPersisting(true);
     setReorderError(null);
     try {
+      const ordered_slugs = ordered.filter((t) => !t.orphan).map((t) => t.slug);
+      if (ordered_slugs.length === 0) return;
       const res = await fetch("/api/tickets/reorder", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           project: projectSlug,
           stage: stageKey,
-          ordered_slugs: ordered.map((t) => t.slug),
+          workflow: selectedWorkflow,
+          ordered_slugs,
         }),
       });
       if (!res.ok) {
@@ -303,7 +276,12 @@ export function LiveBoard({
     index: number,
     slug: string,
   ) {
-    if (!reorderEnabled || stageKey !== reorderableStageKey || persisting) {
+    if (
+      !reorderEnabled ||
+      stageKey !== reorderableStageKey ||
+      persisting ||
+      tickets.find((t) => t.slug === slug)?.orphan
+    ) {
       event.preventDefault();
       return;
     }
@@ -364,17 +342,21 @@ export function LiveBoard({
     }
     suppressClickRef.current = true;
     const column = ticketsByStage[stageKey] ?? [];
+    const dragged = column[fromIndex];
+    if (!dragged || dragged.orphan) return;
     const reordered = moveItem(column, fromIndex, toIndex);
     if (reordered === column) return;
+    const pinned = reordered.filter((t) => !t.orphan);
+    if (pinned.length === 0) return;
 
     const previousTickets = tickets;
     const optimistic = tickets.map((t) => {
-      const idx = reordered.findIndex((r) => r.slug === t.slug);
+      const idx = pinned.findIndex((r) => r.slug === t.slug);
       if (idx < 0) return t;
       return { ...t, sortOrder: idx };
     });
     setTickets(optimistic);
-    await persistReorder(stageKey, reordered, previousTickets);
+    await persistReorder(stageKey, pinned, previousTickets);
   }
 
   function onCardDragEnd() {
@@ -417,10 +399,12 @@ export function LiveBoard({
       ) : null}
 
       <div className="board">
-        {stages.map((stage) => {
+        {boardStages.map((stage) => {
           const columnTickets = ticketsByStage[stage.key] ?? [];
           const isReorderColumn =
-            reorderEnabled && stage.key === reorderableStageKey;
+            reorderEnabled &&
+            stage.key === reorderableStageKey &&
+            stage.key !== UNMAPPED_STAGE_KEY;
           return (
             <section
               key={stage.key}
@@ -453,8 +437,10 @@ export function LiveBoard({
                     (lastStageKey == null || stage.key === lastStageKey);
                   const review = reviewBadge(stage, ticket);
                   const isDragging = draggingSlug === ticket.slug;
+                  const cardReorderable =
+                    isReorderColumn && !ticket.orphan && !persisting;
                   const showDropBefore =
-                    isReorderColumn &&
+                    cardReorderable &&
                     dropIndex === index &&
                     draggingSlug != null &&
                     draggingSlug !== ticket.slug;
@@ -465,25 +451,25 @@ export function LiveBoard({
                       ) : null}
                       <Link
                         href={`/projects/${projectSlug}/tickets/${ticket.slug}`}
-                        className={`ticket-card${review ? ` ${review.cardClass}` : ""}${flashSlug === ticket.slug ? " ticket-flash" : ""}${isReorderColumn ? " ticket-reorderable" : ""}${isDragging ? " ticket-dragging" : ""}`}
-                        draggable={isReorderColumn && !persisting}
+                        className={`ticket-card${review ? ` ${review.cardClass}` : ""}${flashSlug === ticket.slug ? " ticket-flash" : ""}${cardReorderable ? " ticket-reorderable" : ""}${ticket.orphan ? " ticket-orphan" : ""}${isDragging ? " ticket-dragging" : ""}`}
+                        draggable={cardReorderable}
                         onDragStart={
-                          isReorderColumn
+                          cardReorderable
                             ? (e) =>
                                 onCardDragStart(e, stage.key, index, ticket.slug)
                             : undefined
                         }
                         onDragOver={
-                          isReorderColumn
+                          isReorderColumn && !ticket.orphan
                             ? (e) => onCardDragOver(e, stage.key, index)
                             : undefined
                         }
                         onDrop={
-                          isReorderColumn
+                          isReorderColumn && !ticket.orphan
                             ? (e) => onCardDrop(e, stage.key, index)
                             : undefined
                         }
-                        onDragEnd={isReorderColumn ? onCardDragEnd : undefined}
+                        onDragEnd={cardReorderable ? onCardDragEnd : undefined}
                         onClick={onCardClick}
                       >
                         {ticket.ticketKey ? (

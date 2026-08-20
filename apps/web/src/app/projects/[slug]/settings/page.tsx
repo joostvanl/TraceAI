@@ -1,8 +1,13 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import type { WorkflowDocument } from "@traceai/core";
+import {
+  editorWorkflowSlugForRequest,
+  relationSlug,
+  type WorkflowDocument,
+} from "@traceai/core";
 import { ProjectMembersPanel } from "@/components/ProjectMembersPanel";
 import { WorkflowEditorPanel } from "@/components/WorkflowEditorPanel";
+import { WorkflowEditorToolbar } from "@/components/WorkflowEditorToolbar";
 import { getProject } from "@/lib/cms";
 import { requireProjectAccess } from "@/lib/project-access";
 import { getSessionIdentity, isLoginConfigured } from "@/lib/session";
@@ -14,16 +19,23 @@ type SettingsTab = "workflow" | "members";
 
 type PageProps = {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; workflow?: string }>;
 };
+
+function firstQuery(value: string | string[] | undefined): string | undefined {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const trimmed = raw?.trim();
+  return trimmed || undefined;
+}
 
 export default async function ProjectSettingsPage({
   params,
   searchParams,
 }: PageProps) {
   const { slug } = await params;
-  const { tab } = await searchParams;
-  const activeTab: SettingsTab = tab === "members" ? "members" : "workflow";
+  const query = await searchParams;
+  const activeTab: SettingsTab = query.tab === "members" ? "members" : "workflow";
+  const requestedWorkflow = firstQuery(query.workflow);
   const configured = await isLoginConfigured();
   if (!configured) redirect("/login");
   const identity = await getSessionIdentity();
@@ -51,6 +63,11 @@ export default async function ProjectSettingsPage({
     project: string;
     workflow_document: WorkflowDocument;
   } | null = null;
+  let editorWorkflows: Array<{ slug: string; name: string }> = [];
+  let selectedWorkflow: string | null = relationSlug(
+    project.fields.default_workflow,
+  );
+  let cloneSources: Array<{ slug: string; name: string; project: string }> = [];
 
   try {
     const client = createTraceServerClient({
@@ -69,9 +86,33 @@ export default async function ProjectSettingsPage({
         display_name: u.display_name,
       }));
     }
-    const workflowSlug = project.fields.default_workflow;
-    if (workflowSlug) {
-      const workflow = (await client.getWorkflow(workflowSlug)) as {
+    const listed = (await client.listWorkflows(slug)) as Array<{
+      slug: string;
+      name: string;
+      project?: string;
+    }>;
+    const defaultWorkflow = relationSlug(project.fields.default_workflow);
+    editorWorkflows = listed.map((workflow) => ({
+      slug: workflow.slug,
+      name: workflow.name || workflow.slug,
+    }));
+    if (
+      defaultWorkflow &&
+      !editorWorkflows.some((workflow) => workflow.slug === defaultWorkflow)
+    ) {
+      editorWorkflows.unshift({
+        slug: defaultWorkflow,
+        name: defaultWorkflow,
+      });
+    }
+    selectedWorkflow = editorWorkflowSlugForRequest({
+      requested: requestedWorkflow,
+      defaultWorkflow,
+      projectWorkflowSlugs: editorWorkflows.map((workflow) => workflow.slug),
+    });
+    if (requestedWorkflow && !selectedWorkflow) notFound();
+    if (selectedWorkflow) {
+      const workflow = (await client.getWorkflow(selectedWorkflow)) as {
         slug: string;
         name: string;
         project: string;
@@ -84,9 +125,31 @@ export default async function ProjectSettingsPage({
         workflow_document: workflow.workflow_document,
       };
     }
+    if (identity.is_platform_admin) {
+      const all = (await client.listWorkflows()) as Array<{
+        slug: string;
+        name: string;
+        project?: string | null;
+      }>;
+      cloneSources = all
+        .filter((workflow) => relationSlug(workflow.project) !== slug)
+        .map((workflow) => ({
+          slug: workflow.slug,
+          name: workflow.name || workflow.slug,
+          project: relationSlug(workflow.project) || "(geen project)",
+        }));
+    }
   } catch (error) {
     loadError = error instanceof Error ? error.message : String(error);
   }
+
+  const membershipRole = members.find(
+    (member) => member.user === identity.slug,
+  )?.role;
+  const canWriteWorkflow =
+    identity.is_platform_admin ||
+    identity.mode === "legacy" ||
+    membershipRole === "admin";
 
   return (
     <div className="panel">
@@ -125,8 +188,23 @@ export default async function ProjectSettingsPage({
             Dubbelklik een stage of pijl om de tekstuele eigenschappen onder het
             canvas te bewerken.
           </p>
+          {selectedWorkflow ? (
+            <WorkflowEditorToolbar
+              projectSlug={slug}
+              workflows={editorWorkflows}
+              selectedSlug={selectedWorkflow}
+              defaultSlug={relationSlug(project.fields.default_workflow)}
+              canWriteWorkflow={canWriteWorkflow}
+              isPlatformAdmin={identity.is_platform_admin === true}
+              cloneSources={cloneSources}
+            />
+          ) : null}
           {workflowPayload ? (
-            <WorkflowEditorPanel projectSlug={slug} initial={workflowPayload} />
+            <WorkflowEditorPanel
+              key={workflowPayload.slug}
+              projectSlug={slug}
+              initial={workflowPayload}
+            />
           ) : (
             <p className="muted">Geen default workflow geconfigureerd.</p>
           )}

@@ -3,7 +3,6 @@ import { TraceApiError } from "@traceai/core";
 import { getSessionIdentity, isLoginConfigured } from "@/lib/session";
 import { createTraceServerClient } from "@/lib/traceai-server";
 import { hasProjectAccess } from "@/lib/project-access";
-import { resolveEditorWorkflowSlug } from "@/lib/editor-workflow";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,7 +11,7 @@ type RouteContext = {
   params: Promise<{ slug: string }>;
 };
 
-export async function GET(request: Request, context: RouteContext) {
+export async function POST(request: Request, context: RouteContext) {
   if (!(await isLoginConfigured())) {
     return NextResponse.json(
       { message: "UI login is not configured", code: "NOT_CONFIGURED" },
@@ -27,19 +26,19 @@ export async function GET(request: Request, context: RouteContext) {
     );
   }
   const { slug } = await context.params;
-  // The workflow document is project data, but `getWorkflow` is not
-  // project-scoped, so membership has to be checked here (TRA-81).
   if (!(await hasProjectAccess(slug, identity))) {
     return NextResponse.json(
       { message: "Project not found", code: "NOT_FOUND" },
       { status: 404 },
     );
   }
-  const workflowSlug = await resolveEditorWorkflowSlug(slug, request);
-  if (!workflowSlug) {
+  let body: { name?: string };
+  try {
+    body = (await request.json()) as typeof body;
+  } catch {
     return NextResponse.json(
-      { message: "Project or workflow not found", code: "NOT_FOUND" },
-      { status: 404 },
+      { message: "Invalid JSON body", code: "VALIDATION" },
+      { status: 400 },
     );
   }
   try {
@@ -47,8 +46,11 @@ export async function GET(request: Request, context: RouteContext) {
       asHumanCapable: true,
       identity,
     });
-    const workflow = await client.getWorkflow(workflowSlug);
-    return NextResponse.json(workflow);
+    const result = await client.createWorkflow({
+      name: body.name ?? "",
+      project: slug,
+    });
+    return NextResponse.json(result, { status: 201 });
   } catch (error) {
     if (error instanceof TraceApiError) {
       return NextResponse.json(

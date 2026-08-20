@@ -25,16 +25,48 @@ describe("assertNonNegativeIntegerSortOrder", () => {
 
 describe("planTicketReorder", () => {
   const tickets = [
-    { slug: "a", project: "traceai", stage: "backlog", sort_order: 0 },
-    { slug: "b", project: "traceai", stage: "backlog", sort_order: 1 },
-    { slug: "c", project: "traceai", stage: "backlog", sort_order: 2 },
-    { slug: "d", project: "traceai", stage: "todo", sort_order: 0 },
+    {
+      slug: "a",
+      project: "traceai",
+      stage: "backlog",
+      workflow: "wf-a",
+      sort_order: 0,
+    },
+    {
+      slug: "b",
+      project: "traceai",
+      stage: "backlog",
+      workflow: "wf-a",
+      sort_order: 1,
+    },
+    {
+      slug: "c",
+      project: "traceai",
+      stage: "backlog",
+      workflow: "wf-a",
+      sort_order: 2,
+    },
+    {
+      slug: "d",
+      project: "traceai",
+      stage: "todo",
+      workflow: "wf-a",
+      sort_order: 0,
+    },
+    {
+      slug: "other",
+      project: "traceai",
+      stage: "backlog",
+      workflow: "wf-b",
+      sort_order: 0,
+    },
   ];
 
   it("assigns sort_order by index and returns only changed tickets", () => {
     const updates = planTicketReorder({
       project: "traceai",
       stage: "backlog",
+      workflow: "wf-a",
       ordered_slugs: ["c", "a", "b"],
       tickets,
     });
@@ -49,6 +81,7 @@ describe("planTicketReorder", () => {
     const updates = planTicketReorder({
       project: "traceai",
       stage: "backlog",
+      workflow: "wf-a",
       ordered_slugs: ["a", "b", "c"],
       tickets,
     });
@@ -61,6 +94,7 @@ describe("planTicketReorder", () => {
         planTicketReorder({
           project: "traceai",
           stage: "backlog",
+          workflow: "wf-a",
           ordered_slugs: ["a", "b", "d"],
           tickets,
         }),
@@ -74,6 +108,7 @@ describe("planTicketReorder", () => {
         planTicketReorder({
           project: "traceai",
           stage: "backlog",
+          workflow: "wf-a",
           ordered_slugs: ["a", "b"],
           tickets,
         }),
@@ -87,10 +122,50 @@ describe("planTicketReorder", () => {
         planTicketReorder({
           project: "traceai",
           stage: "backlog",
+          workflow: "wf-a",
           ordered_slugs: ["a", "a", "b"],
           tickets,
         }),
       /duplicates/,
+    );
+  });
+
+  it("rejects a slug from another workflow with the same stage key", () => {
+    assert.throws(
+      () =>
+        planTicketReorder({
+          project: "traceai",
+          stage: "backlog",
+          workflow: "wf-a",
+          ordered_slugs: ["a", "b", "c", "other"],
+          tickets,
+        }),
+      /not in project/,
+    );
+  });
+
+  it("does not require tickets from another workflow in ordered_slugs", () => {
+    const updates = planTicketReorder({
+      project: "traceai",
+      stage: "backlog",
+      workflow: "wf-a",
+      ordered_slugs: ["a", "b", "c"],
+      tickets,
+    });
+    assert.deepEqual(updates, []);
+  });
+
+  it("rejects a missing workflow", () => {
+    assert.throws(
+      () =>
+        planTicketReorder({
+          project: "traceai",
+          stage: "backlog",
+          workflow: "",
+          ordered_slugs: ["a", "b", "c"],
+          tickets,
+        }),
+      /workflow is required/,
     );
   });
 });

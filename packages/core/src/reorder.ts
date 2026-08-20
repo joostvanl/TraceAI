@@ -11,6 +11,7 @@ export type ReorderableTicket = {
   slug: string;
   project: string;
   stage: string;
+  workflow: string;
   sort_order?: number | null;
 };
 
@@ -26,10 +27,14 @@ export type SortOrderUpdate = {
 export function planTicketReorder(input: {
   project: string;
   stage: string;
+  workflow: string;
   ordered_slugs: string[];
   tickets: ReorderableTicket[];
 }): SortOrderUpdate[] {
-  const { project, stage, ordered_slugs } = input;
+  const { project, stage, workflow, ordered_slugs } = input;
+  if (!workflow) {
+    throw new ValidationError("workflow is required");
+  }
   if (!Array.isArray(ordered_slugs) || ordered_slugs.length === 0) {
     throw new ValidationError("ordered_slugs must be a non-empty array");
   }
@@ -38,7 +43,8 @@ export function planTicketReorder(input: {
   }
 
   const inStage = input.tickets.filter(
-    (t) => t.project === project && t.stage === stage,
+    (t) =>
+      t.project === project && t.stage === stage && t.workflow === workflow,
   );
   const bySlug = new Map(inStage.map((t) => [t.slug, t]));
 

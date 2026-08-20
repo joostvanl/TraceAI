@@ -906,6 +906,55 @@ export function createApp(deps: {
     );
   });
 
+  app.patch("/v1/projects/:slug", requireScope("projects:write"), async (c) => {
+    let body: Record<string, unknown>;
+    try {
+      body = (await c.req.json()) as Record<string, unknown>;
+    } catch {
+      return c.json({ message: "Invalid JSON body", code: "VALIDATION" }, 400);
+    }
+    const keys = Object.keys(body);
+    if (keys.length !== 1 || keys[0] !== "default_workflow") {
+      return c.json(
+        {
+          message: "Only default_workflow may be updated",
+          code: "VALIDATION",
+        },
+        400,
+      );
+    }
+    if (
+      typeof body.default_workflow !== "string" ||
+      !body.default_workflow.trim()
+    ) {
+      return c.json(
+        { message: "default_workflow is required", code: "VALIDATION" },
+        400,
+      );
+    }
+    const project = param(c, "slug");
+    const denied = await enforceProjectRole(
+      deps.service,
+      await principalFor(c, deps.service),
+      project,
+      requiredRoleForAction("write_workflow"),
+    );
+    if (denied) {
+      return c.json({ message: denied, code: "FORBIDDEN" }, 403);
+    }
+    const updated = await deps.service.setProjectDefaultWorkflow(
+      project,
+      body.default_workflow.trim(),
+    );
+    audit(c, {
+      action: "project.update_default_workflow",
+      resourceType: "project",
+      resourceId: project,
+      meta: { default_workflow: updated.fields.default_workflow },
+    });
+    return c.json(mapProject(updated));
+  });
+
   app.get(
     "/v1/projects/:slug/search",
     requireScope("tickets:read"),
@@ -1007,6 +1056,7 @@ export function createApp(deps: {
     const hidden = await denyUnlessProjectVisible(c, project);
     if (hidden) return hidden;
     const stage = c.req.query("stage") ?? undefined;
+    const workflow = c.req.query("workflow") || undefined;
     const parentRaw = c.req.query("parent");
     const parent =
       parentRaw === undefined
@@ -1015,7 +1065,7 @@ export function createApp(deps: {
           ? null
           : parentRaw;
     // Load the full project set so roll-ups include descendants even when
-    // the response is filtered by stage/parent.
+    // the response is filtered by stage/parent/workflow.
     const projectTickets = await deps.service.listTickets({ project });
     const tickets = projectTickets
       .filter((t) => (stage ? t.fields.stage === stage : true))
@@ -1024,7 +1074,8 @@ export function createApp(deps: {
         const value = t.fields.parent || null;
         if (parent === null) return value == null || value === "";
         return value === parent;
-      });
+      })
+      .filter((t) => (workflow ? t.fields.workflow === workflow : true));
     return c.json(
       tickets.map((t) => {
         const rollup = computeTokenRollup(projectTickets, t.slug);
@@ -1179,15 +1230,17 @@ export function createApp(deps: {
     const body = await c.req.json<{
       project?: string;
       stage?: string;
+      workflow?: string;
       ordered_slugs?: string[];
     }>();
     const project = body.project?.trim() ?? "";
     const stage = body.stage?.trim() ?? "";
+    const workflow = body.workflow?.trim() ?? "";
     const ordered_slugs = body.ordered_slugs;
-    if (!project || !stage || !Array.isArray(ordered_slugs)) {
+    if (!project || !stage || !workflow || !Array.isArray(ordered_slugs)) {
       return c.json(
         {
-          message: "project, stage, and ordered_slugs are required",
+          message: "project, stage, workflow, and ordered_slugs are required",
           code: "VALIDATION",
         },
         400,
@@ -1208,6 +1261,7 @@ export function createApp(deps: {
       const changed = await deps.service.reorderTickets({
         project,
         stage,
+        workflow,
         ordered_slugs,
       });
       const mapped = changed.map((t) => {
@@ -1219,7 +1273,7 @@ export function createApp(deps: {
         action: "ticket.reorder",
         resourceType: "project",
         resourceId: project,
-        meta: { stage, count: mapped.length },
+        meta: { stage, workflow, count: mapped.length },
       });
       return c.json({ tickets: mapped });
     } catch (error) {
@@ -1738,6 +1792,46 @@ export function createApp(deps: {
     });
     return c.json(mapWorkflow(workflow), 201);
   });
+
+  app.post(
+    "/v1/projects/:slug/workflows/clone",
+    requireScope("workflows:write"),
+    async (c) => {
+      const principal = await principalFor(c, deps.service);
+      if (!principal.isPlatformAdmin) {
+        return c.json(
+          { message: "Platform admin required", code: "FORBIDDEN" },
+          403,
+        );
+      }
+      let body: { source?: string };
+      try {
+        body = (await c.req.json()) as { source?: string };
+      } catch {
+        return c.json(
+          { message: "Invalid JSON body", code: "VALIDATION" },
+          400,
+        );
+      }
+      if (!body?.source?.trim()) {
+        return c.json(
+          { message: "source is required", code: "VALIDATION" },
+          400,
+        );
+      }
+      const workflow = await deps.service.cloneWorkflow({
+        source: body.source.trim(),
+        project: param(c, "slug"),
+      });
+      audit(c, {
+        action: "workflow.clone",
+        resourceType: "workflow",
+        resourceId: workflow.slug,
+        meta: { source: body.source.trim(), project: param(c, "slug") },
+      });
+      return c.json(mapWorkflow(workflow), 201);
+    },
+  );
 
   app.patch(
     "/v1/workflows/:slug",

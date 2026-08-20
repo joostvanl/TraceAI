@@ -78,6 +78,7 @@ describe("POST /v1/tickets/reorder", () => {
         body: JSON.stringify({
           project: "traceai",
           stage: "backlog",
+          workflow: "wf",
           ordered_slugs: ["a"],
         }),
       });
@@ -120,6 +121,7 @@ describe("POST /v1/tickets/reorder", () => {
         body: JSON.stringify({
           project: "traceai",
           stage: "backlog",
+          workflow: "wf",
           ordered_slugs: ["a", "b"],
         }),
       });
@@ -127,6 +129,7 @@ describe("POST /v1/tickets/reorder", () => {
       assert.deepEqual(called, {
         project: "traceai",
         stage: "backlog",
+        workflow: "wf",
         ordered_slugs: ["a", "b"],
       });
       const body = (await res.json()) as {
@@ -135,6 +138,47 @@ describe("POST /v1/tickets/reorder", () => {
       assert.equal(body.tickets.length, 1);
       assert.equal(body.tickets[0]?.slug, "a");
       assert.equal(body.tickets[0]?.sort_order, 0);
+    } finally {
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns 400 when workflow is missing", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "traceai-reorder-"));
+    const store = new AuthStore(join(dir, "auth.sqlite"));
+    try {
+      const user = store.createUser({ email: "w@example.com", name: "W" });
+      const token = store.createToken({
+        userId: user.id,
+        name: "write",
+        scopes: ["tickets:write"],
+      });
+      const service = {
+        ...projectMemberStubs({ email: "w@example.com", projects: ["traceai"] }),
+        reorderTickets: async () => {
+          throw new Error("should not be called");
+        },
+      };
+      const app = createApp({
+        authStore: store,
+        service: service as never,
+      });
+      const res = await app.request("/v1/tickets/reorder", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token.token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          project: "traceai",
+          stage: "backlog",
+          ordered_slugs: ["a", "b"],
+        }),
+      });
+      assert.equal(res.status, 400);
+      const body = (await res.json()) as { code?: string };
+      assert.equal(body.code, "VALIDATION");
     } finally {
       store.close();
       rmSync(dir, { recursive: true, force: true });

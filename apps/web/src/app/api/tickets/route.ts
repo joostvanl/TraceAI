@@ -11,6 +11,7 @@ type CreateBody = {
   title?: string;
   description?: string;
   priority?: string;
+  workflow?: string;
 };
 
 export async function POST(request: Request) {
@@ -47,6 +48,7 @@ export async function POST(request: Request) {
   const title = body.title?.trim() ?? "";
   const description = body.description?.trim() ?? "";
   const priority = body.priority?.trim() || "medium";
+  const workflow = body.workflow?.trim() || "";
 
   if (!project || !title || !description) {
     return NextResponse.json(
@@ -75,7 +77,7 @@ export async function POST(request: Request) {
       title,
       description,
       priority,
-      stage: "backlog",
+      ...(workflow ? { workflow } : {}),
     })) as {
       slug: string;
       ticket_key?: string | null;

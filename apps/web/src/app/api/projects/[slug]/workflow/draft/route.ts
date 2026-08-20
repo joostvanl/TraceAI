@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { TraceApiError } from "@traceai/core";
 import { getSessionIdentity, isLoginConfigured } from "@/lib/session";
 import { createTraceServerClient } from "@/lib/traceai-server";
-import { getProject } from "@/lib/cms";
 import { hasProjectAccess } from "@/lib/project-access";
+import { resolveEditorWorkflowSlug } from "@/lib/editor-workflow";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,11 +35,10 @@ export async function POST(request: Request, context: RouteContext) {
       { status: 404 },
     );
   }
-  const project = await getProject(slug);
-  const workflowSlug = project?.fields.default_workflow;
+  const workflowSlug = await resolveEditorWorkflowSlug(slug, request);
   if (!workflowSlug) {
     return NextResponse.json(
-      { message: "Project or default workflow not found", code: "NOT_FOUND" },
+      { message: "Project or workflow not found", code: "NOT_FOUND" },
       { status: 404 },
     );
   }

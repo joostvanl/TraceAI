@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 import { TraceApiError } from "@traceai/core";
 import { getSessionIdentity, isLoginConfigured } from "@/lib/session";
 import { createTraceServerClient } from "@/lib/traceai-server";
-import { getProject } from "@/lib/cms";
 // The workflow endpoints are not project-scoped in the API, so membership is
 // enforced here (TRA-81).
 import { hasProjectAccess } from "@/lib/project-access";
+import { resolveEditorWorkflowSlug } from "@/lib/editor-workflow";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,12 +14,7 @@ type RouteContext = {
   params: Promise<{ slug: string }>;
 };
 
-async function workflowSlugFor(projectSlug: string) {
-  const project = await getProject(projectSlug);
-  return project?.fields.default_workflow ?? null;
-}
-
-export async function GET(_request: Request, context: RouteContext) {
+export async function GET(request: Request, context: RouteContext) {
   if (!(await isLoginConfigured())) {
     return NextResponse.json(
       { message: "UI login is not configured", code: "NOT_CONFIGURED" },
@@ -40,10 +35,10 @@ export async function GET(_request: Request, context: RouteContext) {
       { status: 404 },
     );
   }
-  const workflowSlug = await workflowSlugFor(slug);
+  const workflowSlug = await resolveEditorWorkflowSlug(slug, request);
   if (!workflowSlug) {
     return NextResponse.json(
-      { message: "Project or default workflow not found", code: "NOT_FOUND" },
+      { message: "Project or workflow not found", code: "NOT_FOUND" },
       { status: 404 },
     );
   }
@@ -89,10 +84,10 @@ export async function POST(request: Request, context: RouteContext) {
       { status: 404 },
     );
   }
-  const workflowSlug = await workflowSlugFor(slug);
+  const workflowSlug = await resolveEditorWorkflowSlug(slug, request);
   if (!workflowSlug) {
     return NextResponse.json(
-      { message: "Project or default workflow not found", code: "NOT_FOUND" },
+      { message: "Project or workflow not found", code: "NOT_FOUND" },
       { status: 404 },
     );
   }

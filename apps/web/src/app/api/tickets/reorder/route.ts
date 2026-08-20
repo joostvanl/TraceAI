@@ -9,6 +9,7 @@ export const dynamic = "force-dynamic";
 type ReorderBody = {
   project?: string;
   stage?: string;
+  workflow?: string;
   ordered_slugs?: string[];
 };
 
@@ -44,12 +45,13 @@ export async function POST(request: Request) {
 
   const project = body.project?.trim() ?? "";
   const stage = body.stage?.trim() ?? "";
+  const workflow = body.workflow?.trim() ?? "";
   const ordered_slugs = body.ordered_slugs;
 
-  if (!project || !stage || !Array.isArray(ordered_slugs)) {
+  if (!project || !stage || !workflow || !Array.isArray(ordered_slugs)) {
     return NextResponse.json(
       {
-        message: "project, stage, and ordered_slugs are required",
+        message: "project, stage, workflow, and ordered_slugs are required",
         code: "VALIDATION",
       },
       { status: 400 },
@@ -64,6 +66,7 @@ export async function POST(request: Request) {
     const result = await client.reorderTickets({
       project,
       stage,
+      workflow,
       ordered_slugs,
     });
     return NextResponse.json(result);

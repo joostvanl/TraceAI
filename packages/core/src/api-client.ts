@@ -140,12 +140,14 @@ export class TraceApiClient {
     project: string,
     stage?: string,
     parent?: string | null,
+    workflow?: string,
   ) {
     const params = new URLSearchParams({ project });
     if (stage) params.set("stage", stage);
     if (parent !== undefined) {
       params.set("parent", parent === null ? "" : parent);
     }
+    if (workflow) params.set("workflow", workflow);
     return this.request<unknown[]>(`/v1/tickets?${params}`);
   }
 
@@ -217,6 +219,7 @@ export class TraceApiClient {
   reorderTickets(body: {
     project: string;
     stage: string;
+    workflow: string;
     ordered_slugs: string[];
   }) {
     return this.request<unknown>(
@@ -306,10 +309,36 @@ export class TraceApiClient {
   }
 
   createWorkflow(body: Record<string, unknown>) {
-    return this.request<unknown>("/v1/workflows", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    return this.request<unknown>(
+      "/v1/workflows",
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+      { asHuman: Boolean(this.humanIdentityHeader) },
+    );
+  }
+
+  patchProject(slug: string, body: { default_workflow: string }) {
+    return this.request<unknown>(
+      `/v1/projects/${encodeURIComponent(slug)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      },
+      { asHuman: Boolean(this.humanIdentityHeader) },
+    );
+  }
+
+  cloneWorkflow(project: string, body: { source: string }) {
+    return this.request<unknown>(
+      `/v1/projects/${encodeURIComponent(project)}/workflows/clone`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+      { asHuman: Boolean(this.humanIdentityHeader) },
+    );
   }
 
   updateWorkflow(slug: string, body: Record<string, unknown>) {

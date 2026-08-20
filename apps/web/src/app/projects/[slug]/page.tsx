@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { UNMAPPED_STAGE_KEY, relationSlug } from "@traceai/core";
 import { CreateTicketForm } from "@/components/CreateTicketForm";
 import { LiveBoard } from "@/components/LiveBoard";
+import { WorkflowSwitcher } from "@/components/WorkflowSwitcher";
 import { getProjectBoard, listBoardTicketsViaTraceAI } from "@/lib/cms";
 import { requireProjectAccess } from "@/lib/project-access";
 import { getSessionUser } from "@/lib/session";
@@ -10,41 +12,114 @@ export const dynamic = "force-dynamic";
 
 type Props = {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ workflow?: string | string[] }>;
 };
 
-export default async function ProjectPage({ params }: Props) {
+function firstQuery(value: string | string[] | undefined): string | undefined {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const trimmed = raw?.trim();
+  return trimmed || undefined;
+}
+
+export default async function ProjectPage({ params, searchParams }: Props) {
   const { slug } = await params;
+  const requestedWorkflow = firstQuery((await searchParams).workflow);
   await requireProjectAccess(slug);
-  const board = await getProjectBoard(slug);
+  const board = await getProjectBoard(slug, requestedWorkflow);
   if (!board) notFound();
   const sessionUser = await getSessionUser();
 
-  const { project, stages, ticketsByStage } = board;
+  const {
+    project,
+    stages,
+    ticketsByStage,
+    selectedWorkflow,
+    defaultWorkflow,
+    projectWorkflows,
+  } = board;
+  if (!selectedWorkflow) {
+    return (
+      <>
+        <nav className="breadcrumb">
+          <Link href="/">Projects</Link>
+          <span>/</span>
+          <span>{project.fields.name}</span>
+        </nav>
+        <h1>{project.fields.name}</h1>
+        <div className="empty">No workflow stages configured for this project.</div>
+      </>
+    );
+  }
+
   const lastStageKey = stages[stages.length - 1]?.key;
-  // Prefer the TraceAI API (single source of truth, matches the SSE stream)
-  // for the live board's initial tickets; fall back to the Aurora-derived
-  // board when TraceAI isn't configured on the web server.
+  const liveStageKeys = stages.map((s) => s.key);
+  const ownedSlugs = projectWorkflows.map((w) => w.slug);
+  const switcherWorkflows = [...projectWorkflows]
+    .sort((a, b) => a.fields.name.localeCompare(b.fields.name));
+  if (
+    defaultWorkflow &&
+    !switcherWorkflows.some((w) => w.slug === defaultWorkflow) &&
+    board.workflow?.slug === defaultWorkflow
+  ) {
+    switcherWorkflows.unshift(board.workflow);
+  } else if (defaultWorkflow) {
+    switcherWorkflows.sort((a, b) => {
+      if (a.slug === defaultWorkflow) return -1;
+      if (b.slug === defaultWorkflow) return 1;
+      return a.fields.name.localeCompare(b.fields.name);
+    });
+  }
+
+  const hasOverflow = Object.keys(ticketsByStage).some(
+    (key) =>
+      key === UNMAPPED_STAGE_KEY || !liveStageKeys.includes(key),
+  );
+  const boardStages = [
+    ...stages.map((s) => ({
+      key: s.key,
+      name: s.name,
+      requiresHumanApproval: s.agent?.require_human_approval_on_exit === true,
+    })),
+    ...(hasOverflow
+      ? [{ key: UNMAPPED_STAGE_KEY, name: "Onbekende stage" }]
+      : []),
+  ];
+
   const initialTickets =
-    (await listBoardTicketsViaTraceAI(slug)) ??
+    (await listBoardTicketsViaTraceAI(slug, {
+      selectedWorkflow,
+      defaultWorkflow,
+      projectWorkflowSlugs: ownedSlugs,
+    })) ??
     Object.values(ticketsByStage)
       .flat()
-      .map((ticket) => ({
-        slug: ticket.slug,
-        ticketKey: ticket.fields.ticket_key ?? null,
-        title: ticket.fields.title,
-        stage: ticket.fields.stage,
-        priority: ticket.fields.priority ?? "medium",
-        stageChangedAt: ticket.fields.stage_entered_at ?? ticket.updatedAt,
-        tokensEstimate: ticket.fields.tokens_estimate ?? null,
-        tokensActual: ticket.fields.tokens_actual ?? null,
-        resolution: ticket.fields.resolution ?? null,
-        reviewState: ticket.fields.review_state || null,
-        sortOrder: ticket.fields.sort_order ?? null,
-      }));
+      .map((ticket) => {
+        const workflow = relationSlug(ticket.fields.workflow) ?? "";
+        return {
+          slug: ticket.slug,
+          ticketKey: ticket.fields.ticket_key ?? null,
+          title: ticket.fields.title,
+          stage: ticket.fields.stage,
+          priority: ticket.fields.priority ?? "medium",
+          stageChangedAt: ticket.fields.stage_entered_at ?? ticket.updatedAt,
+          tokensEstimate: ticket.fields.tokens_estimate ?? null,
+          tokensActual: ticket.fields.tokens_actual ?? null,
+          resolution: ticket.fields.resolution ?? null,
+          reviewState: ticket.fields.review_state || null,
+          sortOrder: ticket.fields.sort_order ?? null,
+          workflow,
+          orphan: workflow !== selectedWorkflow,
+        };
+      });
 
   const eventsUrl =
     process.env.NEXT_PUBLIC_TRACEAI_EVENTS_URL ??
     "https://traceai.joostvanleeuwaarden.com/events";
+
+  const boardHref =
+    defaultWorkflow && selectedWorkflow === defaultWorkflow
+      ? `/projects/${slug}`
+      : `/projects/${slug}?workflow=${encodeURIComponent(selectedWorkflow)}`;
 
   return (
     <>
@@ -70,6 +145,15 @@ export default async function ProjectPage({ params }: Props) {
         </div>
       </div>
       <p className="lede">{project.fields.description || "No description."}</p>
+      <WorkflowSwitcher
+        projectSlug={slug}
+        workflows={switcherWorkflows.map((w) => ({
+          slug: w.slug,
+          name: w.fields.name,
+        }))}
+        selectedWorkflow={selectedWorkflow}
+        defaultWorkflow={defaultWorkflow}
+      />
 
       {stages.length === 0 ? (
         <div className="empty">No workflow stages configured for this project.</div>
@@ -77,16 +161,16 @@ export default async function ProjectPage({ params }: Props) {
         <>
           <CreateTicketForm
             projectSlug={slug}
+            workflow={selectedWorkflow}
+            boardHref={boardHref}
             authenticated={Boolean(sessionUser)}
           />
           <LiveBoard
             projectSlug={slug}
-            stages={stages.map((s) => ({
-              key: s.key,
-              name: s.name,
-              requiresHumanApproval:
-                s.agent?.require_human_approval_on_exit === true,
-            }))}
+            selectedWorkflow={selectedWorkflow}
+            defaultWorkflow={defaultWorkflow}
+            projectWorkflowSlugs={ownedSlugs}
+            stages={boardStages}
             lastStageKey={lastStageKey}
             initialTickets={initialTickets}
             eventsUrl={eventsUrl}

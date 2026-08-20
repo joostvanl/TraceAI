@@ -478,7 +478,7 @@ function WorkflowEditorPanelInner({
     setIssues([]);
     try {
       const res = await fetch(
-        `/api/projects/${encodeURIComponent(projectSlug)}/workflow/draft`,
+        `/api/projects/${encodeURIComponent(projectSlug)}/workflow/draft?workflow=${encodeURIComponent(initial.slug)}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -508,7 +508,7 @@ function WorkflowEditorPanelInner({
     setError(null);
     try {
       const res = await fetch(
-        `/api/projects/${encodeURIComponent(projectSlug)}/workflow/activate`,
+        `/api/projects/${encodeURIComponent(projectSlug)}/workflow/activate?workflow=${encodeURIComponent(initial.slug)}`,
       );
       const body = (await res.json().catch(() => ({}))) as ActivationPreview & {
         message?: string;
@@ -538,7 +538,7 @@ function WorkflowEditorPanelInner({
     try {
       // Persist current canvas as draft first so activate sees latest pending.
       const draftRes = await fetch(
-        `/api/projects/${encodeURIComponent(projectSlug)}/workflow/draft`,
+        `/api/projects/${encodeURIComponent(projectSlug)}/workflow/draft?workflow=${encodeURIComponent(initial.slug)}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -555,7 +555,7 @@ function WorkflowEditorPanelInner({
         return;
       }
       const res = await fetch(
-        `/api/projects/${encodeURIComponent(projectSlug)}/workflow/activate`,
+        `/api/projects/${encodeURIComponent(projectSlug)}/workflow/activate?workflow=${encodeURIComponent(initial.slug)}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -584,7 +584,7 @@ function WorkflowEditorPanelInner({
   async function loadVersions() {
     try {
       const res = await fetch(
-        `/api/projects/${encodeURIComponent(projectSlug)}/workflow/versions`,
+        `/api/projects/${encodeURIComponent(projectSlug)}/workflow/versions?workflow=${encodeURIComponent(initial.slug)}`,
       );
       if (!res.ok) return;
       const body = (await res.json()) as VersionRow[];

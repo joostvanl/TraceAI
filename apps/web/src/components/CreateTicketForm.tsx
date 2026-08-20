@@ -6,12 +6,19 @@ import { useRouter } from "next/navigation";
 
 type Props = {
   projectSlug: string;
+  workflow: string;
+  boardHref: string;
   authenticated: boolean;
 };
 
 type Priority = "low" | "medium" | "high";
 
-export function CreateTicketForm({ projectSlug, authenticated }: Props) {
+export function CreateTicketForm({
+  projectSlug,
+  workflow,
+  boardHref,
+  authenticated,
+}: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
@@ -21,7 +28,7 @@ export function CreateTicketForm({ projectSlug, authenticated }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const loginHref = `/login?next=${encodeURIComponent(`/projects/${projectSlug}`)}`;
+  const loginHref = `/login?next=${encodeURIComponent(boardHref)}`;
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -37,6 +44,7 @@ export function CreateTicketForm({ projectSlug, authenticated }: Props) {
           title,
           description,
           priority,
+          workflow,
         }),
       });
       const body = (await res.json().catch(() => ({}))) as {

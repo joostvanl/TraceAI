@@ -20,6 +20,7 @@ export * from "./relations.js";
 export * from "./review-inbox.js";
 export * from "./workflow-editor.js";
 export * from "./reorder.js";
+export * from "./board-workflow.js";
 export * from "./wiki-slugs.js";
 export * from "./wiki-pages.js";
 export * from "./standard-worker-workflow.js";

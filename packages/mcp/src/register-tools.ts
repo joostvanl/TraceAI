@@ -154,7 +154,7 @@ export function registerTraceAiTools(
 
   server.tool(
     "list_tickets",
-    "List tickets for a project. Optional stage and parent filters. Each row includes tokens_estimate_rollup (own + descendants).",
+    "List tickets for a project. Optional stage, parent, and workflow filters. workflow is an exact pin match; omit it to return every ticket in the project. Each row includes tokens_estimate_rollup (own + descendants).",
     {
       project: z.string().describe("Project slug"),
       stage: z.string().optional().describe("Stage key filter"),
@@ -165,10 +165,17 @@ export function registerTraceAiTools(
         .describe(
           "Parent ticket slug filter; null/empty for root tickets only",
         ),
+      workflow: z
+        .string()
+        .optional()
+        .describe("Exact workflow-slug pin; omit for the full project set"),
     },
-    async ({ project, stage, parent }) => {
+    async ({ project, stage, parent, workflow }) => {
       try {
-        return ok(await client.listTickets(project, stage, parent), apiBase);
+        return ok(
+          await client.listTickets(project, stage, parent, workflow),
+          apiBase,
+        );
       } catch (error) {
         return fail(error);
       }

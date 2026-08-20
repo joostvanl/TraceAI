@@ -2,6 +2,7 @@ export type BoardOrderTicket = {
   slug: string;
   stage: string;
   sortOrder?: number | null;
+  orphan?: boolean;
 };
 
 export type BoardOrderStage = {
@@ -43,6 +44,9 @@ export function groupByStage<T extends BoardOrderTicket>(
   }
   if (reorderableStageKey && map[reorderableStageKey]) {
     map[reorderableStageKey] = [...map[reorderableStageKey]].sort((a, b) => {
+      const aOrphan = Boolean(a.orphan);
+      const bOrphan = Boolean(b.orphan);
+      if (aOrphan !== bOrphan) return aOrphan ? 1 : -1;
       const ao = a.sortOrder ?? Number.MAX_SAFE_INTEGER;
       const bo = b.sortOrder ?? Number.MAX_SAFE_INTEGER;
       if (ao !== bo) return ao - bo;

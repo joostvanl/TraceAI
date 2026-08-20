@@ -14,6 +14,7 @@ import {
   assertNoErrors,
 } from "./trace-errors.js";
 import { listAllEntries as listAllEntriesShared } from "./list-all-entries.js";
+import { isProjectWorkflow } from "./board-workflow.js";
 import {
   assertNonNegativeIntegerSortOrder,
   planTicketReorder,
@@ -548,6 +549,56 @@ export class TraceService {
     return workflow;
   }
 
+  async setProjectDefaultWorkflow(
+    projectSlug: string,
+    workflowSlug: string,
+  ): Promise<Project> {
+    await this.ensureReady();
+    const result = await this.getProject(projectSlug);
+    if (!result) throw new NotFoundError(`Project not found: ${projectSlug}`);
+    const owned = await this.listWorkflows(projectSlug);
+    const currentDefault = relationSlug(result.project.fields.default_workflow);
+    if (
+      !isProjectWorkflow(
+        workflowSlug,
+        currentDefault,
+        owned.map((workflow) => workflow.slug),
+      )
+    ) {
+      throw new ValidationError(
+        `Workflow "${workflowSlug}" is not a workflow of project ${projectSlug}`,
+      );
+    }
+    return this.client.updateEntry<Project>("project", result.project.id, {
+      fields: { default_workflow: workflowSlug },
+    });
+  }
+
+  async cloneWorkflow(input: {
+    source: string;
+    project: string;
+  }): Promise<Workflow> {
+    await this.ensureReady();
+    const dest = await this.getProject(input.project);
+    if (!dest) throw new NotFoundError(`Project not found: ${input.project}`);
+    const source = await this.getWorkflow(input.source);
+    if (!source) throw new NotFoundError(`Workflow not found: ${input.source}`);
+    const document = JSON.parse(
+      JSON.stringify(source.workflow_document),
+    ) as WorkflowDocument;
+    const destList = await this.listWorkflows(input.project);
+    const sourceName = source.workflow.fields.name;
+    const nameTaken = destList.some(
+      (workflow) => workflow.fields.name === sourceName,
+    );
+    return this.createWorkflow({
+      name: nameTaken ? `${sourceName} (kopie)` : sourceName,
+      project: input.project,
+      document,
+      slug: `${input.project}-${source.workflow.slug}`,
+    });
+  }
+
   async updateWorkflow(
     slug: string,
     input: {
@@ -868,6 +919,8 @@ export class TraceService {
     project: string;
     stage?: string;
     parent?: string | null;
+    /** Exact pin match; omit to return the full project set. */
+    workflow?: string;
   }): Promise<Ticket[]> {
     await this.ensureReady();
     // Fall back on the *project* filter only. Deciding it after the stage and
@@ -901,6 +954,9 @@ export class TraceService {
         }
         return parent === input.parent;
       })
+      .filter((t) =>
+        input.workflow ? t.fields.workflow === input.workflow : true,
+      )
       .sort((a, b) => (a.fields.sort_order ?? 0) - (b.fields.sort_order ?? 0));
   }
 
@@ -1259,22 +1315,44 @@ export class TraceService {
     const projectCtx = await this.getProject(input.project);
     if (!projectCtx) throw new NotFoundError(`Project not found: ${input.project}`);
 
-    const workflowSlug =
-      input.workflow ??
-      projectCtx.project.fields.default_workflow ??
-      projectCtx.workflow?.slug;
+    const defaultWorkflow =
+      relationSlug(projectCtx.project.fields.default_workflow) ??
+      projectCtx.workflow?.slug ??
+      null;
+    const projectWorkflows = await this.listWorkflows(input.project);
+    const workflowSlug = input.workflow ?? defaultWorkflow;
     if (!workflowSlug) {
       throw new ValidationError(`No workflow configured for project ${input.project}`);
+    }
+    if (
+      !isProjectWorkflow(
+        workflowSlug,
+        defaultWorkflow,
+        projectWorkflows.map((w) => w.slug),
+      )
+    ) {
+      throw new ValidationError(
+        `Workflow "${workflowSlug}" is not a workflow of project ${input.project}`,
+      );
     }
 
     const workflow =
       projectCtx.workflow?.slug === workflowSlug
         ? projectCtx.workflow
         : (await this.getWorkflow(workflowSlug))?.workflow;
-    if (!workflow) throw new NotFoundError(`Workflow not found: ${workflowSlug}`);
+    if (!workflow) {
+      throw new ValidationError(
+        `Workflow "${workflowSlug}" is not a workflow of project ${input.project}`,
+      );
+    }
 
     const doc = parseWorkflowDocument(workflow.fields.stages_json);
     const stages = doc.stages;
+    if (input.stage && !stages.some((s) => s.key === input.stage)) {
+      throw new ValidationError(
+        `Stage "${input.stage}" is not in workflow ${workflowSlug}`,
+      );
+    }
     const stage = input.stage ?? firstStageKey(stages);
     if (!stage) throw new ValidationError("Workflow has no stages");
 
@@ -1457,6 +1535,7 @@ export class TraceService {
   async reorderTickets(input: {
     project: string;
     stage: string;
+    workflow: string;
     ordered_slugs: string[];
   }): Promise<Ticket[]> {
     await this.ensureReady();
@@ -1464,11 +1543,13 @@ export class TraceService {
     const updates = planTicketReorder({
       project: input.project,
       stage: input.stage,
+      workflow: input.workflow,
       ordered_slugs: input.ordered_slugs,
       tickets: projectTickets.map((t) => ({
         slug: t.slug,
         project: t.fields.project,
         stage: t.fields.stage,
+        workflow: t.fields.workflow,
         sort_order: t.fields.sort_order,
       })),
     });

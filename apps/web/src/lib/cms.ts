@@ -11,8 +11,10 @@ import {
   parseStages,
   isTicketKeyPattern,
   relationSlug,
+  remapStageForBoard,
   searchProjectContent,
   sortTicketsNewestFirst,
+  ticketBelongsOnBoard,
   wikiLogicalSlug,
   type Comment,
   type EntriesReader,
@@ -290,7 +292,48 @@ export type BoardTicketSnapshot = {
   resolution: string | null;
   reviewState: string | null;
   sortOrder: number | null;
+  workflow: string;
+  orphan: boolean;
 };
+
+function ticketOrphan(pin: string, selectedWorkflow: string): boolean {
+  return pin !== selectedWorkflow;
+}
+
+function snapshotFromRow(
+  t: {
+    slug: string;
+    ticket_key?: string | null;
+    title: string;
+    stage: string;
+    priority?: string | null;
+    stage_entered_at?: string | null;
+    tokens_estimate?: number | null;
+    tokens_actual?: number | null;
+    resolution?: string | null;
+    review_state?: string | null;
+    sort_order?: number | null;
+    workflow?: string | null;
+  },
+  selectedWorkflow: string,
+): BoardTicketSnapshot {
+  const workflow = t.workflow ?? "";
+  return {
+    slug: t.slug,
+    ticketKey: t.ticket_key ?? null,
+    title: t.title,
+    stage: t.stage,
+    priority: t.priority ?? "medium",
+    stageChangedAt: t.stage_entered_at ?? undefined,
+    tokensEstimate: t.tokens_estimate ?? null,
+    tokensActual: t.tokens_actual ?? null,
+    resolution: t.resolution ?? null,
+    reviewState: t.review_state || null,
+    sortOrder: t.sort_order ?? null,
+    workflow,
+    orphan: ticketOrphan(workflow, selectedWorkflow),
+  };
+}
 
 function getTraceClient(): TraceApiClient | null {
   const traceApiUrl = process.env.TRACEAI_API_URL?.replace(/\/$/, "");
@@ -307,11 +350,25 @@ function getTraceClient(): TraceApiClient | null {
  */
 export async function listBoardTicketsViaTraceAI(
   projectSlug: string,
+  options: {
+    selectedWorkflow: string;
+    defaultWorkflow: string | null;
+    projectWorkflowSlugs: string[];
+  },
 ): Promise<BoardTicketSnapshot[] | null> {
   const client = getTraceClient();
   if (!client) return null;
   try {
-    const rows = (await client.listTickets(projectSlug)) as Array<{
+    const isDefaultBoard =
+      Boolean(options.defaultWorkflow) &&
+      options.selectedWorkflow === options.defaultWorkflow;
+    // Named board: exact pin. Default board: unfiltered set, then kaartregel.
+    const rows = (await client.listTickets(
+      projectSlug,
+      undefined,
+      undefined,
+      isDefaultBoard ? undefined : options.selectedWorkflow,
+    )) as Array<{
       slug: string;
       ticket_key?: string | null;
       title: string;
@@ -323,49 +380,85 @@ export async function listBoardTicketsViaTraceAI(
       resolution?: string | null;
       review_state?: string | null;
       sort_order?: number | null;
+      workflow?: string | null;
     }>;
-    return rows.map((t) => ({
-      slug: t.slug,
-      ticketKey: t.ticket_key ?? null,
-      title: t.title,
-      stage: t.stage,
-      priority: t.priority ?? "medium",
-      stageChangedAt: t.stage_entered_at ?? undefined,
-      tokensEstimate: t.tokens_estimate ?? null,
-      tokensActual: t.tokens_actual ?? null,
-      resolution: t.resolution ?? null,
-      reviewState: t.review_state || null,
-      sortOrder: t.sort_order ?? null,
-    }));
+    return rows
+      .filter((t) =>
+        ticketBelongsOnBoard({
+          ticketWorkflow: t.workflow,
+          selectedWorkflow: options.selectedWorkflow,
+          defaultWorkflow: options.defaultWorkflow,
+          projectWorkflowSlugs: options.projectWorkflowSlugs,
+        }),
+      )
+      .map((t) => snapshotFromRow(t, options.selectedWorkflow));
   } catch {
     return null;
   }
 }
 
-export async function getProjectBoard(projectSlug: string): Promise<{
+export async function getProjectBoard(
+  projectSlug: string,
+  selectedWorkflowSlug?: string | null,
+): Promise<{
   project: Project;
   workflow: Workflow | null;
   stages: WorkflowStage[];
   ticketsByStage: Record<string, Ticket[]>;
+  selectedWorkflow: string | null;
+  defaultWorkflow: string | null;
+  projectWorkflows: Workflow[];
 } | null> {
   const project = await getProject(projectSlug);
   if (!project) return null;
 
-  const workflowSlug = project.fields.default_workflow;
-  let workflow = workflowSlug ? await getWorkflow(workflowSlug) : null;
-  if (!workflow) {
-    const workflows = await listWorkflowsForProject(projectSlug);
-    workflow = workflows[0] ?? null;
+  const projectWorkflows = await listWorkflowsForProject(projectSlug);
+  const ownedSlugs = projectWorkflows.map((w) => w.slug);
+  const defaultWorkflow =
+    relationSlug(project.fields.default_workflow) || ownedSlugs[0] || null;
+  const requested = selectedWorkflowSlug?.trim() || defaultWorkflow;
+
+  if (!requested) {
+    return {
+      project,
+      workflow: null,
+      stages: [],
+      ticketsByStage: {},
+      selectedWorkflow: null,
+      defaultWorkflow,
+      projectWorkflows,
+    };
+  }
+
+  const isDefault = Boolean(defaultWorkflow && requested === defaultWorkflow);
+  if (!isDefault && !ownedSlugs.includes(requested)) {
+    return null;
+  }
+
+  let workflow = await getWorkflow(requested);
+  if (!workflow && isDefault) {
+    workflow = projectWorkflows[0] ?? null;
+  }
+  if (!workflow && !isDefault) {
+    return null;
   }
 
   const stages = parseStages(workflow?.fields.stages_json);
-  const tickets = await listTicketsForProject(projectSlug);
+  const tickets = (await listTicketsForProject(projectSlug)).filter((t) =>
+    ticketBelongsOnBoard({
+      ticketWorkflow: relationSlug(t.fields.workflow),
+      selectedWorkflow: requested,
+      defaultWorkflow,
+      projectWorkflowSlugs: ownedSlugs,
+    }),
+  );
+  const liveKeys = new Set(stages.map((s) => s.key));
   const ticketsByStage: Record<string, Ticket[]> = {};
   for (const stage of stages) {
     ticketsByStage[stage.key] = [];
   }
   for (const ticket of tickets) {
-    const key = ticket.fields.stage;
+    const key = remapStageForBoard(ticket.fields.stage, liveKeys);
     if (!ticketsByStage[key]) ticketsByStage[key] = [];
     ticketsByStage[key].push(ticket);
   }
@@ -378,7 +471,15 @@ export async function getProjectBoard(projectSlug: string): Promise<{
     );
   }
 
-  return { project, workflow, stages, ticketsByStage };
+  return {
+    project,
+    workflow,
+    stages,
+    ticketsByStage,
+    selectedWorkflow: requested,
+    defaultWorkflow,
+    projectWorkflows,
+  };
 }
 
 export async function searchProjectPublic(

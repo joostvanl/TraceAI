@@ -34,4 +34,17 @@ describe("groupByStage first-column sortOrder", () => {
       ["z"],
     );
   });
+
+  it("keeps wees-pins after pinned cards in the reorderable column", () => {
+    const stages = [{ key: "backlog" }];
+    const tickets = [
+      { slug: "wees", stage: "backlog", sortOrder: 0, orphan: true },
+      { slug: "pinned", stage: "backlog", sortOrder: 1, orphan: false },
+    ];
+    const grouped = groupByStage(stages, tickets, "backlog");
+    assert.deepEqual(
+      grouped.backlog?.map((t) => t.slug),
+      ["pinned", "wees"],
+    );
+  });
 });
