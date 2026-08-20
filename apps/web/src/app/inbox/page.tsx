@@ -133,6 +133,10 @@ async function InboxTicketBody({
         <Link href={`/projects/${item.project}/tickets/${ticket.slug}`}>
           Open op board
         </Link>
+        {" · "}
+        <span className="badge">
+          {workflow?.fields.name || ticket.fields.workflow || "onbekend"}
+        </span>
       </p>
 
       <Markdown content={ticket.fields.description ?? ""} />

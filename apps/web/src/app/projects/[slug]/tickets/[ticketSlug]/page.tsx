@@ -139,6 +139,11 @@ export default async function TicketPage({ params }: Props) {
                 <span className="badge">
                   {currentStage?.name ?? ticket.fields.stage}
                 </span>
+                <span className="badge">
+                  {workflow?.fields.name ||
+                    ticket.fields.workflow ||
+                    "onbekend"}
+                </span>
                 <span
                   className={`badge ${ticket.fields.priority ?? "medium"}`}
                 >
