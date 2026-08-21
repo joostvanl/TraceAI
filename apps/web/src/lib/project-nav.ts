@@ -3,7 +3,12 @@ export type NavWorkflow = {
   name: string;
 };
 
-export type ProjectPageKind = "insights" | "wiki" | "settings" | "tokens";
+export type ProjectPageKind =
+  | "tickets"
+  | "insights"
+  | "wiki"
+  | "settings"
+  | "tokens";
 
 export function boardHref(
   projectSlug: string,
@@ -28,12 +33,18 @@ export function isBoardActive(input: {
   return selected === input.workflowSlug;
 }
 
+export function ticketsHref(projectSlug: string): string {
+  return `/projects/${projectSlug}/tickets`;
+}
+
 export function isPageActive(
   pathname: string,
   projectSlug: string,
   kind: ProjectPageKind,
 ): boolean {
   const prefix = `/projects/${projectSlug}/${kind}`;
+  // Ticket detail lives under /tickets/{slug}; the list item is list-only.
+  if (kind === "tickets") return pathname === prefix;
   return pathname === prefix || pathname.startsWith(`${prefix}/`);
 }
 

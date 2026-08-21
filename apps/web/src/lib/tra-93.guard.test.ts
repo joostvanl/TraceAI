@@ -38,4 +38,16 @@ describe("TRA-93 WorkflowSwitcher removal", () => {
     assert.match(sidebar, /\/projects\/\$\{slug\}\/tokens/);
     assert.doesNotMatch(sidebar, /\/account\/tokens/);
   });
+
+  it("T16: Tickets is the first page link under /projects/:slug/tickets", () => {
+    const sidebar = readFileSync(
+      join(srcDir, "components", "ProjectSidebar.tsx"),
+      "utf8",
+    );
+    const tickets = sidebar.indexOf('label: "Tickets"');
+    const insights = sidebar.indexOf('label: "Insights"');
+    assert.ok(tickets >= 0, "Tickets menu item missing");
+    assert.ok(tickets < insights, "Tickets must come before Insights");
+    assert.match(sidebar, /ticketsHref/);
+  });
 });

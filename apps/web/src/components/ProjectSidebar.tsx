@@ -8,6 +8,7 @@ import {
   isBoardActive,
   isPageActive,
   menuOpenAfter,
+  ticketsHref,
   type NavWorkflow,
   type ProjectPageKind,
 } from "@/lib/project-nav";
@@ -24,6 +25,11 @@ const PAGE_LINKS: Array<{
   kind: ProjectPageKind;
   href: (projectSlug: string) => string;
 }> = [
+  {
+    label: "Tickets",
+    kind: "tickets",
+    href: ticketsHref,
+  },
   {
     label: "Insights",
     kind: "insights",

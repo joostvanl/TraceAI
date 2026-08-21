@@ -11,6 +11,7 @@ import {
   parseStages,
   isTicketKeyPattern,
   relationSlug,
+  relationSlugOrEmpty,
   remapStageForBoard,
   searchProjectContent,
   sortTicketsNewestFirst,
@@ -26,6 +27,12 @@ import {
   type Workflow,
   type WorkflowStage,
 } from "@traceai/core";
+import {
+  filterTicketsByMeta,
+  pageTicketList,
+  type TicketListInput,
+  type TicketListQuery,
+} from "@/lib/project-tickets";
 
 const apiUrl =
   process.env.NEXT_PUBLIC_CMS_API_URL ??
@@ -96,6 +103,47 @@ export async function listTicketsForProject(
   return tickets.sort(
     (a, b) => (a.fields.sort_order ?? 0) - (b.fields.sort_order ?? 0),
   );
+}
+
+export async function listProjectTicketsPublic(
+  projectSlug: string,
+  query: TicketListQuery,
+): Promise<{
+  items: TicketListInput[];
+  total: number;
+  limit: number;
+  offset: number;
+}> {
+  const tickets = await listTicketsForProject(projectSlug);
+  const rows: TicketListInput[] = tickets.map((t) => ({
+    slug: t.slug,
+    ticket_key: t.fields.ticket_key ?? null,
+    title: t.fields.title,
+    workflow: relationSlugOrEmpty(t.fields.workflow),
+    stage: t.fields.stage,
+    priority: t.fields.priority ?? "medium",
+    tokens_estimate: t.fields.tokens_estimate ?? null,
+    tokens_actual: t.fields.tokens_actual ?? null,
+    stage_entered_at: t.fields.stage_entered_at ?? null,
+    resolution: t.fields.resolution ?? null,
+    description: t.fields.description ?? "",
+  }));
+  const filtered = filterTicketsByMeta(rows, query);
+  if (query.q && filtered.length > 0) {
+    const comments = await listCommentsForTickets(filtered.map((t) => t.slug));
+    const commentsByTicket = new Map<string, string[]>();
+    for (const comment of comments) {
+      const key = relationSlug(comment.fields.ticket);
+      if (!key) continue;
+      const list = commentsByTicket.get(key) ?? [];
+      list.push(comment.fields.body);
+      commentsByTicket.set(key, list);
+    }
+    for (const row of filtered) {
+      row.commentBodies = commentsByTicket.get(row.slug) ?? [];
+    }
+  }
+  return pageTicketList(rows, query);
 }
 
 export async function getTicket(

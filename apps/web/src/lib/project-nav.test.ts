@@ -6,6 +6,7 @@ import {
   isPageActive,
   menuOpenAfter,
   sortWorkflowsForNav,
+  ticketsHref,
 } from "./project-nav.js";
 
 const project = "traceai";
@@ -159,5 +160,23 @@ describe("TRA-93 project nav helpers", () => {
     assert.equal(menuOpenAfter(false, "close"), false);
     assert.equal(menuOpenAfter(false, "toggle"), true);
     assert.equal(menuOpenAfter(true, "toggle"), false);
+  });
+
+  it("T14: tickets list is active on the exact list URL", () => {
+    assert.equal(
+      isPageActive(`/projects/${project}/tickets`, project, "tickets"),
+      true,
+    );
+  });
+
+  it("T15: ticket detail does not highlight Tickets", () => {
+    assert.equal(
+      isPageActive(`/projects/${project}/tickets/foo`, project, "tickets"),
+      false,
+    );
+  });
+
+  it("T16: ticketsHref is /projects/:slug/tickets", () => {
+    assert.equal(ticketsHref(project), `/projects/${project}/tickets`);
   });
 });
