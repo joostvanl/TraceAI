@@ -34,6 +34,44 @@ export function remapStageForBoard(
   return keys.has(stage) ? stage : UNMAPPED_STAGE_KEY;
 }
 
+/**
+ * Pin-wissel (TRA-95) is allowed only on a real project workflow whose live
+ * first stage matches the ticket. Wees-pins (empty / unknown / foreign) cannot
+ * be rescued this way.
+ */
+export function isTicketWorkflowReassignable(input: {
+  currentPin: string | null | undefined;
+  currentStage: string;
+  liveFirstStageKey: string | null | undefined;
+  defaultWorkflow: string | null | undefined;
+  projectWorkflowSlugs: Iterable<string>;
+}): boolean {
+  const pin = input.currentPin?.trim() || "";
+  if (!isProjectWorkflow(pin, input.defaultWorkflow, input.projectWorkflowSlugs)) {
+    return false;
+  }
+  if (!input.liveFirstStageKey) return false;
+  return input.currentStage === input.liveFirstStageKey;
+}
+
+/** Next `sort_order` for a column: max existing + 1, or 0 when empty. */
+export function nextColumnSortOrder(
+  sortOrders: Iterable<number | null | undefined>,
+): number {
+  let max = -1;
+  for (const n of sortOrders) {
+    if (typeof n === "number" && Number.isFinite(n) && n > max) max = n;
+  }
+  return max + 1;
+}
+
+export function workflowReassignAuditComment(
+  oldName: string,
+  newName: string,
+): string {
+  return `Workflow: ${oldName} → ${newName}`;
+}
+
 /** Create may pin default_workflow or a live workflow of this project only. */
 export function isProjectWorkflow(
   workflowSlug: string,

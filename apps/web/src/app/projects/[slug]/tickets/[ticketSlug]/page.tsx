@@ -2,24 +2,30 @@ import Link from "next/link";
 import { notFound, permanentRedirect } from "next/navigation";
 import {
   computeTokenRollup,
+  firstStageKey,
   humanApproveTarget,
   humanDismissTarget,
   humanRejectTargets,
   isTicketReviewState,
+  isTicketWorkflowReassignable,
   listChildTickets,
   listDescendantSlugs,
   parseWorkflowDocument,
+  relationSlug,
   resolveTicketRef,
 } from "@traceai/core";
 import { HumanReviewActions } from "@/components/HumanReviewActions";
 import { Markdown } from "@/components/Markdown";
+import { TicketWorkflowSelect } from "@/components/TicketWorkflowSelect";
 import {
   getProject,
   getTicket,
   getWorkflow,
   listCommentsForTicket,
   listTicketsForProject,
+  listWorkflowsForProject,
 } from "@/lib/cms";
+import { sortWorkflowsForNav } from "@/lib/project-nav";
 import { requireProjectAccess } from "@/lib/project-access";
 import { getSessionUser } from "@/lib/session";
 
@@ -62,12 +68,33 @@ export default async function TicketPage({ params }: Props) {
     permanentRedirect(`/projects/${slug}/tickets/${ticket.slug}`);
   }
 
-  const [comments, workflow] = await Promise.all([
+  const [comments, workflow, projectWorkflows] = await Promise.all([
     listCommentsForTicket(ticket.slug),
     getWorkflow(ticket.fields.workflow),
+    listWorkflowsForProject(slug),
   ]);
 
   const stages = parseWorkflowDocument(workflow?.fields.stages_json).stages;
+  const defaultWorkflow = relationSlug(project.fields.default_workflow);
+  const canChangeWorkflow =
+    Boolean(sessionUser) &&
+    isTicketWorkflowReassignable({
+      currentPin: ticket.fields.workflow,
+      currentStage: ticket.fields.stage,
+      liveFirstStageKey: workflow ? firstStageKey(stages) : null,
+      defaultWorkflow,
+      projectWorkflowSlugs: projectWorkflows.map((w) => w.slug),
+    });
+  const workflowOptions = sortWorkflowsForNav(
+    projectWorkflows.map((w) => ({
+      slug: w.slug,
+      name: w.fields.name || w.slug,
+    })),
+    defaultWorkflow,
+  ).map((w) => ({
+    ...w,
+    isDefault: Boolean(defaultWorkflow && w.slug === defaultWorkflow),
+  }));
   const currentStage = stages.find((s) => s.key === ticket.fields.stage);
   const humanGated =
     currentStage?.agent?.require_human_approval_on_exit === true;
@@ -139,11 +166,18 @@ export default async function TicketPage({ params }: Props) {
                 <span className="badge">
                   {currentStage?.name ?? ticket.fields.stage}
                 </span>
-                <span className="badge">
-                  {workflow?.fields.name ||
+                <TicketWorkflowSelect
+                  ticketSlug={ticket.slug}
+                  currentSlug={ticket.fields.workflow || ""}
+                  currentLabel={
+                    workflow?.fields.name ||
                     ticket.fields.workflow ||
-                    "onbekend"}
-                </span>
+                    "onbekend"
+                  }
+                  options={workflowOptions}
+                  canChange={canChangeWorkflow}
+                  disabledReason="Workflow kan alleen in de eerste stage worden gewijzigd"
+                />
                 <span
                   className={`badge ${ticket.fields.priority ?? "medium"}`}
                 >

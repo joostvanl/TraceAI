@@ -4,8 +4,11 @@ import {
   UNMAPPED_STAGE_KEY,
   editorWorkflowSlugForRequest,
   isProjectWorkflow,
+  isTicketWorkflowReassignable,
+  nextColumnSortOrder,
   remapStageForBoard,
   ticketBelongsOnBoard,
+  workflowReassignAuditComment,
 } from "./board-workflow.js";
 
 const owned = ["traceai-default", "standard-worker"];
@@ -90,6 +93,73 @@ describe("isProjectWorkflow", () => {
         owned,
       ),
       false,
+    );
+  });
+});
+
+describe("isTicketWorkflowReassignable (TRA-95)", () => {
+  const base = {
+    currentPin: "traceai-default",
+    currentStage: "backlog",
+    liveFirstStageKey: "backlog",
+    defaultWorkflow: "traceai-default",
+    projectWorkflowSlugs: owned,
+  };
+
+  it("allows a project pin in its live first stage", () => {
+    assert.equal(isTicketWorkflowReassignable(base), true);
+    assert.equal(
+      isTicketWorkflowReassignable({
+        ...base,
+        currentPin: "standard-worker",
+        liveFirstStageKey: "intake",
+        currentStage: "intake",
+      }),
+      true,
+    );
+  });
+
+  it("rejects any non-first stage", () => {
+    assert.equal(
+      isTicketWorkflowReassignable({ ...base, currentStage: "todo" }),
+      false,
+    );
+  });
+
+  it("rejects wees-pins (empty, unknown, foreign)", () => {
+    assert.equal(
+      isTicketWorkflowReassignable({ ...base, currentPin: "" }),
+      false,
+    );
+    assert.equal(
+      isTicketWorkflowReassignable({
+        ...base,
+        currentPin: "traceai-product-development",
+      }),
+      false,
+    );
+  });
+
+  it("rejects a pin whose live workflow has no stages", () => {
+    assert.equal(
+      isTicketWorkflowReassignable({ ...base, liveFirstStageKey: null }),
+      false,
+    );
+  });
+});
+
+describe("nextColumnSortOrder", () => {
+  it("returns 0 for an empty column and max+1 otherwise", () => {
+    assert.equal(nextColumnSortOrder([]), 0);
+    assert.equal(nextColumnSortOrder([0, 2, null, undefined]), 3);
+  });
+});
+
+describe("workflowReassignAuditComment", () => {
+  it("is a one-line old → new label", () => {
+    assert.equal(
+      workflowReassignAuditComment("Standard Worker", "TraceAI Story"),
+      "Workflow: Standard Worker → TraceAI Story",
     );
   });
 });

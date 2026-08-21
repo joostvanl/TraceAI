@@ -14,7 +14,12 @@ import {
   assertNoErrors,
 } from "./trace-errors.js";
 import { listAllEntries as listAllEntriesShared } from "./list-all-entries.js";
-import { isProjectWorkflow } from "./board-workflow.js";
+import {
+  isProjectWorkflow,
+  isTicketWorkflowReassignable,
+  nextColumnSortOrder,
+  workflowReassignAuditComment,
+} from "./board-workflow.js";
 import {
   assertNonNegativeIntegerSortOrder,
   planTicketReorder,
@@ -1461,6 +1466,9 @@ export class TraceService {
       sort_order?: number;
       resolution?: TicketResolution | string;
       parent?: string | null;
+      workflow?: string;
+      /** Comment author when a workflow pin-wissel writes an audit line. */
+      author?: string;
     },
   ): Promise<Ticket> {
     await this.ensureReady();
@@ -1510,22 +1518,142 @@ export class TraceService {
         parentRef: input.parent,
       });
     }
+
+    let workflowFields: {
+      workflow: string;
+      stage: string;
+      stage_entered_at: string;
+      sort_order: number;
+      review_state: "";
+    } | null = null;
+    let workflowAudit: string | null = null;
+    if (input.workflow !== undefined) {
+      const planned = await this.planTicketWorkflowReassign(
+        ticket,
+        input.workflow,
+      );
+      if (planned) {
+        workflowFields = planned.fields;
+        workflowAudit = planned.comment;
+      }
+    }
+
+    const fields = {
+      ...(input.title != null ? { title: input.title } : {}),
+      ...(input.description != null ? { description: input.description } : {}),
+      ...(input.priority != null ? { priority: input.priority } : {}),
+      ...(input.tokens_estimate != null
+        ? { tokens_estimate: input.tokens_estimate }
+        : {}),
+      ...(input.sort_order != null ? { sort_order: input.sort_order } : {}),
+      ...(input.resolution != null ? { resolution: input.resolution } : {}),
+      ...(parentSlug !== undefined ? { parent: parentSlug ?? "" } : {}),
+      ...(workflowFields ?? {}),
+    };
+    if (Object.keys(fields).length === 0) {
+      return ticket;
+    }
     const updated = await this.client.updateEntry<Ticket>("ticket", ticket.id, {
-      fields: {
-        ...(input.title != null ? { title: input.title } : {}),
-        ...(input.description != null ? { description: input.description } : {}),
-        ...(input.priority != null ? { priority: input.priority } : {}),
-        ...(input.tokens_estimate != null
-          ? { tokens_estimate: input.tokens_estimate }
-          : {}),
-        ...(input.sort_order != null ? { sort_order: input.sort_order } : {}),
-        ...(input.resolution != null ? { resolution: input.resolution } : {}),
-        ...(parentSlug !== undefined ? { parent: parentSlug ?? "" } : {}),
-      },
+      fields,
     });
     await this.ensurePublished("ticket", updated);
     await this.upsertSearchTicket(updated);
+    if (workflowAudit) {
+      await this.addComment({
+        ticket: updated.slug,
+        body: workflowAudit,
+        author: input.author,
+      });
+    }
     return updated;
+  }
+
+  private async planTicketWorkflowReassign(
+    ticket: Ticket,
+    rawWorkflow: string,
+  ): Promise<{
+    fields: {
+      workflow: string;
+      stage: string;
+      stage_entered_at: string;
+      sort_order: number;
+      review_state: "";
+    };
+    comment: string;
+  } | null> {
+    const targetSlug = rawWorkflow.trim();
+    if (!targetSlug) {
+      throw new ValidationError("workflow is required");
+    }
+    const projectSlug = ticket.fields.project;
+    const projectCtx = await this.getProject(projectSlug);
+    if (!projectCtx) {
+      throw new NotFoundError(`Project not found: ${projectSlug}`);
+    }
+    const defaultWorkflow =
+      relationSlug(projectCtx.project.fields.default_workflow) ??
+      projectCtx.workflow?.slug ??
+      null;
+    const projectWorkflows = await this.listWorkflows(projectSlug);
+    const projectSlugs = projectWorkflows.map((w) => w.slug);
+    const currentPin = ticket.fields.workflow ?? "";
+    const currentWf = currentPin ? await this.getWorkflow(currentPin) : null;
+    const currentFirst = currentWf ? firstStageKey(currentWf.stages) : null;
+    if (
+      !isTicketWorkflowReassignable({
+        currentPin,
+        currentStage: ticket.fields.stage,
+        liveFirstStageKey: currentFirst,
+        defaultWorkflow,
+        projectWorkflowSlugs: projectSlugs,
+      })
+    ) {
+      const stageName =
+        currentWf?.stages[0]?.name ?? currentFirst ?? "first stage";
+      throw new ValidationError(
+        `Workflow can only be changed while the ticket is in the first stage ("${stageName}").`,
+      );
+    }
+    if (!isProjectWorkflow(targetSlug, defaultWorkflow, projectSlugs)) {
+      throw new ValidationError(
+        `Workflow "${targetSlug}" is not a workflow of project ${projectSlug}`,
+      );
+    }
+    if (targetSlug === currentPin) {
+      return null;
+    }
+    const targetWf = await this.getWorkflow(targetSlug);
+    if (!targetWf) {
+      throw new ValidationError(
+        `Workflow "${targetSlug}" is not a workflow of project ${projectSlug}`,
+      );
+    }
+    const newStage = firstStageKey(targetWf.stages);
+    if (!newStage) {
+      throw new ValidationError(`Workflow "${targetSlug}" has no stages`);
+    }
+    const siblings = await this.listTickets({ project: projectSlug });
+    const sort_order = nextColumnSortOrder(
+      siblings
+        .filter(
+          (t) =>
+            t.fields.workflow === targetSlug && t.fields.stage === newStage,
+        )
+        .map((t) => t.fields.sort_order),
+    );
+    return {
+      fields: {
+        workflow: targetSlug,
+        stage: newStage,
+        stage_entered_at: new Date().toISOString(),
+        sort_order,
+        ...CLEARED_REVIEW_FIELDS,
+      },
+      comment: workflowReassignAuditComment(
+        currentWf?.workflow.fields.name || currentPin,
+        targetWf.workflow.fields.name || targetSlug,
+      ),
+    };
   }
 
   /**

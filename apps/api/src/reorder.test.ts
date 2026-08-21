@@ -46,6 +46,7 @@ describe("mapTicket / ticketEvent sort_order", () => {
   it("ticketEventFromMapped includes sort_order", () => {
     const event = ticketEventFromMapped("ticket.updated", sampleTicketFields());
     assert.equal(event.ticket.sort_order, 3);
+    assert.equal(event.ticket.workflow, "wf");
   });
 });
 
@@ -218,7 +219,8 @@ describe("POST /v1/tickets/reorder", () => {
         body: JSON.stringify({ sort_order: 7 }),
       });
       assert.equal(res.status, 200);
-      assert.deepEqual(patchBody, { sort_order: 7 });
+      assert.equal((patchBody as { sort_order?: number }).sort_order, 7);
+      assert.equal(typeof (patchBody as { author?: string }).author, "string");
       const body = (await res.json()) as { sort_order: number | null };
       assert.equal(body.sort_order, 7);
     } finally {

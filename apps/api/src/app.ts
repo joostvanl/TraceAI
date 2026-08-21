@@ -1196,6 +1196,7 @@ export function createApp(deps: {
       sort_order?: number;
       resolution?: string;
       parent?: string | null;
+      workflow?: string;
     }>();
     // Load first: the project of the ticket is what decides both checks, and
     // this route had neither before TRA-82.
@@ -1215,7 +1216,12 @@ export function createApp(deps: {
     if (denied) {
       return c.json({ message: denied, code: "FORBIDDEN" }, 403);
     }
-    const ticket = await deps.service.updateTicket(param(c, "slug"), body);
+    const human = resolveHumanIdentity(c);
+    const actor = c.get("actor");
+    const ticket = await deps.service.updateTicket(param(c, "slug"), {
+      ...body,
+      author: attributionName(human, actor.name),
+    });
     const mapped = mapTicket(ticket);
     publishTicketEvent(ticketEventFromMapped("ticket.updated", mapped));
     audit(c, {
