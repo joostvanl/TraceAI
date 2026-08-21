@@ -2,12 +2,17 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   TICKETS_PAGE_SIZE,
+  columnAriaSort,
+  defaultDirForSort,
   filterTicketsByMeta,
   formatEntered,
   formatTokens,
+  nextTicketListSort,
   orderTicketsForList,
   pageTicketList,
   parseTicketListQuery,
+  sortTicketsByColumn,
+  ticketListColumnHref,
   ticketListHref,
   uniqueStageKeys,
   type TicketListInput,
@@ -72,6 +77,8 @@ describe("TRA-94 project ticket list helpers", () => {
         priority: "high",
         resolution: "completed",
         offset: 25,
+        sort: "",
+        dir: "",
       },
     );
     assert.equal(parseTicketListQuery({ offset: "-4" }).offset, 0);
@@ -181,5 +188,171 @@ describe("TRA-94 project ticket list helpers", () => {
       "done",
       "review",
     ]);
+  });
+});
+
+const gamma = ticket({
+  slug: "gamma-ticket",
+  ticket_key: "TRA-10",
+  title: "Zebra work",
+  workflow: "bug",
+  stage: "backlog",
+  priority: "low",
+  tokens_actual: 100,
+  tokens_estimate: 500,
+  stage_entered_at: "2026-08-10T10:00:00.000Z",
+});
+
+const noKey = ticket({
+  slug: "no-key",
+  title: "Missing key",
+  ticket_key: null,
+  priority: "high",
+  tokens_actual: null,
+  tokens_estimate: 50,
+  stage_entered_at: null,
+});
+
+describe("TRA-97 ticket list column sort", () => {
+  it("parses sort/dir and ignores invalid values", () => {
+    assert.deepEqual(parseTicketListQuery({ sort: "title", dir: "desc" }).sort, "title");
+    assert.equal(parseTicketListQuery({ sort: "title", dir: "desc" }).dir, "desc");
+    assert.equal(parseTicketListQuery({ sort: "nope", dir: "asc" }).sort, "");
+    assert.equal(parseTicketListQuery({ sort: "nope", dir: "asc" }).dir, "");
+    assert.equal(parseTicketListQuery({ sort: "title", dir: "sideways" }).dir, "asc");
+    assert.equal(parseTicketListQuery({ sort: "entered" }).dir, "desc");
+    assert.equal(parseTicketListQuery({ dir: "desc" }).sort, "");
+  });
+
+  it("href includes sort+dir and omits them when unset", () => {
+    const sorted = parseTicketListQuery({
+      q: "search",
+      sort: "title",
+      dir: "asc",
+      offset: "25",
+    });
+    assert.equal(
+      ticketListHref("traceai", sorted),
+      "/projects/traceai/tickets?q=search&sort=title&dir=asc&offset=25",
+    );
+    assert.equal(
+      ticketListHref("traceai", parseTicketListQuery({})),
+      "/projects/traceai/tickets",
+    );
+  });
+
+  it("column href resets offset and toggles the active column", () => {
+    const query = parseTicketListQuery({
+      sort: "title",
+      dir: "asc",
+      offset: "25",
+      q: "search",
+    });
+    assert.equal(
+      ticketListColumnHref("traceai", query, "title"),
+      "/projects/traceai/tickets?q=search&sort=title&dir=desc",
+    );
+    assert.equal(
+      ticketListColumnHref("traceai", query, "entered"),
+      "/projects/traceai/tickets?q=search&sort=entered&dir=desc",
+    );
+    assert.equal(defaultDirForSort("key"), "asc");
+    assert.equal(defaultDirForSort("tokens"), "desc");
+    assert.deepEqual(nextTicketListSort(query, "title"), {
+      sort: "title",
+      dir: "desc",
+    });
+    assert.equal(columnAriaSort(query, "title"), "ascending");
+    assert.equal(columnAriaSort(query, "key"), "none");
+  });
+
+  it("sorts key numerically and puts missing keys last", () => {
+    const ordered = sortTicketsByColumn([gamma, alpha, noKey], "key", "asc");
+    assert.deepEqual(
+      ordered.map((row) => row.slug),
+      ["alpha-ticket", "gamma-ticket", "no-key"],
+    );
+  });
+
+  it("sorts title case-insensitively", () => {
+    const ordered = sortTicketsByColumn([gamma, alpha, beta], "title", "asc");
+    assert.deepEqual(
+      ordered.map((row) => row.slug),
+      ["alpha-ticket", "beta-ticket", "gamma-ticket"],
+    );
+  });
+
+  it("priority rank is high > medium > low, not alphabetical", () => {
+    const desc = sortTicketsByColumn([gamma, alpha, beta], "priority", "desc");
+    assert.deepEqual(
+      desc.map((row) => row.slug),
+      ["alpha-ticket", "beta-ticket", "gamma-ticket"],
+    );
+    const asc = sortTicketsByColumn([gamma, alpha, beta], "priority", "asc");
+    assert.deepEqual(
+      asc.map((row) => row.slug),
+      ["gamma-ticket", "beta-ticket", "alpha-ticket"],
+    );
+  });
+
+  it("tokens sorts by actual then estimate with nulls last in both directions", () => {
+    const desc = sortTicketsByColumn([noKey, gamma, alpha], "tokens", "desc");
+    assert.equal(desc[0]?.slug, "gamma-ticket");
+    assert.equal(desc[desc.length - 1]?.slug, "alpha-ticket");
+    const asc = sortTicketsByColumn([noKey, gamma, alpha], "tokens", "asc");
+    assert.equal(asc[0]?.slug, "gamma-ticket");
+    assert.equal(asc[asc.length - 1]?.slug, "alpha-ticket");
+  });
+
+  it("entered sorts timestamps and puts missing last", () => {
+    const desc = sortTicketsByColumn([alpha, beta, noKey], "entered", "desc");
+    assert.deepEqual(
+      desc.map((row) => row.slug),
+      ["beta-ticket", "alpha-ticket", "no-key"],
+    );
+  });
+
+  it("q without sort keeps BM25 order", () => {
+    const ordered = orderTicketsForList([alpha, beta], {
+      q: "search",
+      sort: "",
+      dir: "",
+    });
+    assert.equal(ordered[0]?.slug, "alpha-ticket");
+  });
+
+  it("q + sort keeps BM25 membership but uses column order", () => {
+    const withSearch = ticket({
+      slug: "search-later",
+      ticket_key: "TRA-9",
+      title: "Later search hit",
+      description: "Implement project search across tickets",
+    });
+    const ordered = orderTicketsForList([withSearch, alpha, beta], {
+      q: "search",
+      sort: "key",
+      dir: "asc",
+    });
+    assert.deepEqual(
+      ordered.map((row) => row.slug),
+      ["alpha-ticket", "search-later"],
+    );
+  });
+
+  it("paginates after column sort", () => {
+    const many = Array.from({ length: 30 }, (_, i) =>
+      ticket({
+        slug: `t-${i}`,
+        ticket_key: `TRA-${i}`,
+        title: `Ticket ${i}`,
+      }),
+    );
+    const page = pageTicketList(
+      many,
+      parseTicketListQuery({ sort: "key", dir: "desc" }),
+    );
+    assert.equal(page.total, 30);
+    assert.equal(page.items[0]?.ticket_key, "TRA-29");
+    assert.equal(page.items.length, TICKETS_PAGE_SIZE);
   });
 });

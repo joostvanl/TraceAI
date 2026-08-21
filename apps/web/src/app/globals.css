@@ -1309,6 +1309,23 @@ h2 {
   font-weight: 600;
 }
 
+.insights-table th a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.insights-table th a:hover {
+  color: var(--text);
+}
+
+.insights-table th[aria-sort="ascending"] a::after {
+  content: " \2191";
+}
+
+.insights-table th[aria-sort="descending"] a::after {
+  content: " \2193";
+}
+
 .insights-table .mono,
 .mono {
   font-family: var(--mono);

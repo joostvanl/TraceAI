@@ -13,12 +13,25 @@ import { requireProjectAccess } from "@/lib/project-access";
 import {
   TICKET_LIST_PRIORITIES,
   TICKETS_PAGE_SIZE,
+  columnAriaSort,
   formatEntered,
   formatTokens,
   parseTicketListQuery,
+  ticketListColumnHref,
   ticketListHref,
   uniqueStageKeys,
+  type TicketListSort,
 } from "@/lib/project-tickets";
+
+const TICKET_LIST_COLUMNS: { key: TicketListSort; label: string }[] = [
+  { key: "key", label: "Key" },
+  { key: "title", label: "Title" },
+  { key: "workflow", label: "Workflow" },
+  { key: "stage", label: "Stage" },
+  { key: "priority", label: "Priority" },
+  { key: "tokens", label: "Tokens" },
+  { key: "entered", label: "Entered" },
+];
 
 export const dynamic = "force-dynamic";
 
@@ -134,6 +147,12 @@ export default async function ProjectTicketsPage({
               ))}
             </select>
           </label>
+          {query.sort ? (
+            <>
+              <input type="hidden" name="sort" value={query.sort} />
+              <input type="hidden" name="dir" value={query.dir} />
+            </>
+          ) : null}
           <button type="submit">Apply</button>
         </form>
 
@@ -144,13 +163,16 @@ export default async function ProjectTicketsPage({
             <table className="insights-table">
               <thead>
                 <tr>
-                  <th>Key</th>
-                  <th>Title</th>
-                  <th>Workflow</th>
-                  <th>Stage</th>
-                  <th>Priority</th>
-                  <th>Tokens</th>
-                  <th>Entered</th>
+                  {TICKET_LIST_COLUMNS.map((column) => (
+                    <th
+                      key={column.key}
+                      aria-sort={columnAriaSort(query, column.key)}
+                    >
+                      <Link href={ticketListColumnHref(slug, query, column.key)}>
+                        {column.label}
+                      </Link>
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
