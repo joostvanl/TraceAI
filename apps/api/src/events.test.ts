@@ -97,6 +97,7 @@ describe("TicketEventBus", () => {
     bus.subscribe(() => {
       bHits += 1;
     });
+    assert.equal(bus.subscriberCount(), 2);
 
     const record = bus.publish(sampleEvent());
     assert.equal(record.event_id, 1);

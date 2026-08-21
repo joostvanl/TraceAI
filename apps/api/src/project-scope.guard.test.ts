@@ -51,6 +51,7 @@ const PROJECT_SCOPED = [
  */
 const NOT_PROJECT_SCOPED: Record<string, string> = {
   "GET /health": "liveness probe, returns no data",
+  "GET /metrics": "Prometheus scrape; process-wide series, no ticket payload",
   "GET /events":
     "public SSE stream by design (no bearer token), so there is no identity to check. This IS a cross-project read path and is tracked as a separate finding, not resolved here.",
   "GET /v1/me": "describes the calling token",

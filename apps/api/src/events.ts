@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { observeTicketEvent } from "./metrics.js";
 
 export type TicketEventType =
   | "ticket.created"
@@ -170,6 +171,10 @@ export class TicketEventBus {
     };
   }
 
+  subscriberCount(): number {
+    return this.subscribers.size;
+  }
+
   getEventsAfter(afterId: number, project?: string): TicketEventRecord[] {
     return this.store.readAfter(afterId, { project });
   }
@@ -228,7 +233,9 @@ function getBus(): TicketEventBus {
 }
 
 export function publishTicketEvent(event: TicketEvent): TicketEventRecord {
-  return getBus().publish(event);
+  const record = getBus().publish(event);
+  observeTicketEvent(event);
+  return record;
 }
 
 /**
@@ -238,6 +245,10 @@ export function publishTicketEvent(event: TicketEvent): TicketEventRecord {
  */
 export function subscribeTicketEvents(listener: Notify): () => void {
   return getBus().subscribe(listener);
+}
+
+export function eventSubscriberCount(): number {
+  return getBus().subscriberCount();
 }
 
 export function getEventsAfter(

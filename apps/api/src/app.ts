@@ -26,12 +26,22 @@ import {
   type Ticket,
 } from "@traceai/core";
 import {
+  eventSubscriberCount,
   getEventsAfter,
   latestEventId,
   publishTicketEvent,
   subscribeTicketEvents,
   ticketEventFromMapped,
 } from "./events.js";
+import {
+  metricsContentType,
+  observeHttp,
+  observeTokensUsed,
+  observeWikiWrite,
+  renderMetrics,
+  setSupportGauges,
+  snapshotFromService,
+} from "./metrics.js";
 import {
   attributionName,
   HUMAN_IDENTITY_HEADER,
@@ -393,6 +403,17 @@ function corsOrigins(): string[] {
   ];
 }
 
+function httpRouteLabel(c: Context): string {
+  const routes = c.req.matchedRoutes;
+  for (let i = routes.length - 1; i >= 0; i--) {
+    const path = routes[i]?.path;
+    if (path && path !== "*" && path !== "/*") return path;
+  }
+  const routePath = c.req.routePath;
+  if (routePath && routePath !== "*" && routePath !== "/*") return routePath;
+  return "unmatched";
+}
+
 export function createApp(deps: {
   authStore: AuthStore;
   service: TraceService;
@@ -420,7 +441,32 @@ export function createApp(deps: {
 
   app.use("*", requestIdMiddleware());
 
+  app.use("*", async (c, next) => {
+    const started = performance.now();
+    await next();
+    observeHttp({
+      method: c.req.method,
+      route: httpRouteLabel(c),
+      status: c.res.status,
+      seconds: (performance.now() - started) / 1000,
+    });
+  });
+
   app.get("/health", (c) => c.json({ status: "ok", service: "traceai-api" }));
+
+  app.get("/metrics", async (c) => {
+    try {
+      await snapshotFromService(deps.service);
+    } catch {
+      // Board gauges stay at the last successful snapshot.
+    }
+    setSupportGauges({
+      subscribers: eventSubscriberCount(),
+      latestId: latestEventId(),
+    });
+    const body = await renderMetrics();
+    return c.body(body, 200, { "Content-Type": metricsContentType() });
+  });
 
   // Hosted MCP (Streamable HTTP) — Cursor remote config needs only URL + Bearer.
   // Mounted outside `/v1/*` so auth errors stay MCP/HTTP-native; still requires trc_….
@@ -1361,6 +1407,12 @@ export function createApp(deps: {
             to_stage: ticket.fields.stage,
           }),
         );
+        if (typeof body.tokens_used === "number") {
+          observeTokensUsed({
+            project: ticket.fields.project,
+            tokens: body.tokens_used,
+          });
+        }
         // Scenario A/B: notify humans when an agent enters a gated stage.
         if (!asHuman) {
           const human = resolveHumanIdentity(c);
@@ -1636,6 +1688,7 @@ export function createApp(deps: {
       ...body,
       updated_by: actor.name,
     });
+    observeWikiWrite({ project: page.fields.project, op: "create" });
     audit(c, {
       action: "wiki.create",
       resourceType: "wiki_page",
@@ -1713,6 +1766,7 @@ export function createApp(deps: {
     }
 
     const page = result.page;
+    observeWikiWrite({ project: page.fields.project, op: "update" });
     audit(c, {
       action: "wiki.update",
       resourceType: "wiki_page",
