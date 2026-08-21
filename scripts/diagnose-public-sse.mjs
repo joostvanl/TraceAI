@@ -53,7 +53,10 @@ console.log("target ticket:", candidate.slug, "stage:", candidate.stage);
 const started = Date.now();
 const controller = new AbortController();
 const res = await fetch(`${listenBase}/events?project=${project}`, {
-  headers: { Accept: "text/event-stream" },
+  headers: {
+    Accept: "text/event-stream",
+    Authorization: `Bearer ${token}`,
+  },
   signal: controller.signal,
 });
 console.log("SSE status:", res.status, res.headers.get("content-type"));

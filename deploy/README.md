@@ -36,7 +36,7 @@ the old name.
 | Public UI | https://traceai.joostvanleeuwaarden.com |
 | LAN Web UI | http://192.168.1.91:3011 |
 | LAN API health | http://192.168.1.91:3847/health |
-| Public SSE | https://traceai.joostvanleeuwaarden.com/events?project=traceai |
+| API SSE (bearer + project) | https://traceai.joostvanleeuwaarden.com/events?project=traceai |
 | Public MCP | https://traceai.joostvanleeuwaarden.com/mcp |
 
 ## Cloudflare tunnel
@@ -62,9 +62,10 @@ Write/refresh the config, then install the unit:
 sudo systemctl restart cloudflared-traceai
 ```
 
-Keep `NEXT_PUBLIC_TRACEAI_EVENTS_URL=https://traceai.joostvanleeuwaarden.com/events`
-and CORS for that origin in `~/.config/traceai/traceai.env`, then redeploy so the
-web image is rebuilt with the public events URL.
+The board no longer opens that URL from the browser. It uses same-origin
+`/api/events`, which proxies to `TRACEAI_API_URL/events` with the session.
+Keep CORS for the UI origin in `~/.config/traceai/traceai.env` if anything
+still calls the API stream directly.
 
 Auth SQLite lives in the Docker volume `traceai-data`. Bootstrap a token once:
 

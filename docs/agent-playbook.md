@@ -73,7 +73,8 @@ Fix it, do not bypass it:
 
 ## Live board
 
-- The board listens to `GET /events?project=<slug>` (SSE) published by the API on
-  create / update / transition / comment.
+- The board listens to same-origin `GET /api/events?project=<slug>` (SSE), which
+  proxies to authenticated `GET /events` on the API. Events are published on
+  create / update / transition / comment / review.
 - Only writes through the API/MCP are reflected live. The `Done` lane is ordered by the
   moment a ticket entered Done (most recently completed on top).

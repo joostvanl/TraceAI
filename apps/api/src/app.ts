@@ -472,13 +472,31 @@ export function createApp(deps: {
   // Mounted outside `/v1/*` so auth errors stay MCP/HTTP-native; still requires trc_….
   mountTraceAiMcp(app, deps.authStore);
 
-  // Public SSE stream for read-only live boards (no bearer token).
-  // Supports resume via `Last-Event-ID` header or `?after=<event_id>`: on
-  // (re)connect the client replays every event it missed from the durable
-  // store, then follows live events. Each message carries a stable `id:` so
-  // the browser's EventSource resumes automatically after a drop.
-  app.get("/events", (c) => {
-    const projectFilter = c.req.query("project") ?? undefined;
+  // SSE stream for live boards. Authenticated: same principal as `/v1/*`.
+  // Browser EventSource cannot send Authorization, so the web UI reaches
+  // this via same-origin `GET /api/events` (TRA-84). Resume via
+  // `Last-Event-ID` / `?after=<event_id>` still applies — replay is filtered
+  // to projects the caller may see.
+  app.use("/events", auth);
+  app.use(
+    "/events",
+    projectGuardMiddleware({
+      service: deps.service,
+      resolveHuman: resolveHumanIdentity,
+    }),
+  );
+  app.get("/events", async (c) => {
+    const projectFilter = c.req.query("project")?.trim() || undefined;
+    const principal = await principalFor(c, deps.service);
+    const isAdmin = principal.isPlatformAdmin || principal.hasAdminScope;
+    if (!isAdmin && !projectFilter) {
+      return c.json({ message: "project is required", code: "VALIDATION" }, 400);
+    }
+    if (projectFilter) {
+      const hidden = await denyUnlessProjectVisible(c, projectFilter);
+      if (hidden) return hidden;
+    }
+
     const afterParam =
       c.req.header("Last-Event-ID") ?? c.req.query("after") ?? undefined;
     const parsedAfter = afterParam ? Number(afterParam) : NaN;

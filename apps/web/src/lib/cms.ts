@@ -762,7 +762,7 @@ const HOMEPAGE_CONNECT_FALLBACK: HomepageConnectContent = {
     "Entering Done needs resolution (completed | superseded | cancelled | duplicate | verification-only) and ## Wiki with page slug(s) or N/A.",
     "All ticket/workflow/wiki writes go through TraceAI MCP or the TraceAI API — never bypass TraceAI.",
     "Humans can add light wish-tickets from a project board (New ticket) after signing in; they land in Backlog for agents to refine.",
-    "Project boards are live via SSE from https://traceai.joostvanleeuwaarden.com/events?project=… — cards move without refreshing.",
+    "Project boards are live via authenticated SSE (`/api/events` → API `/events`) — cards move without refreshing for project members.",
     "Use the Inbox for tickets waiting on your human verdict.",
   ],
   mcpConfig: `{
