@@ -156,7 +156,11 @@ export function LiveBoard({
   // via Last-Event-ID. Shown only as a diagnostic hint.
   const eventsHost = useMemo(() => {
     try {
-      return new URL(eventsUrl).host;
+      const origin =
+        typeof window !== "undefined"
+          ? window.location.origin
+          : "http://localhost";
+      return new URL(eventsUrl, origin).host;
     } catch {
       return null;
     }
@@ -172,7 +176,7 @@ export function LiveBoard({
       return;
     }
 
-    const url = new URL(eventsUrl);
+    const url = new URL(eventsUrl, window.location.origin);
     url.searchParams.set("project", projectSlug);
     const source = new EventSource(url.toString());
     let flashTimer: ReturnType<typeof setTimeout> | undefined;

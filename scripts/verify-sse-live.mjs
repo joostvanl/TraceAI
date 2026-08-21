@@ -12,7 +12,10 @@ const project = "traceai";
 const targetSlug = "verify-live-board-sse-through-api";
 
 const res = await fetch(`${api}/events?project=${project}`, {
-  headers: { Accept: "text/event-stream" },
+  headers: {
+    Accept: "text/event-stream",
+    Authorization: `Bearer ${token}`,
+  },
 });
 if (!res.ok || !res.body) {
   console.error("SSE connect failed", res.status);

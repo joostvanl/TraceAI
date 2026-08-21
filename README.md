@@ -106,7 +106,6 @@ The API process holds `AURORA_USER_TOKEN` / `AURORA_MANAGEMENT_TOKEN` in its own
 
 ```
 NEXT_PUBLIC_CMS_API_URL=https://aurora-api.joostvanleeuwaarden.com
-NEXT_PUBLIC_TRACEAI_EVENTS_URL=https://traceai.joostvanleeuwaarden.com/events
 
 # Server-only — Aurora public read key. Renamed from NEXT_PUBLIC_CMS_SITE_KEY in
 # TRA-81: the prefix would allow the key into the browser bundle.
@@ -133,13 +132,14 @@ See [deploy/README.md](deploy/README.md). Short version on the Pi:
 
 ## Live board (SSE)
 
-Project boards subscribe to:
+The signed-in board opens same-origin `GET /api/events?project=<projectSlug>` (session cookie). That route proxies to the API with the web server's `TRACEAI_TOKEN` and the human-proxy identity. The API endpoint itself is authenticated:
 
 ```
 GET https://traceai.joostvanleeuwaarden.com/events?project=<projectSlug>
+Authorization: Bearer trc_…
 ```
 
-No bearer token required. The API publishes `ticket.created`, `ticket.updated`, `ticket.transitioned`, and `ticket.commented` after successful writes. The Next.js board updates cards in place (no full refresh).
+A missing token is `401`. A non-admin caller must pass `project` and be a member of it (`404` otherwise). Platform admins and `admin`-scope tokens may omit `project` to follow every project. The API publishes `ticket.created`, `ticket.updated`, `ticket.transitioned`, `ticket.commented`, and `ticket.reviewed` after successful writes. The Next.js board updates cards in place (no full refresh).
 
 ### Durable, cross-process events
 
@@ -148,7 +148,7 @@ Ticket events are persisted to an append-only SQLite store (`node:sqlite`, the s
 - `GET /events` emits stable `id:` fields. On reconnect the browser's `EventSource` resends the last id as `Last-Event-ID` (you can also pass `?after=<event_id>`), and the API replays only the events missed since then — no hard refresh required.
 - The web board loads its **initial** ticket list from the TraceAI API (`/v1/tickets`) when `TRACEAI_API_URL` + `TRACEAI_TOKEN` are set, so the live-board path has one source of truth (TraceAI → Aurora), matching the SSE stream. Without those env vars it falls back to reading Aurora directly.
 
-Because events are durable and shared, `TRACEAI_API_URL` and `NEXT_PUBLIC_TRACEAI_EVENTS_URL` no longer have to resolve to the same process — any instance backed by the same event store works. Both localhost origins are already allowed by the API's CORS defaults, so a local board can subscribe to the Pi instance.
+Because events are durable and shared, the web proxy (`TRACEAI_API_URL`) can target any API instance backed by the same event store. Both localhost origins are already allowed by the API's CORS defaults, so a local board can subscribe to the Pi instance via that proxy.
 
 **API env for events:**
 

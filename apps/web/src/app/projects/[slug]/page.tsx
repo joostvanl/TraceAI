@@ -96,9 +96,7 @@ export default async function ProjectPage({ params, searchParams }: Props) {
         };
       });
 
-  const eventsUrl =
-    process.env.NEXT_PUBLIC_TRACEAI_EVENTS_URL ??
-    "https://traceai.joostvanleeuwaarden.com/events";
+  const eventsUrl = "/api/events";
 
   const boardHref =
     defaultWorkflow && selectedWorkflow === defaultWorkflow

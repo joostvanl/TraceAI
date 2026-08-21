@@ -6,7 +6,30 @@
  *
  * Optional: also listen on a local API if one is running:
  *   LOCAL_API=http://localhost:3847 node scripts/which-instance-emits.mjs
+ *
+ * Requires TRACEAI_TOKEN or data/bootstrap-token.txt (TRA-84: /events is authenticated).
  */
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+function readBootstrapToken() {
+  try {
+    return readFileSync(resolve("data/bootstrap-token.txt"), "utf8")
+      .split(/\r?\n/)
+      .find((l) => l.startsWith("token="))
+      ?.slice("token=".length)
+      .trim();
+  } catch {
+    return undefined;
+  }
+}
+
+const token = process.env.TRACEAI_TOKEN ?? readBootstrapToken();
+if (!token) {
+  console.error("Missing TRACEAI_TOKEN (or data/bootstrap-token.txt).");
+  process.exit(2);
+}
+
 const targets = [
   ["public", "https://traceai.joostvanleeuwaarden.com"],
 ];
@@ -21,7 +44,10 @@ const stamp = () => `+${String(Date.now() - started).padStart(6)}ms`;
 
 async function listen(label, base) {
   const res = await fetch(`${base}/events?project=${project}`, {
-    headers: { Accept: "text/event-stream" },
+    headers: {
+      Accept: "text/event-stream",
+      Authorization: `Bearer ${token}`,
+    },
   });
   console.log(`${stamp()} ${label} stream open (${res.status})`);
   const reader = res.body.getReader();

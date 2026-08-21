@@ -14,8 +14,13 @@ const project = "traceai";
 const esUrl = `${api}/events?project=${project}`;
 console.log("connecting", esUrl);
 
-// Minimal SSE client
-const res = await fetch(esUrl, { headers: { Accept: "text/event-stream" } });
+// Minimal SSE client — stream requires the same bearer as /v1 (TRA-84).
+const res = await fetch(esUrl, {
+  headers: {
+    Accept: "text/event-stream",
+    Authorization: `Bearer ${token}`,
+  },
+});
 if (!res.ok || !res.body) {
   console.error("SSE connect failed", res.status);
   process.exit(1);
