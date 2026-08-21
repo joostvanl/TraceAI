@@ -87,25 +87,7 @@ export default async function ProjectInsightsPage({
         <span>Insights</span>
       </nav>
 
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "baseline",
-          gap: "1rem",
-          flexWrap: "wrap",
-        }}
-      >
-        <h1>Insights &amp; search</h1>
-        <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
-          <Link className="muted" href={`/projects/${slug}/wiki`}>
-            Wiki
-          </Link>
-          <Link className="muted" href={`/projects/${slug}`}>
-            ← Board
-          </Link>
-        </div>
-      </div>
+      <h1>Insights &amp; search</h1>
       <p className="lede">
         Search tickets and wiki, browse full Done history (beyond the board
         window), and view basic delivery metrics. Read-only.

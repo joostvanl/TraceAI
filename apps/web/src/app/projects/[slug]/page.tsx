@@ -3,7 +3,6 @@ import { notFound } from "next/navigation";
 import { UNMAPPED_STAGE_KEY, relationSlug } from "@traceai/core";
 import { CreateTicketForm } from "@/components/CreateTicketForm";
 import { LiveBoard } from "@/components/LiveBoard";
-import { WorkflowSwitcher } from "@/components/WorkflowSwitcher";
 import { getProjectBoard, listBoardTicketsViaTraceAI } from "@/lib/cms";
 import { requireProjectAccess } from "@/lib/project-access";
 import { getSessionUser } from "@/lib/session";
@@ -54,21 +53,6 @@ export default async function ProjectPage({ params, searchParams }: Props) {
   const lastStageKey = stages[stages.length - 1]?.key;
   const liveStageKeys = stages.map((s) => s.key);
   const ownedSlugs = projectWorkflows.map((w) => w.slug);
-  const switcherWorkflows = [...projectWorkflows]
-    .sort((a, b) => a.fields.name.localeCompare(b.fields.name));
-  if (
-    defaultWorkflow &&
-    !switcherWorkflows.some((w) => w.slug === defaultWorkflow) &&
-    board.workflow?.slug === defaultWorkflow
-  ) {
-    switcherWorkflows.unshift(board.workflow);
-  } else if (defaultWorkflow) {
-    switcherWorkflows.sort((a, b) => {
-      if (a.slug === defaultWorkflow) return -1;
-      if (b.slug === defaultWorkflow) return 1;
-      return a.fields.name.localeCompare(b.fields.name);
-    });
-  }
 
   const hasOverflow = Object.keys(ticketsByStage).some(
     (key) =>
@@ -128,32 +112,8 @@ export default async function ProjectPage({ params, searchParams }: Props) {
         <span>/</span>
         <span>{project.fields.name}</span>
       </nav>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "baseline",
-          gap: "1rem",
-          flexWrap: "wrap",
-        }}
-      >
-        <h1>{project.fields.name}</h1>
-        <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
-          <Link href={`/projects/${slug}/insights`}>Insights</Link>
-          <Link href={`/projects/${slug}/wiki`}>Wiki</Link>
-          <Link href={`/projects/${slug}/settings`}>Settings</Link>
-        </div>
-      </div>
+      <h1>{project.fields.name}</h1>
       <p className="lede">{project.fields.description || "No description."}</p>
-      <WorkflowSwitcher
-        projectSlug={slug}
-        workflows={switcherWorkflows.map((w) => ({
-          slug: w.slug,
-          name: w.fields.name,
-        }))}
-        selectedWorkflow={selectedWorkflow}
-        defaultWorkflow={defaultWorkflow}
-      />
 
       {stages.length === 0 ? (
         <div className="empty">No workflow stages configured for this project.</div>

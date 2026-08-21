@@ -28,20 +28,7 @@ export default async function ProjectWikiIndexPage({ params }: Props) {
         <span>Wiki</span>
       </nav>
 
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "baseline",
-          gap: "1rem",
-          flexWrap: "wrap",
-        }}
-      >
-        <h1>Wiki</h1>
-        <Link className="muted" href={`/projects/${slug}`}>
-          ← Board
-        </Link>
-      </div>
+      <h1>Wiki</h1>
       <p className="lede">
         Project documentation (read-only). Agents update pages via TraceAI MCP.
         The tree shows one level by default — use + / − to expand.

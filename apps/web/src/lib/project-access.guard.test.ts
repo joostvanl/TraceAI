@@ -22,7 +22,7 @@ function projectScopedFiles(): string[] {
   ];
   return roots
     .flatMap((root) => walk(root))
-    .filter((f) => f.endsWith("page.tsx") || f.endsWith("route.ts"));
+    .filter((f) => f.endsWith("page.tsx") || f.endsWith("route.ts") || f.endsWith("layout.tsx"));
 }
 
 /**
@@ -78,7 +78,7 @@ describe("web project access coverage (TRA-81)", () => {
         }
         assert.ok(
           guarded,
-          `${label} must call requireProjectAccess (page) or hasProjectAccess (route handler) before reading project data`,
+          `${label} must call requireProjectAccess (page/layout) or hasProjectAccess (route handler) before reading project data`,
         );
       },
     );
