@@ -321,6 +321,7 @@ h2 {
 .live-board {
   display: grid;
   gap: 0.85rem;
+  min-width: 0;
 }
 
 .workflow-switcher {
@@ -467,9 +468,12 @@ h2 {
 
 .board {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(200px, 1fr);
   gap: 0.85rem;
   align-items: start;
+  min-width: 0;
+  overflow-x: auto;
 }
 
 .column {
@@ -1637,6 +1641,13 @@ h2 {
 
   .project-shell-main {
     padding: 1rem;
+  }
+
+  .board {
+    grid-auto-flow: row;
+    grid-auto-columns: unset;
+    grid-template-columns: 1fr;
+    overflow-x: visible;
   }
 }
 
