@@ -77,6 +77,7 @@ import {
   lastStageKey,
 } from "./types.js";
 import { enforceExpectedTransition } from "./stage-conflict.js";
+import { assertHumanGateTransition } from "./human-gate-open.js";
 import {
   computeTokenRollup,
   listChildTickets,
@@ -1751,6 +1752,13 @@ export class TraceService {
     if (!fromStage || !targetStage) {
       throw new ValidationError("Invalid workflow stage for transition");
     }
+    assertHumanGateTransition({
+      stages,
+      fromStage,
+      toStage: targetStage,
+      asHuman: options?.asHuman === true,
+      reviewState: ticket.fields.review_state,
+    });
     assertNoErrors(
       validateHumanGateExit({
         fromStage,

@@ -22,6 +22,25 @@ describe("formatToolError (TRA-73 / TRA-70)", () => {
     assert.equal(/anchor/.test(text), false);
   });
 
+  it("M1b: HUMAN_GATE_OPEN dumps body and waits for a UI verdict", () => {
+    const body = {
+      message: 'Stage "todo" is waiting for a human review verdict.',
+      code: "HUMAN_GATE_OPEN",
+      current_stage: "todo",
+      review_state: null,
+      to_stage: "in_progress",
+      allowed_targets: ["in_progress", "done"],
+    };
+    const text = formatToolError(
+      new TraceApiError(body.message, 409, "HUMAN_GATE_OPEN", body),
+    );
+    assert.match(text, /Error 409 HUMAN_GATE_OPEN/);
+    assert.match(text, /allowed_targets/);
+    assert.match(text, /human gate is still open/i);
+    assert.equal(/get_wiki_page/.test(text), false);
+    assert.equal(/another actor moved this ticket/i.test(text), false);
+  });
+
   it("M2: wiki CONFLICT keeps the TRA-70 hint and does not dump STAGE_CONFLICT body", () => {
     const text = formatToolError(
       new TraceApiError("old_string not found", 409, "CONFLICT", {

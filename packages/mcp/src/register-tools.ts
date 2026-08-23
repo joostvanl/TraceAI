@@ -34,6 +34,9 @@ const WIKI_409_HINT =
 const STAGE_CONFLICT_HINT =
   " (Hint: another actor moved this ticket or changed the verdict. Read current_stage, review_state and recent_comments above. Do NOT retry the same transition. Do NOT omit expected_stage to bypass the guard.)";
 
+const HUMAN_GATE_OPEN_HINT =
+  " (Hint: a human gate is still open. Read current_stage, review_state and allowed_targets. Wait for a TraceAI UI verdict. Do NOT retry the same transition. Do NOT omit expected_stage or expected_review_state to bypass the gate. Chat is not a verdict.)";
+
 const INVALID_400_HINT =
   " (Hint: the request itself is invalid — resending it unchanged will fail again. Correct the field or the edit first.)";
 
@@ -49,6 +52,11 @@ export function formatToolError(error: unknown): string {
   let bodyDump = "";
   if (code === "STAGE_CONFLICT") {
     classHint = STAGE_CONFLICT_HINT;
+    if (error instanceof TraceApiError && error.body != null) {
+      bodyDump = `\n${JSON.stringify(error.body, null, 2)}`;
+    }
+  } else if (code === "HUMAN_GATE_OPEN") {
+    classHint = HUMAN_GATE_OPEN_HINT;
     if (error instanceof TraceApiError && error.body != null) {
       bodyDump = `\n${JSON.stringify(error.body, null, 2)}`;
     }
@@ -351,7 +359,7 @@ export function registerTraceAiTools(
 
   server.tool(
     "transition_ticket",
-    "Move a ticket to another workflow stage. ALWAYS pass comment with ## Vorige stap and ## Deze stap. Entering review ALSO requires ## Testverslag and ## Uitslag (PASS/FAIL). Token/resolution fields are required only when the workflow playbook says so (see get_workflow): tokens_used when agent_policy.require_tokens_used_on_transition; tokens_estimate when leaving a stage with require_tokens_estimate_on_exit; resolution when entering a stage with require_resolution_on_enter. Call get_ticket immediately before this tool and pass expected_stage (the current stage). On a human-gated stage also pass expected_review_state (current review_state, or null). Workflows with require_expected_stage_on_transition refuse the call without those fields. On 409 STAGE_CONFLICT the error includes current_stage, review_state and recent_comments — do not retry the same transition. A stage with require_human_approval_on_exit may only be left after a human recorded a verdict in the TraceAI UI: get_ticket then shows review_state approved (move to human_approve_to), rejected (move to a human_reject_to target, comment needs ## Reden) or dismissed (move to human_dismiss_to, comment needs ## Reden). Only the outcomes the stage actually configures are available. Without a verdict the transition is refused; the verdict is cleared once the ticket moves.",
+    "Move a ticket to another workflow stage. ALWAYS pass comment with ## Vorige stap and ## Deze stap. Entering review ALSO requires ## Testverslag and ## Uitslag (PASS/FAIL). Token/resolution fields are required only when the workflow playbook says so (see get_workflow): tokens_used when agent_policy.require_tokens_used_on_transition; tokens_estimate when leaving a stage with require_tokens_estimate_on_exit; resolution when entering a stage with require_resolution_on_enter. Call get_ticket immediately before this tool and pass expected_stage (the current stage). On a human-gated stage also pass expected_review_state (current review_state, or null). Workflows with require_expected_stage_on_transition refuse the call without those fields. On 409 STAGE_CONFLICT the error includes current_stage, review_state and recent_comments — do not retry the same transition. On 409 HUMAN_GATE_OPEN the current stage still needs a UI verdict, or the chosen hop skips a gated stage; the body has current_stage, review_state and allowed_targets — do not retry, do not omit expected_* . Chat is not a verdict. This tool has no asHuman override. A stage with require_human_approval_on_exit may only be left after a human recorded a verdict in the TraceAI UI: get_ticket then shows review_state approved (move to human_approve_to), rejected (move to a human_reject_to target, comment needs ## Reden) or dismissed (move to human_dismiss_to, comment needs ## Reden). Only the outcomes the stage actually configures are available. Without a verdict the transition is refused; the verdict is cleared once the ticket moves.",
     {
       slug: z.string(),
       to_stage: z.string().describe("Target stage key"),
