@@ -17,12 +17,21 @@ function block(source: string, startMarker: string, endMarker: string): string {
 }
 
 describe("TRA-98 board columns stay in one desktop row", () => {
-  it("desktop board is a non-wrapping column track with horizontal overflow", () => {
+  it("desktop board is a non-wrapping column track with a themed bottom scroller", () => {
     const desktop = block(css, "\n.board {", "\n}");
     assert.match(desktop, /grid-auto-flow:\s*column/);
     assert.match(desktop, /grid-auto-columns:\s*minmax\(200px,\s*1fr\)/);
-    assert.match(desktop, /overflow-x:\s*auto/);
     assert.doesNotMatch(desktop, /auto-fit/);
+
+    const scroller = block(css, "\n.board-scroller {", "\n}");
+    assert.match(scroller, /overflow-x:\s*auto/);
+    assert.match(scroller, /flex:\s*1/);
+    assert.match(scroller, /scrollbar-color:\s*var\(--border\)\s*var\(--bg\)/);
+  });
+
+  it("board page fills the project pane so the scrollbar sits at the bottom", () => {
+    assert.match(css, /\.project-shell-main:has\(\.live-board\)/);
+    assert.match(css, /body:has\(\.project-shell\)/);
   });
 
   it("mobile board stacks columns at the project-shell breakpoint", () => {
@@ -30,6 +39,7 @@ describe("TRA-98 board columns stay in one desktop row", () => {
     const board = block(mobile, "\n  .board {", "\n  }");
     assert.match(board, /grid-auto-flow:\s*row/);
     assert.match(board, /grid-template-columns:\s*1fr/);
-    assert.match(board, /overflow-x:\s*visible/);
+    const scroller = block(mobile, "\n  .board-scroller {", "\n  }");
+    assert.match(scroller, /overflow-x:\s*visible/);
   });
 });

@@ -402,7 +402,8 @@ export function LiveBoard({
         </p>
       ) : null}
 
-      <div className="board">
+      <div className="board-scroller">
+        <div className="board">
         {boardStages.map((stage) => {
           const columnTickets = ticketsByStage[stage.key] ?? [];
           const isReorderColumn =
@@ -509,6 +510,7 @@ export function LiveBoard({
             </section>
           );
         })}
+        </div>
       </div>
     </div>
   );
