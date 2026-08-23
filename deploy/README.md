@@ -7,10 +7,16 @@ Two hosts, two Aurora tenants, same production Aurora API:
 | Raspberry Pi (prod) | 192.168.1.91 | `main` | live (`cmsiyy8oy00quoc01zzam3t6p`) | `~/deploy-traceai.sh` or `deploy/remote-update.sh` on the Pi |
 | Ubuntu laptop (test) | 192.168.1.185 | `test` (or any) | **TraceAI Test** (own website id + site key) | **manual** over LAN SSH — see below |
 
-GitHub-hosted Actions cannot reach `192.168.1.185`. There is no auto-deploy to the test laptop. From a machine on the same LAN:
+GitHub-hosted Actions cannot reach `192.168.1.185`. There is no auto-deploy to the test laptop.
+
+The test checkout is often a `--single-branch` clone of `main`. `git checkout test` then fails with `pathspec 'test' did not match`. First switch once (creates `origin/test` and a local `test` branch), then use `remote-update.sh`. Set `TRACEAI_BRANCH=test` in `~/.config/traceai/traceai.env` so later runs do not fall back to `main`.
 
 ```bash
-ssh joostvl@192.168.1.185 'TRACEAI_BRANCH=test TRACEAI_LAN_HOST=192.168.1.185 ~/TraceAI/deploy/remote-update.sh'
+# first time only — from a --single-branch main clone
+ssh joostvl@192.168.1.185 'cd ~/TraceAI && git config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*" && git fetch --prune origin refs/heads/test:refs/remotes/origin/test && git checkout -B test origin/test'
+
+# every update (script defaults to test when LAN host is 192.168.1.185)
+ssh joostvl@192.168.1.185 'TRACEAI_LAN_HOST=192.168.1.185 ~/TraceAI/deploy/remote-update.sh'
 ```
 
 Both stacks talk to `https://aurora-api.joostvanleeuwaarden.com`. The test host must use the TraceAI Test tenant so tickets never land on the live board.
@@ -108,5 +114,6 @@ TRACEAI_LAN_HOST=<this-host-ip> ~/TraceAI/deploy/remote-update.sh
 From Windows on the LAN, test laptop only:
 
 ```powershell
-ssh joostvl@192.168.1.185 "TRACEAI_BRANCH=test TRACEAI_LAN_HOST=192.168.1.185 ~/TraceAI/deploy/remote-update.sh"
+ssh joostvl@192.168.1.185 "cd ~/TraceAI && git config remote.origin.fetch `"+refs/heads/*:refs/remotes/origin/*`" && git fetch --prune origin refs/heads/test:refs/remotes/origin/test && git checkout -B test origin/test"
+ssh joostvl@192.168.1.185 "TRACEAI_LAN_HOST=192.168.1.185 ~/TraceAI/deploy/remote-update.sh"
 ```
