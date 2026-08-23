@@ -9,15 +9,18 @@ Two hosts, two Aurora tenants, same production Aurora API:
 
 GitHub-hosted Actions cannot reach `192.168.1.185`. There is no auto-deploy to the test laptop.
 
-The test checkout is often a `--single-branch` clone of `main`. `git checkout test` then fails with `pathspec 'test' did not match`. First switch once (creates `origin/test` and a local `test` branch), then use `remote-update.sh`. Set `TRACEAI_BRANCH=test` in `~/.config/traceai/traceai.env` so later runs do not fall back to `main`.
+The test checkout is often a `--single-branch` clone of `main`. `deploy/remote-update-test.sh` always pins `origin/test` and `192.168.1.185` (it widens fetch so `test` is visible). On the host, `~/update-test.sh` is the short entrypoint.
 
 ```bash
-# first time only — from a --single-branch main clone
-ssh joostvl@192.168.1.185 'cd ~/TraceAI && git config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*" && git fetch --prune origin refs/heads/test:refs/remotes/origin/test && git checkout -B test origin/test'
+# from any LAN machine
+ssh joostvl@192.168.1.185 ~/update-test.sh
 
-# every update (script defaults to test when LAN host is 192.168.1.185)
-ssh joostvl@192.168.1.185 'TRACEAI_LAN_HOST=192.168.1.185 ~/TraceAI/deploy/remote-update.sh'
+# or on the testhost itself
+~/update-test.sh
+~/TraceAI/deploy/remote-update-test.sh
 ```
+
+From Windows: `scripts/deploy-test-host.cmd`.
 
 Both stacks talk to `https://aurora-api.joostvanleeuwaarden.com`. The test host must use the TraceAI Test tenant so tickets never land on the live board.
 
@@ -114,6 +117,6 @@ TRACEAI_LAN_HOST=<this-host-ip> ~/TraceAI/deploy/remote-update.sh
 From Windows on the LAN, test laptop only:
 
 ```powershell
-ssh joostvl@192.168.1.185 "cd ~/TraceAI && git config remote.origin.fetch `"+refs/heads/*:refs/remotes/origin/*`" && git fetch --prune origin refs/heads/test:refs/remotes/origin/test && git checkout -B test origin/test"
-ssh joostvl@192.168.1.185 "TRACEAI_LAN_HOST=192.168.1.185 ~/TraceAI/deploy/remote-update.sh"
+ssh joostvl@192.168.1.185 ~/update-test.sh
+# or: scripts/deploy-test-host.cmd
 ```
