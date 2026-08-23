@@ -71,6 +71,7 @@ a:hover {
   padding: 0;
   width: 100%;
   flex: 1;
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -349,7 +350,9 @@ h2 {
   flex-direction: column;
   gap: 0.85rem;
   min-width: 0;
+  min-height: 0;
   flex: 1;
+  overflow: hidden;
 }
 
 .workflow-switcher {
@@ -530,7 +533,8 @@ h2 {
   grid-auto-columns: minmax(200px, 1fr);
   gap: 0.85rem;
   align-items: start;
-  min-width: 0;
+  width: max-content;
+  min-width: 100%;
   min-height: 100%;
 }
 
@@ -1728,6 +1732,7 @@ h2 {
 
   .live-board {
     flex: none;
+    overflow: visible;
   }
 
   .board-scroller {
@@ -1740,6 +1745,8 @@ h2 {
     grid-auto-flow: row;
     grid-auto-columns: unset;
     grid-template-columns: 1fr;
+    width: auto;
+    min-width: 0;
     min-height: 0;
   }
 }
