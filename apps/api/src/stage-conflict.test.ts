@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { AuthStore, DEFAULT_AGENT_SCOPES } from "@traceai/auth";
 import {
   ExpectedStateRequiredError,
+  HumanGateOpenError,
   MISSING_EXPECTED_STAGE,
   StageConflictError,
   ValidationError,
@@ -120,6 +121,41 @@ describe("POST /v1/tickets/:slug/transition stale-state (TRA-73)", () => {
         assert.equal(body.current_stage, "review");
         assert.equal(body.review_state, null);
         assert.equal(body.recent_comments?.length, 1);
+      },
+    );
+  });
+
+  it("A1b: HumanGateOpenError → HTTP 409 HUMAN_GATE_OPEN", async () => {
+    await withApp(
+      {
+        transitionTicket: async () => {
+          throw new HumanGateOpenError(
+            "todo",
+            null,
+            "in_progress",
+            ["in_progress", "done"],
+            'Stage "todo" is waiting for a human review verdict.',
+          );
+        },
+      },
+      async (app, token) => {
+        const res = await post(app, token, {
+          to_stage: "in_progress",
+          comment: COMMENT,
+          expected_stage: "todo",
+          expected_review_state: null,
+        });
+        assert.equal(res.status, 409);
+        const body = (await res.json()) as {
+          code?: string;
+          current_stage?: string;
+          review_state?: string | null;
+          allowed_targets?: string[];
+        };
+        assert.equal(body.code, "HUMAN_GATE_OPEN");
+        assert.equal(body.current_stage, "todo");
+        assert.equal(body.review_state, null);
+        assert.deepEqual(body.allowed_targets, ["in_progress", "done"]);
       },
     );
   });

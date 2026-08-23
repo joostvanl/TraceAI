@@ -10,6 +10,7 @@ import {
   AuroraNetworkError,
   computeTokenRollup,
   ExpectedStateRequiredError,
+  HumanGateOpenError,
   isProjectRole,
   membershipSlug,
   parseWorkflowDocument,
@@ -1479,6 +1480,19 @@ export function createApp(deps: {
             409,
           );
         }
+        if (error instanceof HumanGateOpenError) {
+          return c.json(
+            {
+              message: error.message,
+              code: error.code,
+              current_stage: error.current_stage,
+              review_state: error.review_state,
+              to_stage: error.to_stage,
+              allowed_targets: error.allowed_targets,
+            },
+            409,
+          );
+        }
         if (error instanceof ExpectedStateRequiredError) {
           return c.json(
             { message: error.message, code: "VALIDATION" },
@@ -2591,6 +2605,19 @@ export function createApp(deps: {
           to_stage: err.to_stage,
           stage_entered_at: err.stage_entered_at,
           recent_comments: err.recent_comments,
+        },
+        409,
+      );
+    }
+    if (err instanceof HumanGateOpenError) {
+      return c.json(
+        {
+          message: err.message,
+          code: err.code,
+          current_stage: err.current_stage,
+          review_state: err.review_state,
+          to_stage: err.to_stage,
+          allowed_targets: err.allowed_targets,
         },
         409,
       );
