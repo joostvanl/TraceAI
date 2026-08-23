@@ -121,13 +121,14 @@ TRACEAI_SESSION_SECRET=choose-a-long-random-secret
 
 Boards and pages require a session. `/login` verifies against Aurora CMS content type `app_login` (entry `default`, fields Username + Password). The Password field is hashed in Aurora; TraceAI never reads the hash — it calls Aurora management `verify-credentials`. The web server verifies via the TraceAI API (`POST /v1/ui/login/verify`) using the server-side `trc_…` token, then sets an HttpOnly, HMAC-signed cookie (`traceai_session`, 7 days). `/api/tickets` returns **401** without a session and otherwise proxies to the TraceAI API. Tickets land in **Backlog** with a light wish description; agents must refine the playbook sections before transitioning to To do.
 
-## Deploy on Raspberry Pi (Docker)
+## Deploy (Docker)
 
-See [deploy/README.md](deploy/README.md). Short version on the Pi:
+See [deploy/README.md](deploy/README.md). Production lives on the Pi (`192.168.1.91`, branch `main`, live Aurora tenant). The LAN test host is `192.168.1.185` and uses a separate Aurora tenant on the same production Aurora API. Deploy the test host **manually** over LAN SSH (GitHub-hosted Actions cannot reach it):
 
 ```bash
+# on the host
 ~/deploy-traceai.sh
-# UI: http://<pi-ip>:3011  API: http://<pi-ip>:3847/health
+# UI: http://<lan-ip>:3011  API: http://<lan-ip>:3847/health
 ```
 
 ## Live board (SSE)

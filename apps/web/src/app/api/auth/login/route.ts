@@ -4,6 +4,7 @@ import {
   SESSION_MAX_AGE_SECONDS,
   createSessionToken,
   isLoginConfigured,
+  cookieShouldBeSecure,
   sessionCookieOptions,
   sessionSecret,
   verifyCredentials,
@@ -77,7 +78,10 @@ export async function POST(request: Request) {
   response.cookies.set(
     SESSION_COOKIE,
     createSessionToken(result.identity),
-    sessionCookieOptions(SESSION_MAX_AGE_SECONDS),
+    sessionCookieOptions(
+      SESSION_MAX_AGE_SECONDS,
+      cookieShouldBeSecure(request),
+    ),
   );
   return response;
 }

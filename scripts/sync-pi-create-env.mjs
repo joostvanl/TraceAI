@@ -1,6 +1,7 @@
 /**
- * Upserts TRACEAI_TOKEN / TRACEAI_API_URL / TRACEAI_SESSION_SECRET on the
- * Pi env file used by deploy-traceai.sh, without echoing secrets.
+ * Upserts TRACEAI_TOKEN / TRACEAI_API_URL / TRACEAI_SESSION_SECRET on a
+ * deploy host env file used by deploy-traceai.sh, without echoing secrets.
+ * Target: TRACEAI_DEPLOY_HOST (fallback TRACEAI_PI_HOST, then the Pi).
  *
  * UI username/password live in Aurora (`app_login` / `default`) — not in env.
  * Password is hashed in Aurora; TraceAI verifies via management API.
@@ -14,7 +15,10 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-const HOST = process.env.TRACEAI_PI_HOST ?? "joostvl@192.168.1.91";
+const HOST =
+  process.env.TRACEAI_DEPLOY_HOST ??
+  process.env.TRACEAI_PI_HOST ??
+  "joostvl@192.168.1.91";
 const ENV_REMOTE = process.env.TRACEAI_ENV_FILE ?? "~/.config/traceai/traceai.env";
 const loginPath = join("scripts", ".ui-login.local");
 const AURORA_API =
@@ -120,7 +124,7 @@ upsert TRACEAI_SESSION_SECRET ${JSON.stringify(sessionSecret)}
 sed -i '/^TRACEAI_UI_USER=/d' "$ENV_FILE"
 sed -i '/^TRACEAI_UI_PASSWORD=/d' "$ENV_FILE"
 sed -i '/^TRACEAI_CREATE_SECRET=/d' "$ENV_FILE"
-echo "Pi env updated (token + session secret; UI login stays in Aurora)"
+echo "Deploy host env updated (token + session secret; UI login stays in Aurora)"
 `;
 
 execFileSync("ssh", ["-o", "BatchMode=yes", HOST, "bash", "-s"], {

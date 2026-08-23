@@ -1,13 +1,27 @@
-# TraceAI on Raspberry Pi (Docker)
+# TraceAI Docker deploy (Pi + LAN test host)
 
-Deploy the TraceAI API + read-only web UI on a Pi (aarch64) using the same Aurora
-website/project as local development.
+Two hosts, two Aurora tenants, same production Aurora API:
+
+| Host | LAN | Git branch | Aurora website | How to deploy |
+|---|---|---|---|---|
+| Raspberry Pi (prod) | 192.168.1.91 | `main` | live (`cmsiyy8oy00quoc01zzam3t6p`) | `~/deploy-traceai.sh` or `deploy/remote-update.sh` on the Pi |
+| Ubuntu laptop (test) | 192.168.1.185 | `test` (or any) | **TraceAI Test** (own website id + site key) | **manual** over LAN SSH — see below |
+
+GitHub-hosted Actions cannot reach `192.168.1.185`. There is no auto-deploy to the test laptop. From a machine on the same LAN:
+
+```bash
+ssh joostvl@192.168.1.185 'TRACEAI_BRANCH=test TRACEAI_LAN_HOST=192.168.1.185 ~/TraceAI/deploy/remote-update.sh'
+```
+
+Both stacks talk to `https://aurora-api.joostvanleeuwaarden.com`. The test host must use the TraceAI Test tenant so tickets never land on the live board.
+
+Set `TRACEAI_LAN_HOST` (and matching `TRACEAI_CORS_ORIGINS` / `NEXT_PUBLIC_TRACEAI_EVENTS_URL`) in `~/.config/traceai/traceai.env` on each host.
 
 ## Prerequisites
 
-- Docker + Compose on the Pi
+- Docker + Compose on the host
 - Clone of this repo (or `rsync` of sources)
-- Aurora user token + public site key (same as local)
+- Aurora user token + the **site key of that host’s tenant**
 
 ## Setup
 
@@ -15,13 +29,18 @@ Install the trigger script once as `~/deploy-traceai.sh`. It clones/updates this
 repository over public HTTPS, builds both containers and runs health checks.
 
 ```bash
+# Pi (defaults: branch main, LAN 192.168.1.91)
 chmod +x ~/deploy-traceai.sh
 ~/deploy-traceai.sh
+
+# Test laptop
+TRACEAI_BRANCH=test TRACEAI_LAN_HOST=192.168.1.185 TRACEAI_PUBLIC_ORIGIN= \
+  ~/deploy-traceai.sh
 ```
 
 On its first run it creates `~/.config/traceai/traceai.env` and stops. Fill
-`AURORA_USER_TOKEN` and `CMS_SITE_KEY`, then run the same command
-again. Secrets remain outside the git checkout.
+`AURORA_USER_TOKEN` and `CMS_SITE_KEY` (plus `AURORA_WEBSITE_ID` for the test
+tenant), then run the same command again. Secrets remain outside the git checkout.
 
 Upgrading from before TRA-81: rename `NEXT_PUBLIC_CMS_SITE_KEY` to
 `CMS_SITE_KEY` in that env file. The key is server-only and is now read at
@@ -31,13 +50,13 @@ the old name.
 
 ## URLs
 
-| Service | URL |
-|---|---|
-| Public UI | https://traceai.joostvanleeuwaarden.com |
-| LAN Web UI | http://192.168.1.91:3011 |
-| LAN API health | http://192.168.1.91:3847/health |
-| API SSE (bearer + project) | https://traceai.joostvanleeuwaarden.com/events?project=traceai |
-| Public MCP | https://traceai.joostvanleeuwaarden.com/mcp |
+| Service | Prod | Test (LAN only) |
+|---|---|---|
+| Web UI | https://traceai.joostvanleeuwaarden.com | http://192.168.1.185:3011 |
+| LAN Web UI | http://192.168.1.91:3011 | http://192.168.1.185:3011 |
+| API health | https://traceai.joostvanleeuwaarden.com/health | http://192.168.1.185:3847/health |
+| API SSE | https://traceai.joostvanleeuwaarden.com/events?project=traceai | http://192.168.1.185:3847/events |
+| MCP | https://traceai.joostvanleeuwaarden.com/mcp | http://192.168.1.185:3847/mcp (optional; Cursor stays on prod) |
 
 ## Cloudflare tunnel
 
@@ -78,6 +97,16 @@ after exposing it, or copy a bootstrap script into the container.)
 
 ## Update
 
+On the host (Pi or test laptop):
+
 ```bash
 ~/deploy-traceai.sh
+# or, once the checkout exists:
+TRACEAI_LAN_HOST=<this-host-ip> ~/TraceAI/deploy/remote-update.sh
+```
+
+From Windows on the LAN, test laptop only:
+
+```powershell
+ssh joostvl@192.168.1.185 "TRACEAI_BRANCH=test TRACEAI_LAN_HOST=192.168.1.185 ~/TraceAI/deploy/remote-update.sh"
 ```

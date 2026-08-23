@@ -5,6 +5,22 @@ REPO_URL="${TRACEAI_REPO_URL:-https://github.com/joostvanl/TraceAI.git}"
 APP_DIR="${TRACEAI_APP_DIR:-$HOME/TraceAI}"
 ENV_FILE="${TRACEAI_ENV_FILE:-$HOME/.config/traceai/traceai.env}"
 BRANCH="${TRACEAI_BRANCH:-main}"
+LAN_HOST="${TRACEAI_LAN_HOST:-192.168.1.91}"
+# Empty TRACEAI_PUBLIC_ORIGIN = LAN-only (test laptop). Unset = prod public hostname.
+if [[ "${TRACEAI_PUBLIC_ORIGIN+x}" == "x" && -z "${TRACEAI_PUBLIC_ORIGIN}" ]]; then
+  PUBLIC_ORIGIN=""
+else
+  PUBLIC_ORIGIN="${TRACEAI_PUBLIC_ORIGIN:-https://traceai.joostvanleeuwaarden.com}"
+fi
+LAN_UI="http://${LAN_HOST}:3011"
+LAN_API="http://${LAN_HOST}:3847"
+if [[ -n "$PUBLIC_ORIGIN" ]]; then
+  CORS_DEFAULT="${PUBLIC_ORIGIN},${LAN_UI}"
+  EVENTS_DEFAULT="${PUBLIC_ORIGIN}/events"
+else
+  CORS_DEFAULT="${LAN_UI}"
+  EVENTS_DEFAULT="${LAN_API}/events"
+fi
 
 log() {
   printf '[TraceAI deploy] %s\n' "$*"
@@ -21,18 +37,20 @@ docker compose version >/dev/null || fail "Docker Compose is not available"
 
 if [[ ! -f "$ENV_FILE" ]]; then
   mkdir -p "$(dirname "$ENV_FILE")"
-  cat >"$ENV_FILE" <<'EOF'
+  cat >"$ENV_FILE" <<EOF
 AURORA_API_URL=https://aurora-api.joostvanleeuwaarden.com
 AURORA_USER_TOKEN=
 AURORA_WEBSITE_ID=cmsiyy8oy00quoc01zzam3t6p
 AURORA_LOCALE=en-US
-TRACEAI_CORS_ORIGINS=https://traceai.joostvanleeuwaarden.com,http://192.168.1.91:3011
+TRACEAI_LAN_HOST=${LAN_HOST}
+TRACEAI_CORS_ORIGINS=${CORS_DEFAULT}
 NEXT_PUBLIC_CMS_API_URL=https://aurora-api.joostvanleeuwaarden.com
 CMS_SITE_KEY=
-NEXT_PUBLIC_TRACEAI_EVENTS_URL=https://traceai.joostvanleeuwaarden.com/events
+NEXT_PUBLIC_TRACEAI_EVENTS_URL=${EVENTS_DEFAULT}
 TRACEAI_API_URL=http://api:3847
 TRACEAI_TOKEN=
 TRACEAI_SESSION_SECRET=
+TRACEAI_HUMAN_PROXY_SECRET=
 EOF
   chmod 600 "$ENV_FILE"
   fail "Created $ENV_FILE. Fill AURORA_USER_TOKEN, CMS_SITE_KEY, TRACEAI_TOKEN, and TRACEAI_SESSION_SECRET, then run this script again."
@@ -104,5 +122,5 @@ done
 
 docker compose --project-name traceai --project-directory "$APP_DIR/deploy" ps
 log "Deployment complete"
-log "UI:  http://192.168.1.91:3011"
-log "API: http://192.168.1.91:3847/health"
+log "UI:  ${LAN_UI}"
+log "API: ${LAN_API}/health"

@@ -40,7 +40,7 @@ services:
       dockerfile: Dockerfile.web
       args:
         NEXT_PUBLIC_CMS_API_URL: ${NEXT_PUBLIC_CMS_API_URL:-https://aurora-api.joostvanleeuwaarden.com}
-        NEXT_PUBLIC_TRACEAI_EVENTS_URL: ${NEXT_PUBLIC_TRACEAI_EVENTS_URL:-http://192.168.1.91:3847/events}
+        NEXT_PUBLIC_TRACEAI_EVENTS_URL: ${NEXT_PUBLIC_TRACEAI_EVENTS_URL:-https://traceai.joostvanleeuwaarden.com/events}
     image: traceai-web:latest
     restart: unless-stopped
     ports:

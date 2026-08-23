@@ -2,6 +2,8 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { TraceApiClient, TraceApiError, type UiIdentity } from "@traceai/core";
 
+export { cookieShouldBeSecure, sessionCookieOptions } from "./session-cookie";
+
 export const SESSION_COOKIE = "traceai_session";
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
 
@@ -160,12 +162,3 @@ export function signHumanIdentityHeader(identity: SessionIdentity): string {
   return `${payload}.${sign(payload, secret)}`;
 }
 
-export function sessionCookieOptions(maxAge: number) {
-  return {
-    httpOnly: true,
-    sameSite: "lax" as const,
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge,
-  };
-}
