@@ -43,3 +43,31 @@ describe("TRA-98 board columns stay in one desktop row", () => {
     assert.match(scroller, /overflow-x:\s*visible/);
   });
 });
+
+describe("TRA-100 board scroller contains overflow on both axes", () => {
+  it("shell and live-board cannot grow past the pane", () => {
+    const siteMain = block(css, "\n.site-main:has(> .project-shell) {", "\n}");
+    assert.match(siteMain, /min-width:\s*0/);
+
+    const liveBoard = block(css, "\n.live-board {", "\n}");
+    assert.match(liveBoard, /min-width:\s*0/);
+    assert.match(liveBoard, /min-height:\s*0/);
+    assert.match(liveBoard, /overflow:\s*hidden/);
+  });
+
+  it("desktop board overflows the scroller at column mins instead of shrinking", () => {
+    const desktop = block(css, "\n.board {", "\n}");
+    assert.match(desktop, /width:\s*max-content/);
+    assert.match(desktop, /min-width:\s*100%/);
+    assert.doesNotMatch(desktop, /min-width:\s*0/);
+  });
+
+  it("mobile undoes containment so stacked columns are not clipped", () => {
+    const mobile = block(css, "@media (max-width: 640px) {", "\n.form-error {");
+    const liveBoard = block(mobile, "\n  .live-board {", "\n  }");
+    assert.match(liveBoard, /overflow:\s*visible/);
+    const board = block(mobile, "\n  .board {", "\n  }");
+    assert.match(board, /width:\s*auto/);
+    assert.match(board, /min-width:\s*0/);
+  });
+});
