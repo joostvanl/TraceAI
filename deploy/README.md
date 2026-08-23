@@ -7,11 +7,20 @@ Two hosts, two Aurora tenants, same production Aurora API:
 | Raspberry Pi (prod) | 192.168.1.91 | `main` | live (`cmsiyy8oy00quoc01zzam3t6p`) | `~/deploy-traceai.sh` or `deploy/remote-update.sh` on the Pi |
 | Ubuntu laptop (test) | 192.168.1.185 | `test` (or any) | **TraceAI Test** (own website id + site key) | **manual** over LAN SSH — see below |
 
-GitHub-hosted Actions cannot reach `192.168.1.185`. There is no auto-deploy to the test laptop. From a machine on the same LAN:
+GitHub-hosted Actions cannot reach `192.168.1.185`. There is no auto-deploy to the test laptop.
+
+The test checkout is often a `--single-branch` clone of `main`. `deploy/remote-update-test.sh` always pins `origin/test` and `192.168.1.185` (it widens fetch so `test` is visible). On the host, `~/update-test.sh` is the short entrypoint.
 
 ```bash
-ssh joostvl@192.168.1.185 'TRACEAI_BRANCH=test TRACEAI_LAN_HOST=192.168.1.185 ~/TraceAI/deploy/remote-update.sh'
+# from any LAN machine
+ssh joostvl@192.168.1.185 ~/update-test.sh
+
+# or on the testhost itself
+~/update-test.sh
+~/TraceAI/deploy/remote-update-test.sh
 ```
+
+From Windows: `scripts/deploy-test-host.cmd`.
 
 Both stacks talk to `https://aurora-api.joostvanleeuwaarden.com`. The test host must use the TraceAI Test tenant so tickets never land on the live board.
 
@@ -108,5 +117,6 @@ TRACEAI_LAN_HOST=<this-host-ip> ~/TraceAI/deploy/remote-update.sh
 From Windows on the LAN, test laptop only:
 
 ```powershell
-ssh joostvl@192.168.1.185 "TRACEAI_BRANCH=test TRACEAI_LAN_HOST=192.168.1.185 ~/TraceAI/deploy/remote-update.sh"
+ssh joostvl@192.168.1.185 ~/update-test.sh
+# or: scripts/deploy-test-host.cmd
 ```

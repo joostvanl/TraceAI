@@ -4,8 +4,21 @@ set -Eeuo pipefail
 REPO_URL="${TRACEAI_REPO_URL:-https://github.com/joostvanl/TraceAI.git}"
 APP_DIR="${TRACEAI_APP_DIR:-$HOME/TraceAI}"
 ENV_FILE="${TRACEAI_ENV_FILE:-$HOME/.config/traceai/traceai.env}"
-BRANCH="${TRACEAI_BRANCH:-main}"
+read_env_val() {
+  local key="$1"
+  grep -E "^${key}=" "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r' || true
+}
+if [[ -z "${TRACEAI_LAN_HOST:-}" && -f "$ENV_FILE" ]]; then
+  TRACEAI_LAN_HOST="$(read_env_val TRACEAI_LAN_HOST)"
+fi
 LAN_HOST="${TRACEAI_LAN_HOST:-192.168.1.91}"
+if [[ -z "${TRACEAI_BRANCH:-}" && -f "$ENV_FILE" ]]; then
+  TRACEAI_BRANCH="$(read_env_val TRACEAI_BRANCH)"
+fi
+if [[ -z "${TRACEAI_BRANCH:-}" && "$LAN_HOST" == "192.168.1.185" ]]; then
+  TRACEAI_BRANCH=test
+fi
+BRANCH="${TRACEAI_BRANCH:-main}"
 # Empty TRACEAI_PUBLIC_ORIGIN = LAN-only (test laptop). Unset = prod public hostname.
 if [[ "${TRACEAI_PUBLIC_ORIGIN+x}" == "x" && -z "${TRACEAI_PUBLIC_ORIGIN}" ]]; then
   PUBLIC_ORIGIN=""
@@ -43,6 +56,7 @@ AURORA_USER_TOKEN=
 AURORA_WEBSITE_ID=cmsiyy8oy00quoc01zzam3t6p
 AURORA_LOCALE=en-US
 TRACEAI_LAN_HOST=${LAN_HOST}
+TRACEAI_BRANCH=${BRANCH}
 TRACEAI_CORS_ORIGINS=${CORS_DEFAULT}
 NEXT_PUBLIC_CMS_API_URL=https://aurora-api.joostvanleeuwaarden.com
 CMS_SITE_KEY=
@@ -77,15 +91,21 @@ grep -q '^TRACEAI_API_URL=' "$ENV_FILE" ||
 
 if [[ -d "$APP_DIR/.git" ]]; then
   log "Updating $APP_DIR from $BRANCH"
-  git -C "$APP_DIR" fetch origin "$BRANCH"
-  git -C "$APP_DIR" checkout "$BRANCH"
-  git -C "$APP_DIR" pull --ff-only origin "$BRANCH"
+  if [[ -f "$APP_DIR/deploy/git-use-branch.sh" ]]; then
+    chmod +x "$APP_DIR/deploy/git-use-branch.sh"
+    "$APP_DIR/deploy/git-use-branch.sh" "$APP_DIR" "$BRANCH"
+  else
+    git -C "$APP_DIR" config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
+    git -C "$APP_DIR" fetch --prune origin "refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
+    git -C "$APP_DIR" checkout -B "$BRANCH" "origin/${BRANCH}"
+    git -C "$APP_DIR" pull --ff-only origin "$BRANCH"
+  fi
 elif [[ -e "$APP_DIR" ]] && [[ -n "$(ls -A "$APP_DIR" 2>/dev/null)" ]]; then
   fail "$APP_DIR exists but is not a git checkout. Move/remove it once, then retry."
 else
-  log "Cloning $REPO_URL"
+  log "Cloning $REPO_URL (all branches — testhost must be able to switch to test)"
   rm -rf "$APP_DIR"
-  git clone --branch "$BRANCH" --single-branch "$REPO_URL" "$APP_DIR"
+  git clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
 fi
 
 install -m 600 "$ENV_FILE" "$APP_DIR/deploy/.env"
