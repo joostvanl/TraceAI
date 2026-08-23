@@ -533,12 +533,12 @@ h2 {
   grid-auto-columns: minmax(200px, 1fr);
   gap: 0.85rem;
   align-items: start;
-  width: max-content;
   min-width: 100%;
   min-height: 100%;
 }
 
 .column {
+  min-width: 0;
   background: var(--bg-column);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -575,6 +575,7 @@ h2 {
   display: block;
   padding: 0.85rem;
   margin-bottom: 0.6rem;
+  overflow-wrap: anywhere;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -675,6 +676,7 @@ h2 {
   font-size: 0.95rem;
   font-weight: 560;
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .ticket-key {

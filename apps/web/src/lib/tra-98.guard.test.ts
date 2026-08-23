@@ -55,11 +55,12 @@ describe("TRA-100 board scroller contains overflow on both axes", () => {
     assert.match(liveBoard, /overflow:\s*hidden/);
   });
 
-  it("desktop board overflows the scroller at column mins instead of shrinking", () => {
+  it("desktop board fills the pane without intrinsic max-content tracks", () => {
     const desktop = block(css, "\n.board {", "\n}");
-    assert.match(desktop, /width:\s*max-content/);
     assert.match(desktop, /min-width:\s*100%/);
-    assert.doesNotMatch(desktop, /min-width:\s*0/);
+    assert.doesNotMatch(desktop, /max-content/);
+    const column = block(css, "\n.column {", "\n}");
+    assert.match(column, /min-width:\s*0/);
   });
 
   it("mobile undoes containment so stacked columns are not clipped", () => {
