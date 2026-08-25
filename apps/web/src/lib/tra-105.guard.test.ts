@@ -23,12 +23,13 @@ const ticketDetail = readFileSync(
 describe("TRA-105 one-step human-gate panel", () => {
   it("waiting panel is one form: comment field then configured outcome buttons", () => {
     assert.match(component, /Toelichting \(optioneel bij Goedkeuren/);
+    assert.match(component, /requiredHint/);
     assert.match(component, /chooseVerdict\("approved"\)/);
     assert.match(component, /chooseVerdict\("rejected"\)/);
     assert.match(component, /chooseVerdict\("dismissed"\)/);
-    assert.match(component, /"Goedkeuren"/);
-    assert.match(component, /"Afkeuren"/);
-    assert.match(component, /"Annuleren"/);
+    assert.match(component, />\s*Goedkeuren\s*</);
+    assert.match(component, />\s*Afkeuren\s*</);
+    assert.match(component, />\s*Annuleren\s*</);
     assert.doesNotMatch(component, /type Mode =/);
     assert.doesNotMatch(component, /setMode\(/);
     assert.doesNotMatch(component, /Bevestig goedkeuring/);

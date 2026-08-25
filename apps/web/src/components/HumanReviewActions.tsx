@@ -83,6 +83,12 @@ export function HumanReviewActions({
   const showApprove = Boolean(gate.approveTo);
   const showReject = Boolean(gate.rejectTo);
   const showDismiss = Boolean(gate.dismissTo);
+  const requiredHint = [
+    showReject ? "Afkeuren" : null,
+    showDismiss ? "Annuleren" : null,
+  ]
+    .filter(Boolean)
+    .join("/");
 
   async function postVerdict(action: VerdictAction, applyToChildren: boolean) {
     setError(null);
@@ -250,8 +256,8 @@ export function HumanReviewActions({
         onSubmit={(event) => event.preventDefault()}
       >
         <label>
-          Toelichting (optioneel bij Goedkeuren; verplicht bij Afkeuren
-          {showDismiss ? "/Annuleren" : ""})
+          Toelichting (optioneel bij Goedkeuren
+          {requiredHint ? `; verplicht bij ${requiredHint}` : ""})
           <textarea
             value={comment}
             onChange={(e) => {
@@ -271,7 +277,7 @@ export function HumanReviewActions({
               disabled={submitting}
               onClick={() => chooseVerdict("approved")}
             >
-              {submitting ? "Bezig…" : "Goedkeuren"}
+              Goedkeuren
             </button>
           ) : null}
           {showReject ? (
@@ -281,7 +287,7 @@ export function HumanReviewActions({
               disabled={submitting}
               onClick={() => chooseVerdict("rejected")}
             >
-              {submitting ? "Bezig…" : "Afkeuren"}
+              Afkeuren
             </button>
           ) : null}
           {showDismiss ? (
@@ -291,7 +297,7 @@ export function HumanReviewActions({
               disabled={submitting}
               onClick={() => chooseVerdict("dismissed")}
             >
-              {submitting ? "Bezig…" : "Annuleren"}
+              Annuleren
             </button>
           ) : null}
         </div>
