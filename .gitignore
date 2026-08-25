@@ -21,7 +21,10 @@ data/
 *.sqlite
 *.sqlite-*
 bootstrap-token.txt
-.cursor/
+# Local Cursor state; version project rules so Cloud Agents receive them
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
 data/
 backup/
 scripts/probe-*.mjs

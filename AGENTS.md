@@ -1,0 +1,17 @@
+# TraceAI agent bootstrap
+
+Alle development-workflow (wensen, tickets, comments, stage-transitions, wiki)
+gaat via **TraceAI MCP**, project slug **`traceai`**.
+Niet via GitHub Issues, PR-beschrijvingen als tracker, Aurora MCP, of alleen chat.
+
+## Eerste acties van elke sessie
+
+1. Bevestig dat TraceAI MCP beschikbaar is (`list_projects` of `get_project`).
+2. `get_project` met slug `traceai` — lees `agent_playbook` en default workflow.
+3. Werk daarna volgens die playbook. Bij een bestaand ticket: `get_ticket`, daarna
+   `get_workflow` op de **workflow-pin van dat ticket** (niet aannemen dat het de default is).
+4. Ticketwrites, comments, transitions en wiki: alleen TraceAI MCP.
+   Route: Cursor → TraceAI MCP → API. Nooit Aurora-direct.
+
+Detailregels (comment-secties, human gates, tokens, design packs) staan in
+`agent_playbook` / `get_workflow`. Die niet dupliceren hier.
