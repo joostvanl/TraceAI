@@ -26,8 +26,8 @@ Canonical working agreements live in each workflow's `stages_json` as:
 2. Call `get_workflow` â€” response includes `agent_policy` + per-stage `agent` rules.
 3. The API **enforces** these rules:
    - Ticket descriptions must meet `min_description_chars` and required `##` headings.
-   - Every `transition` requires a Markdown `comment`.
-   - Entering `review` requires `## Testverslag` and `## Uitslag` in that comment.
+   - Every `transition` requires a Markdown `comment` (min ~40 chars when the workflow requires a comment).
+   - Required comment headings come from workflow JSON (`agent_policy.require_comment_sections` and per-stage `require_comment_sections_on_*`). If those lists are empty, no `##` headings are required.
    - When `agent_policy.require_tokens_used_on_transition` is true, pass `tokens_used`
      (non-negative integer LLM token delta for that step).
    - When leaving a stage with `require_tokens_estimate_on_exit`, pass `tokens_estimate`

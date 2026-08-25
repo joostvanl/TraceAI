@@ -19,8 +19,8 @@ export const STANDARD_WORKER_WORKFLOW_DOCUMENT: WorkflowDocument = {
     ],
     on_every_transition: [
       "Before changing stage, post one Markdown transition comment on the ticket; this single comment must satisfy the global rules plus all applicable on_exit and on_enter rules.",
-      "Start with '## Vorige stap' describing what was true / done in the stage you leave.",
-      "Continue with '## Deze stap' describing what you completed, why the transition is appropriate, and what the next stage should verify.",
+      "Required Markdown headings are only those listed in this workflow JSON (agent_policy.require_comment_sections and per-stage require_comment_sections_on_*). If those lists are empty, a short comment without ## headings is enough.",
+      "Keep the comment additive: new facts for this hop, not a recap of the previous comment or the ticket description.",
       "List concrete artifacts (files, endpoints, commands, wiki slugs) when relevant.",
       "Pass tokens_used: a non-negative integer estimate of LLM tokens (prompt+completion) spent on this step.",
       "Call get_ticket immediately before transition_ticket. Pass expected_stage (current stage). When the current stage has require_human_approval_on_exit, also pass expected_review_state (current review_state, or null). Workflows with require_expected_stage_on_transition refuse the call without the required fields. On STAGE_CONFLICT, read the error body; do not retry the same transition.",
@@ -70,7 +70,7 @@ export const STANDARD_WORKER_WORKFLOW_DOCUMENT: WorkflowDocument = {
           "When moving to To do on a non-trivial ticket: ensure wiki parent design-packs exists; create/update pack root + needed children (functional-design, technical-design, use-cases, test-cases); link them via '## Design pack' on the ticket.",
           "If the verdict is rejected, move the ticket back to Backlog and reference the reason (## Reden).",
           "Pass tokens_estimate when leaving to To do.",
-          "Before leaving to To do, reevaluate the estimate with the most recent situation. If there are any changes or new insights, update tokens_estimate accordingly (and mention the delta in ## Deze stap).",
+          "Before leaving to To do, reevaluate the estimate with the most recent situation. If there are any changes or new insights, update tokens_estimate accordingly (and mention the delta in the comment).",
           "When Human rejects with a comment to not take this ticket any further, move the ticket to Done including the given reason (## Reden), a non-completed resolution, and ## Wiki (N/A or pack slug if anything was written).",
         ],
         require_comment_on_exit: true,
@@ -80,6 +80,8 @@ export const STANDARD_WORKER_WORKFLOW_DOCUMENT: WorkflowDocument = {
         human_approve_to: "todo",
         human_reject_to: ["backlog"],
         human_dismiss_to: "done",
+        require_comment_sections_on_reject: ["## Reden"],
+        require_comment_sections_on_dismiss: ["## Reden"],
       },
     },
     {
@@ -110,12 +112,12 @@ export const STANDARD_WORKER_WORKFLOW_DOCUMENT: WorkflowDocument = {
           "Active implementation. Follow the thin ticket playbook; use the design pack as the detailed design source when present. Update the design pack if implementation diverges materially from the agreed design.",
         on_exit: [
           "Comment what was implemented (files, APIs, behaviour).",
-          "If the design pack changed during implementation, list updated wiki slugs in ## Deze stap.",
+          "If the design pack changed during implementation, list updated wiki slugs in the comment.",
           "If moving to Review, include a short test report (see review stage rules).",
         ],
         require_comment_on_exit: true,
         comment_template:
-          "## Vorige stap\n...\n\n## Deze stap\n...\n\n## Testverslag\n- Test: ...\n- Resultaat: PASS/FAIL\n\n## Uitslag\nPASS|FAIL",
+          "## Testverslag\n- Test: ...\n- Resultaat: PASS/FAIL\n\n## Uitslag\nPASS|FAIL",
       },
     },
     {
@@ -142,10 +144,11 @@ export const STANDARD_WORKER_WORKFLOW_DOCUMENT: WorkflowDocument = {
         require_comment_on_exit: true,
         require_comment_sections_on_enter: ["## Testverslag", "## Uitslag"],
         comment_template:
-          "## Vorige stap\nImplementation completed: ...\n\n## Deze stap\nReady for review.\n\n## Testverslag\n- check — PASS\n\n## Uitslag\nPASS",
+          "## Testverslag\n- check — PASS\n\n## Uitslag\nPASS",
         require_human_approval_on_exit: true,
         human_approve_to: "done",
         human_reject_to: ["todo"],
+        require_comment_sections_on_reject: ["## Reden"],
       },
     },
     {

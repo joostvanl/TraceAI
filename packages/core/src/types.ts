@@ -22,6 +22,18 @@ export type WorkflowStageAgentRules = {
    * Markdown headings (case-insensitive), e.g. ["## Wiki"].
    */
   require_comment_sections_on_exit?: string[];
+  /**
+   * When leaving this gated stage toward a reject target, the comment must
+   * include these Markdown headings (case-insensitive). Empty/omitted = no
+   * heading gate (a non-empty comment is still required).
+   */
+  require_comment_sections_on_reject?: string[];
+  /**
+   * When leaving this gated stage toward a dismiss target, the comment must
+   * include these Markdown headings (case-insensitive). Empty/omitted = no
+   * heading gate (a non-empty comment is still required).
+   */
+  require_comment_sections_on_dismiss?: string[];
   /** Suggested comment skeleton shown to agents */
   comment_template?: string;
   /**
@@ -59,13 +71,14 @@ export type WorkflowStageAgentRules = {
   human_approve_to?: string;
   /**
    * Target stage key(s) for a "rejected" verdict. Empty/omitted means this
-   * gate has no reject outcome. Reject transitions must include "## Reden".
+   * gate has no reject outcome. Reject hops require a non-empty comment plus
+   * any headings in require_comment_sections_on_reject.
    */
   human_reject_to?: string[];
   /**
    * Optional target stage for a "dismissed" verdict (abandon / do not pursue).
-   * Omit on gates that should not offer Afzien. Dismiss transitions must
-   * include "## Reden".
+   * Omit on gates that should not offer Afzien. Dismiss hops require a
+   * non-empty comment plus any headings in require_comment_sections_on_dismiss.
    */
   human_dismiss_to?: string;
 };
@@ -89,6 +102,12 @@ export type WorkflowAgentPolicy = {
   min_description_chars?: number;
   /** Require Markdown ## headings in new ticket descriptions */
   require_description_headings?: string[];
+  /**
+   * Extra Markdown headings required on every transition comment
+   * (case-insensitive). Omitted or empty = no global heading gate.
+   * Parse must not default this to product-specific heading names.
+   */
+  require_comment_sections?: string[];
   /**
    * When true, every transition must include tokens_used (non-negative integer
    * delta for that step). Accumulated into ticket tokens_actual.
@@ -355,7 +374,7 @@ export type ListResult<T> = {
 
 export const DEFAULT_AGENT_POLICY: WorkflowAgentPolicy = {
   summary:
-    "TraceAI tickets must be self-contained for junior agents. Every workflow transition needs a Markdown comment describing completed work, plus tokens_used (self-reported LLM token delta for that step). Entering review always requires a short test report with results.",
+    "TraceAI tickets must be self-contained for junior agents. Every workflow transition needs a Markdown comment describing completed work, plus tokens_used (self-reported LLM token delta for that step). Required comment headings come from workflow JSON, not from core.",
   ticket_description: [
     "Write descriptions that a junior agent with no chat history can execute alone.",
     "Include: Context, Goal, What to implement (concrete steps), Out of scope, Acceptance criteria.",
@@ -365,8 +384,8 @@ export const DEFAULT_AGENT_POLICY: WorkflowAgentPolicy = {
   ],
   on_every_transition: [
     "Before changing stage, post a Markdown comment on the ticket.",
-    "Start with '## Vorige stap' describing what was true / done in the stage you leave.",
-    "Continue with '## Deze stap' describing what you completed and what the next stage should verify.",
+    "Required Markdown headings are only those listed in this workflow JSON (agent_policy.require_comment_sections and per-stage require_comment_sections_on_*). If those lists are empty, a short comment without ## headings is enough.",
+    "Keep the comment additive: new facts for this hop, not a recap of the previous comment or the ticket description.",
     "List concrete artifacts (files, endpoints, commands) when relevant.",
     "Pass tokens_used: a non-negative integer estimate of LLM tokens (prompt+completion) spent on this step.",
     "Call get_ticket immediately before transition_ticket. Pass expected_stage (current stage). When the current stage has require_human_approval_on_exit, also pass expected_review_state (current review_state, or null). Workflows with require_expected_stage_on_transition refuse the call without the required fields. On STAGE_CONFLICT, read the error body; do not retry the same transition.",
@@ -409,8 +428,8 @@ export const DEFAULT_STAGES: WorkflowStage[] = [
       on_exit: [
         "Wait for the human verdict in the UI (outcomes configured on this stage); only then transition.",
         "When moving to the approve target, confirm the description is complete enough for a junior agent.",
-        "If the verdict is rejected, move to the reject target and include ## Reden.",
-        "If the verdict is dismissed, move to the dismiss target with ## Reden and the Done enter requirements (resolution, ## Wiki).",
+        "If the verdict is rejected, move to the reject target and include the headings listed in require_comment_sections_on_reject.",
+        "If the verdict is dismissed, move to the dismiss target with the headings listed in require_comment_sections_on_dismiss and the Done enter requirements (resolution, ## Wiki).",
         "Pass tokens_estimate when leaving toward a target that requires it.",
       ],
       require_comment_on_exit: true,
@@ -420,6 +439,8 @@ export const DEFAULT_STAGES: WorkflowStage[] = [
       human_approve_to: "todo",
       human_reject_to: ["backlog"],
       human_dismiss_to: "done",
+      require_comment_sections_on_reject: ["## Reden"],
+      require_comment_sections_on_dismiss: ["## Reden"],
     },
   },
   {
@@ -433,13 +454,14 @@ export const DEFAULT_STAGES: WorkflowStage[] = [
       on_exit: [
         "Wait for the human intake verdict; only then transition.",
         "When approved, describe the first implementation step and confirm work can start.",
-        "When dismissed, move to the dismiss target with ## Reden, an appropriate non-completed resolution, and ## Wiki.",
+        "When dismissed, move to the dismiss target with the headings listed in require_comment_sections_on_dismiss, an appropriate non-completed resolution, and ## Wiki.",
         "When returning to Backlog or In Refinement (if allowed without this gate), explain why the ticket is no longer ready.",
       ],
       require_comment_on_exit: true,
       require_human_approval_on_exit: true,
       human_approve_to: "in_progress",
       human_dismiss_to: "done",
+      require_comment_sections_on_dismiss: ["## Reden"],
     },
   },
   {
@@ -454,7 +476,7 @@ export const DEFAULT_STAGES: WorkflowStage[] = [
       ],
       require_comment_on_exit: true,
       comment_template:
-        "## Vorige stap\n...\n\n## Deze stap\n...\n\n## Testverslag\n- Test: ...\n- Resultaat: PASS/FAIL\n\n## Uitslag\nPASS|FAIL",
+        "## Testverslag\n- Test: ...\n- Resultaat: PASS/FAIL\n\n## Uitslag\nPASS|FAIL",
     },
   },
   {
@@ -473,7 +495,7 @@ export const DEFAULT_STAGES: WorkflowStage[] = [
       require_comment_sections_on_enter: ["## Testverslag", "## Uitslag"],
       on_exit: [
         "Wait for the human verdict in the UI (outcomes configured on this stage); only then transition.",
-        "If the verdict is rejected, move to the reject target and include ## Reden.",
+        "If the verdict is rejected, move to the reject target and include the headings listed in require_comment_sections_on_reject.",
         "If approved toward Done with resolution completed, confirm acceptance criteria and ## Uitslag PASS.",
         "When moving to Done, include the required ## Wiki section.",
       ],
@@ -481,8 +503,9 @@ export const DEFAULT_STAGES: WorkflowStage[] = [
       require_human_approval_on_exit: true,
       human_approve_to: "done",
       human_reject_to: ["todo"],
+      require_comment_sections_on_reject: ["## Reden"],
       comment_template:
-        "## Vorige stap\nImplementation completed: ...\n\n## Deze stap\nReady for review.\n\n## Testverslag\n- `pnpm --filter @traceai/api build` — PASS\n- Manual check: ... — PASS\n\n## Uitslag\nPASS",
+        "## Testverslag\n- `pnpm --filter @traceai/api build` — PASS\n- Manual check: ... — PASS\n\n## Uitslag\nPASS",
     },
   },
   {
@@ -542,6 +565,16 @@ function parseStageAgent(raw: unknown): WorkflowStageAgentRules | undefined {
       item.require_comment_sections_on_exit,
     )
       ? item.require_comment_sections_on_exit.map((s) => String(s))
+      : undefined,
+    require_comment_sections_on_reject: Array.isArray(
+      item.require_comment_sections_on_reject,
+    )
+      ? item.require_comment_sections_on_reject.map((s) => String(s))
+      : undefined,
+    require_comment_sections_on_dismiss: Array.isArray(
+      item.require_comment_sections_on_dismiss,
+    )
+      ? item.require_comment_sections_on_dismiss.map((s) => String(s))
       : undefined,
     comment_template:
       item.comment_template != null ? String(item.comment_template) : undefined,
@@ -621,6 +654,10 @@ function parseAgentPolicy(raw: unknown): WorkflowAgentPolicy {
     require_description_headings: Array.isArray(item.require_description_headings)
       ? item.require_description_headings.map((s) => String(s))
       : DEFAULT_AGENT_POLICY.require_description_headings,
+    // Omitted/empty = no global heading gate. Never default to product headings.
+    require_comment_sections: Array.isArray(item.require_comment_sections)
+      ? item.require_comment_sections.map((s) => String(s))
+      : undefined,
     // Do not fall back to DEFAULT — missing means "not required" (compat).
     require_tokens_used_on_transition:
       typeof item.require_tokens_used_on_transition === "boolean"
@@ -880,11 +917,21 @@ export function validateHumanGateExit(input: {
 
   if (rejecting || dismissing) {
     const comment = input.comment?.trim() ?? "";
-    if (!normalizeHeading(comment).includes("## reden")) {
+    if (!comment) {
       errors.push(
-        `Leaving "${input.fromStage.key}" towards "${input.toStage.key}" requires comment section "## Reden" with the reason.`,
+        `Leaving "${input.fromStage.key}" towards "${input.toStage.key}" requires a comment.`,
       );
     }
+    const sections = rejecting
+      ? input.fromStage.agent?.require_comment_sections_on_reject
+      : input.fromStage.agent?.require_comment_sections_on_dismiss;
+    pushMissingCommentSections(
+      errors,
+      comment,
+      sections,
+      (section) =>
+        `Leaving "${input.fromStage.key}" towards "${input.toStage.key}" requires comment section "${section}".`,
+    );
   }
   return errors;
 }
@@ -961,6 +1008,49 @@ function normalizeHeading(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+function pushMissingCommentSections(
+  errors: string[],
+  comment: string,
+  sections: string[] | undefined,
+  message: (section: string) => string,
+): void {
+  for (const section of sections ?? []) {
+    if (!normalizeHeading(comment).includes(normalizeHeading(section))) {
+      errors.push(message(section));
+    }
+  }
+}
+
+/** Audit comment posted when a human records a review verdict. */
+export function formatReviewVerdictComment(input: {
+  stage: WorkflowStage;
+  verdict: TicketReviewState;
+  author: string;
+  target: string | null;
+  comment?: string | null;
+  cascadeNote?: string;
+}): string {
+  const cascade = input.cascadeNote ?? "";
+  const targetLabel = input.target ?? "—";
+  const action =
+    input.verdict === "approved"
+      ? `Goedgekeurd door ${input.author}${cascade}. De agent mag dit ticket nu naar "${targetLabel}" brengen.`
+      : input.verdict === "dismissed"
+        ? `Afgezien door ${input.author}${cascade}. De agent brengt dit ticket naar "${targetLabel}".`
+        : `Afgekeurd door ${input.author}${cascade}. De agent brengt dit ticket terug naar "${targetLabel}".`;
+  const note = input.comment?.trim() ?? "";
+  if (!note) return action;
+  const headingList =
+    input.verdict === "rejected"
+      ? input.stage.agent?.require_comment_sections_on_reject
+      : input.verdict === "dismissed"
+        ? input.stage.agent?.require_comment_sections_on_dismiss
+        : undefined;
+  const heading = headingList?.[0]?.trim();
+  if (heading) return `${action}\n\n${heading}\n${note}`;
+  return `${action}\n\n${note}`;
+}
+
 export function validateTicketDescription(
   description: string | undefined | null,
   policy: WorkflowAgentPolicy,
@@ -1003,38 +1093,31 @@ export function validateTransitionComment(input: {
   }
 
   if (comment) {
-    if (!normalizeHeading(comment).includes("## vorige stap")) {
-      errors.push(
-        'Transition comment must include heading "## Vorige stap" explaining work done in the stage you leave.',
-      );
-    }
-    if (!normalizeHeading(comment).includes("## deze stap")) {
-      errors.push(
-        'Transition comment must include heading "## Deze stap" describing what you completed and what the next stage should verify.',
-      );
-    }
+    pushMissingCommentSections(
+      errors,
+      comment,
+      input.policy.require_comment_sections,
+      (section) => `Transition comment must include heading "${section}".`,
+    );
   }
 
   const requiredSections =
     input.toStage.agent?.require_comment_sections_on_enter ?? [];
-  for (const section of requiredSections) {
-    if (!normalizeHeading(comment).includes(normalizeHeading(section))) {
-      errors.push(
-        `Entering "${input.toStage.key}" requires comment section "${section}".`,
-      );
-    }
-  }
+  pushMissingCommentSections(
+    errors,
+    comment,
+    requiredSections,
+    (section) => `Entering "${input.toStage.key}" requires comment section "${section}".`,
+  );
 
   if (input.fromStage.key !== input.toStage.key) {
-    const exitSections =
-      input.fromStage.agent?.require_comment_sections_on_exit ?? [];
-    for (const section of exitSections) {
-      if (!normalizeHeading(comment).includes(normalizeHeading(section))) {
-        errors.push(
-          `Leaving "${input.fromStage.key}" requires comment section "${section}".`,
-        );
-      }
-    }
+    pushMissingCommentSections(
+      errors,
+      comment,
+      input.fromStage.agent?.require_comment_sections_on_exit,
+      (section) =>
+        `Leaving "${input.fromStage.key}" requires comment section "${section}".`,
+    );
   }
 
   return errors;

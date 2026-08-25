@@ -1376,7 +1376,7 @@ export function createApp(deps: {
         return c.json(
           {
             message:
-              "comment is required on every transition (## Vorige stap + ## Deze stap; entering review also needs ## Testverslag and ## Uitslag)",
+              "comment is required on every transition (min ~40 chars; required Markdown headings come from the workflow JSON)",
             code: "VALIDATION",
           },
           400,

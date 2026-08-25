@@ -821,6 +821,16 @@ function WorkflowEditorPanelInner({
                   rows={5}
                 />
               </label>
+              <RuleListEditor
+                label="require_comment_sections (iedere hop)"
+                value={agentPolicy.require_comment_sections}
+                onChange={(require_comment_sections) =>
+                  setAgentPolicy((policy) => ({
+                    ...policy,
+                    require_comment_sections,
+                  }))
+                }
+              />
               <h3>Gedrag</h3>
               <pre className="workflow-editor__preview">{behaviour}</pre>
               <h3>Tickettemplates</h3>
@@ -1074,6 +1084,38 @@ function StageProperties({
         />
         Comment bij exit
       </label>
+      <RuleListEditor
+        label="require_comment_sections_on_enter"
+        value={agent.require_comment_sections_on_enter}
+        onChange={(require_comment_sections_on_enter) =>
+          onChange({ agent: { require_comment_sections_on_enter } })
+        }
+      />
+      <RuleListEditor
+        label="require_comment_sections_on_exit"
+        value={agent.require_comment_sections_on_exit}
+        onChange={(require_comment_sections_on_exit) =>
+          onChange({ agent: { require_comment_sections_on_exit } })
+        }
+      />
+      {agent.require_human_approval_on_exit ? (
+        <>
+          <RuleListEditor
+            label="require_comment_sections_on_reject"
+            value={agent.require_comment_sections_on_reject}
+            onChange={(require_comment_sections_on_reject) =>
+              onChange({ agent: { require_comment_sections_on_reject } })
+            }
+          />
+          <RuleListEditor
+            label="require_comment_sections_on_dismiss"
+            value={agent.require_comment_sections_on_dismiss}
+            onChange={(require_comment_sections_on_dismiss) =>
+              onChange({ agent: { require_comment_sections_on_dismiss } })
+            }
+          />
+        </>
+      ) : null}
       <label className="workflow-editor__check">
         <input
           type="checkbox"

@@ -40,6 +40,7 @@ import {
   exitRequiresPlaybookDescription,
   exitRequiresTokensEstimate,
   firstStageKey,
+  formatReviewVerdictComment,
   formatTicketKey,
   isTicketKeyPattern,
   normalizeProjectKey,
@@ -1928,18 +1929,14 @@ export class TraceService {
     const cascadeNote = input.cascadedFrom
       ? ` (doorgezet vanaf parent "${input.cascadedFrom}")`
       : "";
-    const body = [
-      "## Vorige stap",
-      `Ticket stond in "${stage.name}" te wachten op beoordeling.`,
-      "",
-      "## Deze stap",
-      verdict === "approved"
-        ? `Goedgekeurd door ${author}${cascadeNote}. De agent mag dit ticket nu naar "${target ?? "de volgende stage"}" brengen.`
-        : `Afgekeurd door ${author}${cascadeNote}. De agent brengt dit ticket terug naar "${target ?? "een eerdere stage"}".`,
-      ...(input.comment?.trim()
-        ? ["", verdict === "approved" ? "## Toelichting" : "## Reden", input.comment.trim()]
-        : []),
-    ].join("\n");
+    const body = formatReviewVerdictComment({
+      stage,
+      verdict,
+      author,
+      target,
+      comment: input.comment,
+      cascadeNote,
+    });
     await this.addComment({ ticket: ticket.slug, body, author });
 
     const updated = await this.client.updateEntry<Ticket>("ticket", ticket.id, {

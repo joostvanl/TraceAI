@@ -18,8 +18,8 @@ See [docs/identity-and-tokens.md](docs/identity-and-tokens.md) and
 Working agreements are stored in each workflow’s `stages_json` as a v2 document:
 
 - **Rich ticket descriptions** (self-contained for junior agents)
-- **Comment on every transition** (`## Vorige stap` + `## Deze stap`)
-- **Test report when entering review** (`## Testverslag` + `## Uitslag`)
+- **Comment on every transition** (required Markdown headings come from workflow JSON)
+- **Evidence headings only when a stage lists them** (`require_comment_sections_on_*`)
 
 Agents discover them via `get_project` (`agent_playbook`) / `get_workflow`
 (`agent_policy`). The API enforces them on create/update/transition.
