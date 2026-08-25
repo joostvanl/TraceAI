@@ -758,7 +758,7 @@ const HOMEPAGE_CONNECT_FALLBACK: HomepageConnectContent = {
     "Every transition_ticket needs a comment with ## Vorige stap and ## Deze stap, plus tokens_used when the workflow requires it.",
     "Leaving Backlog / In Refinement may require tokens_estimate (see require_*_on_exit_to flags on the stage).",
     "Entering review also requires ## Testverslag and ## Uitslag (PASS/FAIL).",
-    "Human-gated stages: a signed-in reviewer presses Goedkeuren/Afkeuren in the UI; the agent then performs the transition.",
+    "Human-gated stages: a signed-in reviewer presses Goedkeuren/Afkeuren/Annuleren in the UI; the agent then performs the transition.",
     "Entering Done needs resolution (completed | superseded | cancelled | duplicate | verification-only) and ## Wiki with page slug(s) or N/A.",
     "All ticket/workflow/wiki writes go through TraceAI MCP or the TraceAI API — never bypass TraceAI.",
     "Humans can add light wish-tickets from a project board (New ticket) after signing in; they land in Backlog for agents to refine.",

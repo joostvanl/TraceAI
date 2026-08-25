@@ -64,7 +64,7 @@ export type WorkflowStageAgentRules = {
   human_reject_to?: string[];
   /**
    * Optional target stage for a "dismissed" verdict (abandon / do not pursue).
-   * Omit on gates that should not offer Afzien. Dismiss transitions must
+   * Omit on gates that should not offer Annuleren. Dismiss transitions must
    * include "## Reden".
    */
   human_dismiss_to?: string;
@@ -865,7 +865,7 @@ export function validateHumanGateExit(input: {
     const verdict = input.reviewState?.trim();
     if (!isTicketReviewState(verdict)) {
       errors.push(
-        `Stage "${input.fromStage.key}" is waiting for a human review verdict. Ask the reviewer to use Goedkeuren/Afkeuren/Afzien in the TraceAI UI (as configured for this stage), then transition on the back of that verdict.`,
+        `Stage "${input.fromStage.key}" is waiting for a human review verdict. Ask the reviewer to use Goedkeuren/Afkeuren/Annuleren in the TraceAI UI (as configured for this stage), then transition on the back of that verdict.`,
       );
       return errors;
     }

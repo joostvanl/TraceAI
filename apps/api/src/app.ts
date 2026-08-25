@@ -1511,7 +1511,7 @@ export function createApp(deps: {
       return c.json(
         {
           message:
-            "A review verdict can only be recorded by a signed-in human via the TraceAI UI (Goedkeuren/Afkeuren).",
+            "A review verdict can only be recorded by a signed-in human via the TraceAI UI (Goedkeuren/Afkeuren/Annuleren).",
           code: "HUMAN_ONLY",
         },
         403,

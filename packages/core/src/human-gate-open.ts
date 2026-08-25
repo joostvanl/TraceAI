@@ -145,7 +145,7 @@ export function assertHumanGateTransition(input: {
         null,
         input.toStage.key,
         allowed,
-        `Stage "${input.fromStage.key}" is waiting for a human review verdict. Ask the reviewer to use Goedkeuren/Afkeuren/Afzien in the TraceAI UI, then transition on the back of that verdict. Do not retry this transition. Do not omit expected_stage or expected_review_state to bypass the gate.`,
+        `Stage "${input.fromStage.key}" is waiting for a human review verdict. Ask the reviewer to use Goedkeuren/Afkeuren/Annuleren in the TraceAI UI, then transition on the back of that verdict. Do not retry this transition. Do not omit expected_stage or expected_review_state to bypass the gate.`,
       );
     }
     const allowedNow = reviewVerdictTarget(input.fromStage, reviewState);
