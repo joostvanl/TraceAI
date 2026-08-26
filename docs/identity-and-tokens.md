@@ -24,7 +24,7 @@ Personal web users can create/list/revoke **their own** agent tokens without CLI
 
 | Layer | Path |
 |---|---|
-| UI | `/account/tokens` (link in header after login) |
+| UI | `/projects/{slug}/tokens` (project left menu, Pagina's → API-tokens); `/account/tokens` remains as an unlinked deep link |
 | Web proxy | `/api/account/tokens`, `/api/account/tokens/:id/revoke` |
 | API | `GET/POST /v1/me/tokens`, `POST /v1/me/tokens/:id/revoke` |
 

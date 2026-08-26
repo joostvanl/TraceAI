@@ -39,6 +39,15 @@ describe("TRA-93 WorkflowSwitcher removal", () => {
     assert.doesNotMatch(sidebar, /\/account\/tokens/);
   });
 
+  it("TRA-108: AuthStatus has no /account/tokens link or API-tokens label", () => {
+    const authStatus = readFileSync(
+      join(srcDir, "components", "AuthStatus.tsx"),
+      "utf8",
+    );
+    assert.doesNotMatch(authStatus, /\/account\/tokens/);
+    assert.doesNotMatch(authStatus, /API-tokens/);
+  });
+
   it("T16: Tickets is the first page link under /projects/:slug/tickets", () => {
     const sidebar = readFileSync(
       join(srcDir, "components", "ProjectSidebar.tsx"),
