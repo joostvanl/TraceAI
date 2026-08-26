@@ -1178,6 +1178,7 @@ h2 {
   margin-left: auto;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.6rem;
   font-size: 0.88rem;
 }
@@ -1538,6 +1539,17 @@ h2 {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-elevated);
+}
+
+.account-agent-api-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.account-agent-api-later {
+  opacity: 0.78;
 }
 
 .inbox-badge-lg {

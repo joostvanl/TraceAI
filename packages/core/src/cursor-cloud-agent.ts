@@ -119,14 +119,19 @@ export async function nudgeClaimedCloudAgent(
   return { attempted: true, calls: 2 };
 }
 
+export type CloudNudgeClientSource =
+  | CursorCloudFollowUp
+  | ((ticket: Ticket) => CursorCloudFollowUp | null);
+
 /**
  * Fire-and-forget: never await from the review HTTP handler.
  * Default scheduler is `setImmediate` so the 30s busy-retry cannot block the UI.
+ * Pass a per-ticket resolver so a later queue can reuse the same key lookup.
  */
 export function scheduleClaimedCloudNudges(
   tickets: readonly Ticket[],
   verdict: string,
-  client: CursorCloudFollowUp | null | undefined,
+  client: CloudNudgeClientSource | null | undefined,
   schedule: (fn: () => void) => void = (fn) => {
     setImmediate(fn);
   },
@@ -134,7 +139,9 @@ export function scheduleClaimedCloudNudges(
   if (!client) return;
   for (const ticket of tickets) {
     schedule(() => {
-      void nudgeClaimedCloudAgent(ticket, verdict, client).catch((error) => {
+      const resolved = typeof client === "function" ? client(ticket) : client;
+      if (!resolved) return;
+      void nudgeClaimedCloudAgent(ticket, verdict, resolved).catch((error) => {
         console.warn("[traceai] cursor cloud nudge threw", error);
       });
     });

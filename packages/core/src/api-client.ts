@@ -649,4 +649,38 @@ export class TraceApiClient {
       { asHuman: Boolean(this.humanIdentityHeader) },
     );
   }
+
+  listMyAgentApis() {
+    return this.request<{
+      items: Array<{
+        provider: string;
+        configured: boolean;
+        last4: string | null;
+      }>;
+    }>("/v1/me/agent-apis", {}, { asHuman: Boolean(this.humanIdentityHeader) });
+  }
+
+  putMyAgentApi(provider: string, apiKey: string) {
+    return this.request<{
+      provider: string;
+      configured: boolean;
+      last4: string | null;
+    }>(
+      `/v1/me/agent-apis/${encodeURIComponent(provider)}`,
+      { method: "PUT", body: JSON.stringify({ api_key: apiKey }) },
+      { asHuman: Boolean(this.humanIdentityHeader) },
+    );
+  }
+
+  deleteMyAgentApi(provider: string) {
+    return this.request<{
+      provider: string;
+      configured: boolean;
+      last4: string | null;
+    }>(
+      `/v1/me/agent-apis/${encodeURIComponent(provider)}`,
+      { method: "DELETE" },
+      { asHuman: Boolean(this.humanIdentityHeader) },
+    );
+  }
 }

@@ -152,6 +152,7 @@ export async function getTicket(
     getEntry<T>(apiId: string, slug: string): Promise<T>;
   } = getPublicClient(),
 ): Promise<Ticket | null> {
+  // Ticket.fields includes claimed_agent_id and claimed_by_user_id (TRA-114).
   try {
     return await client.getEntry<Ticket>("ticket", slugOrKey);
   } catch {

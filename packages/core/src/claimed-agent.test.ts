@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   CLAIM_TICKET_BEFORE_HUMAN_GATE,
+  claimPersistenceFields,
   claimedAgentKind,
   cloudWakeupPrompt,
   parseClaimedAgentId,
@@ -37,6 +38,17 @@ describe("claimed agent id", () => {
     assert.equal(claimedAgentKind("agent-1"), "other");
     assert.equal(claimedAgentKind(""), null);
     assert.equal(claimedAgentKind(null), null);
+  });
+
+  it("stores claimer with a claim and clears both when unclaimed", () => {
+    assert.deepEqual(claimPersistenceFields("bc-abc", "usr_alice"), {
+      claimed_agent_id: "bc-abc",
+      claimed_by_user_id: "usr_alice",
+    });
+    assert.deepEqual(claimPersistenceFields("", "usr_alice"), {
+      claimed_agent_id: "",
+      claimed_by_user_id: "",
+    });
   });
 });
 

@@ -29,6 +29,9 @@ export async function AuthStatus() {
           </span>
         ) : null}
       </Link>
+      <Link href="/account/agent-apis" className="auth-account-link">
+        Agent APIs
+      </Link>
       <Link href="/account/tokens" className="auth-account-link">
         API-tokens
       </Link>

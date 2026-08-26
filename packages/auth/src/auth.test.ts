@@ -44,3 +44,61 @@ describe("AuthStore", () => {
     }
   });
 });
+
+describe("agent API keys", () => {
+  it("encrypts at rest and never returns the secret from list/put", () => {
+    const dir = mkdtempSync(join(tmpdir(), "traceai-auth-"));
+    const store = new AuthStore(join(dir, "test.sqlite"));
+    try {
+      const user = store.createUser({
+        email: "owner@example.com",
+        name: "Owner",
+      });
+      const secret = "session-secret-for-aes";
+      const put = store.putAgentApiKey({
+        userId: user.id,
+        provider: "cursor",
+        apiKey: "key_abcdefghijklmnopqrstuvwxyz",
+        secret,
+      });
+      assert.equal(put.configured, true);
+      assert.equal(put.last4, "wxyz");
+      assert.equal(
+        JSON.stringify(put).includes("key_abcdefghijklmnopqrstuvwxyz"),
+        false,
+      );
+      const listed = store.listAgentApiKeyMeta(user.id);
+      assert.deepEqual(listed, [
+        { provider: "cursor", configured: true, last4: "wxyz" },
+      ]);
+      const record = store.getAgentApiKeyRecord(user.id, "cursor");
+      assert.ok(record);
+      assert.equal(record.last4, "wxyz");
+      assert.ok(!record.ciphertext.equals(Buffer.from("key_abcdefghijklmnopqrstuvwxyz")));
+      const replaced = store.putAgentApiKey({
+        userId: user.id,
+        provider: "cursor",
+        apiKey: "key_REPLACED_9999",
+        secret,
+      });
+      assert.equal(replaced.last4, "9999");
+      assert.equal(store.deleteAgentApiKey(user.id, "cursor"), true);
+      assert.equal(store.getAgentApiKeyRecord(user.id, "cursor"), null);
+      assert.deepEqual(store.listAgentApiKeyMeta(user.id), []);
+    } finally {
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("AES-256-GCM agent key crypto", () => {
+  it("round-trips and fails closed on tamper", async () => {
+    const { decryptAgentApiKey, encryptAgentApiKey } = await import("./crypto.js");
+    const secret = "unit-test-secret";
+    const { ciphertext, nonce } = encryptAgentApiKey("plain-key-value", secret);
+    assert.equal(decryptAgentApiKey(ciphertext, nonce, secret), "plain-key-value");
+    ciphertext[0] = ciphertext[0]! ^ 0xff;
+    assert.throws(() => decryptAgentApiKey(ciphertext, nonce, secret));
+  });
+});
