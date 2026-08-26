@@ -549,7 +549,7 @@ describe("durable busy-queue (TRA-113)", () => {
         nudgeQueue: queue,
         now: extras.now,
       });
-      await fn({ app, token, queue, jobs });
+      await fn({ app, token: token.token, queue, jobs });
     } finally {
       queue.close();
       store.close();
@@ -622,11 +622,12 @@ describe("durable busy-queue (TRA-113)", () => {
     const queue = new NudgeQueueStore(":memory:");
     try {
       const user = store.createUser({ email: "c@example.com", name: "C" });
-      const token = store.createToken({
+      const created = store.createToken({
         userId: user.id,
         name: "agent",
         scopes: [...DEFAULT_AGENT_SCOPES],
       });
+      const token = created.token;
       const jobs: Array<() => void> = [];
       const missingKeyApp = createApp({
         authStore: store,

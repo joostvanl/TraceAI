@@ -1617,6 +1617,7 @@ export function createApp(deps: {
         400,
       );
     }
+    const verdict = body.verdict;
     const existing = await deps.service.getTicket(param(c, "slug"));
     if (!existing) {
       return c.json({ message: "Ticket not found", code: "NOT_FOUND" }, 404);
@@ -1638,7 +1639,7 @@ export function createApp(deps: {
     }
     const actor = c.get("actor");
     const result = await deps.service.recordReviewVerdict(param(c, "slug"), {
-      verdict: body.verdict,
+      verdict: verdict,
       comment: body.comment,
       author: attributionName(
         human,
@@ -1657,7 +1658,7 @@ export function createApp(deps: {
     }
     scheduleClaimedCloudNudges(
       [result.ticket, ...result.cascaded],
-      body.verdict,
+      verdict,
       cursorCloud,
       deps.scheduleWakeup,
       (ticket, nudgeResult) => {
@@ -1666,7 +1667,7 @@ export function createApp(deps: {
           enqueueBusyCloudNudgeForVerdict(
             nudgeQueue,
             ticket,
-            body.verdict,
+            verdict,
             nudgeResult,
             now(),
           );
