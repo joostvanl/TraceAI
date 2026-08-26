@@ -133,7 +133,7 @@ function handlerBody(from: number): string {
 type Route = { key: string; path: string; body: string };
 
 function routes(): Route[] {
-  const re = /app\.(get|post|patch|delete)\(\s*\n?\s*"([^"]+)"/g;
+  const re = /app\.(get|post|put|patch|delete)\(\s*\n?\s*"([^"]+)"/g;
   const found: Route[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(source))) {
