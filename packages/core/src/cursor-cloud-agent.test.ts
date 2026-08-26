@@ -148,6 +148,32 @@ describe("scheduleClaimedCloudNudges", () => {
     assert.equal(scheduled, 0);
   });
 
+  it("resolves a per-ticket client and skips tickets with none", async () => {
+    const calls: string[] = [];
+    const scheduled: Array<() => void> = [];
+    scheduleClaimedCloudNudges(
+      [
+        ticket({ claimed_agent_id: "bc-a", slug: "with-key" }),
+        ticket({ claimed_agent_id: "bc-b", slug: "no-key" }),
+      ],
+      "approved",
+      (t) =>
+        t.slug === "with-key"
+          ? {
+              followUp: async (id) => {
+                calls.push(id);
+                return { ok: true, status: 201, busy: false };
+              },
+            }
+          : null,
+      (fn) => scheduled.push(fn),
+    );
+    assert.equal(scheduled.length, 2);
+    for (const job of scheduled) job();
+    await new Promise((r) => setImmediate(r));
+    assert.deepEqual(calls, ["bc-a"]);
+  });
+
   it("reports busy to onBusy after the scheduled job runs", async () => {
     const scheduled: Array<() => void> = [];
     const busy: string[] = [];

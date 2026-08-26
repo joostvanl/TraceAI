@@ -93,7 +93,10 @@ import {
   type ProjectRole,
 } from "./roles.js";
 import { relationSlug, relationSlugOrEmpty } from "./relations.js";
-import { parseClaimedAgentId } from "./claimed-agent.js";
+import {
+  claimPersistenceFields,
+  parseClaimedAgentId,
+} from "./claimed-agent.js";
 import {
   buildReviewInboxItems,
   type ReviewInboxItem,
@@ -1603,14 +1606,21 @@ export class TraceService {
   async claimTicket(
     slug: string,
     agentId: string | null | undefined,
+    actorUserId?: string | null,
   ): Promise<Ticket> {
     await this.ensureReady();
     const ticket = await this.resolveTicket(slug);
     if (!ticket) throw new NotFoundError(`Ticket not found: ${slug}`);
     const parsed = parseClaimedAgentId(agentId);
     if (!parsed.ok) throw new ValidationError(parsed.message);
+    const fields = claimPersistenceFields(parsed.value, actorUserId);
+    if (fields.claimed_agent_id && !fields.claimed_by_user_id) {
+      throw new ValidationError(
+        "claim requires an authenticated actor (claimed_by_user_id)",
+      );
+    }
     const updated = await this.client.updateEntry<Ticket>("ticket", ticket.id, {
-      fields: { claimed_agent_id: parsed.value },
+      fields,
     });
     await this.ensurePublished("ticket", updated);
     await this.upsertSearchTicket(updated);

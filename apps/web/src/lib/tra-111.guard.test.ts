@@ -14,7 +14,6 @@ describe("TRA-111 header API-tokens removal", () => {
     );
     assert.doesNotMatch(authStatus, /\/account\/tokens/);
     assert.doesNotMatch(authStatus, /API-tokens/);
-    assert.doesNotMatch(authStatus, /auth-account-link/);
     assert.match(authStatus, /href="\/inbox"/);
     assert.match(authStatus, /href="\/admin\/users"/);
   });
@@ -47,8 +46,8 @@ describe("TRA-111 header API-tokens removal", () => {
     assert.match(cms, /API-tokens in the project left menu/);
   });
 
-  it("unused .auth-account-link CSS is gone", () => {
+  it("header still has no API-tokens; auth-account-link is for Agent APIs (TRA-114)", () => {
     const css = readFileSync(join(srcDir, "app", "globals.css"), "utf8");
-    assert.doesNotMatch(css, /\.auth-account-link/);
+    assert.match(css, /\.auth-account-link/);
   });
 });

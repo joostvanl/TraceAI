@@ -29,6 +29,9 @@ export async function AuthStatus() {
           </span>
         ) : null}
       </Link>
+      <Link href="/account/agent-apis" className="auth-account-link">
+        Agent APIs
+      </Link>
       {(identity.is_platform_admin || identity.mode === "legacy") && (
         <Link href="/admin/users" className="auth-admin-link">
           Admin

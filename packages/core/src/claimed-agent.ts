@@ -52,6 +52,24 @@ export function claimedAgentLabel(
   return `${prefix} ${shown}`;
 }
 
+
+/**
+ * Persist claim + claimer together. Clearing the claim clears the claimer.
+ * A non-empty `bc-` / other id must store the claiming AuthStore user id.
+ */
+export function claimPersistenceFields(
+  agentId: string,
+  actorUserId: string | null | undefined,
+): { claimed_agent_id: string; claimed_by_user_id: string } {
+  if (!agentId) {
+    return { claimed_agent_id: "", claimed_by_user_id: "" };
+  }
+  return {
+    claimed_agent_id: agentId,
+    claimed_by_user_id: typeof actorUserId === "string" ? actorUserId.trim() : "",
+  };
+}
+
 export function cloudWakeupPrompt(input: {
   ticketKey: string | null | undefined;
   slug: string;

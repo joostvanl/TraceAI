@@ -88,3 +88,34 @@ export function maskToken(token: string): string {
   if (token.length < 12) return `${TRACEAI_TOKEN_PREFIX}…`;
   return `${token.slice(0, 8)}…${token.slice(-4)}`;
 }
+
+/** v1 writable provider. Page lists more; only this one stores a key. */
+export const WRITABLE_AGENT_API_PROVIDERS = ["cursor"] as const;
+export type WritableAgentApiProvider =
+  (typeof WRITABLE_AGENT_API_PROVIDERS)[number];
+
+export const KNOWN_AGENT_API_PROVIDERS = [
+  "cursor",
+  "claude_code",
+  "codex",
+] as const;
+export type KnownAgentApiProvider = (typeof KNOWN_AGENT_API_PROVIDERS)[number];
+
+export function isWritableAgentApiProvider(
+  value: string,
+): value is WritableAgentApiProvider {
+  return (WRITABLE_AGENT_API_PROVIDERS as readonly string[]).includes(value);
+}
+
+export function isKnownAgentApiProvider(
+  value: string,
+): value is KnownAgentApiProvider {
+  return (KNOWN_AGENT_API_PROVIDERS as readonly string[]).includes(value);
+}
+
+/** Public metadata — never includes the secret. */
+export type AgentApiKeyMeta = {
+  provider: string;
+  configured: boolean;
+  last4: string | null;
+};

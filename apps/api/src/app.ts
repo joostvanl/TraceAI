@@ -2,9 +2,8 @@ import { Hono, type Context, type Next } from "hono";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
 import { timingSafeEqual } from "node:crypto";
-import type { AuthStore } from "@traceai/auth";
-import { hasScope } from "@traceai/auth";
 import type { TraceService } from "@traceai/core";
+import { hasScope, isWritableAgentApiProvider, type AuthStore } from "@traceai/auth";
 import {
   AuroraApiError,
   AuroraNetworkError,
@@ -17,7 +16,6 @@ import {
   relationSlug,
   requiredRoleForAction,
   claimedAgentKind,
-  CursorCloudAgentClient,
   scheduleClaimedCloudNudges,
   StageConflictError,
   TICKET_REVIEW_STATES,
@@ -82,6 +80,11 @@ import {
   resolveSelfServiceAuthUser,
   sanitizeSelfServiceScopes,
 } from "./self-service-tokens.js";
+import {
+  agentApiEncryptionSecret,
+  cursorFollowUpForClaimer,
+  listedAgentApiProviders,
+} from "./agent-api-keys.js";
 
 const HUMAN_PROXY_HEADER = "x-traceai-human-proxy";
 
@@ -296,6 +299,7 @@ function mapTicket(t: NonNullable<
     sort_order: t.fields.sort_order ?? null,
     claimed_agent_id: t.fields.claimed_agent_id?.trim() || null,
     claimed_agent_kind: claimedAgentKind(t.fields.claimed_agent_id),
+    claimed_by_user_id: t.fields.claimed_by_user_id?.trim() || null,
   };
 }
 
@@ -429,17 +433,23 @@ function httpRouteLabel(c: Context): string {
 export function createApp(deps: {
   authStore: AuthStore;
   service: TraceService;
-  cursorCloud?: CursorCloudFollowUp | null;
+  cursorCloud?: CursorCloudFollowUp | ((ticket: Ticket) => CursorCloudFollowUp | null) | null;
+  cursorCloudFetch?: typeof fetch;
   scheduleWakeup?: (fn: () => void) => void;
   nudgeQueue?: NudgeQueueStore | null;
   now?: () => Date;
 }) {
   const app = new Hono<{ Variables: AppVariables }>();
   const auth = createAuthMiddleware(deps.authStore);
+  // Live path: per-claimer Cursor key (TRA-114). Never CURSOR_API_KEY / fromEnv().
+  // Tests may inject a shared client; `null` skips wake-up entirely.
   const cursorCloud =
-    deps.cursorCloud === undefined
-      ? CursorCloudAgentClient.fromEnv()
-      : deps.cursorCloud;
+    deps.cursorCloud !== undefined
+      ? deps.cursorCloud
+      : (ticket: Ticket) =>
+          cursorFollowUpForClaimer(deps.authStore, ticket, {
+            fetchImpl: deps.cursorCloudFetch,
+          });
   const nudgeQueue =
     deps.nudgeQueue === undefined ? getNudgeQueueStore() : deps.nudgeQueue;
   const now = deps.now ?? (() => new Date());
@@ -448,7 +458,7 @@ export function createApp(deps: {
     "*",
     cors({
       origin: corsOrigins(),
-      allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+      allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       allowHeaders: [
         "Authorization",
         "Content-Type",
@@ -800,6 +810,125 @@ export function createApp(deps: {
       },
     });
     return c.json(token);
+  });
+
+  app.get("/v1/me/agent-apis", async (c) => {
+    const human = resolveHumanIdentity(c);
+    const resolved = await resolveSelfServiceAuthUser(
+      deps.service,
+      deps.authStore,
+      human,
+    );
+    if (!resolved.ok) {
+      return c.json(
+        { message: resolved.message, code: resolved.code },
+        resolved.status,
+      );
+    }
+    return c.json({
+      items: listedAgentApiProviders(deps.authStore, resolved.user.id),
+    });
+  });
+
+  app.put("/v1/me/agent-apis/:provider", async (c) => {
+    const human = resolveHumanIdentity(c);
+    const resolved = await resolveSelfServiceAuthUser(
+      deps.service,
+      deps.authStore,
+      human,
+    );
+    if (!resolved.ok) {
+      return c.json(
+        { message: resolved.message, code: resolved.code },
+        resolved.status,
+      );
+    }
+    const provider = param(c, "provider");
+    if (!isWritableAgentApiProvider(provider)) {
+      return c.json(
+        {
+          message: "Only the Cursor provider can be saved in this version",
+          code: "VALIDATION",
+        },
+        400,
+      );
+    }
+    const secret = agentApiEncryptionSecret();
+    if (!secret) {
+      return c.json(
+        {
+          message:
+            "Agent API encryption secret is not configured (TRACEAI_AGENT_API_SECRET or TRACEAI_SESSION_SECRET)",
+          code: "NOT_CONFIGURED",
+        },
+        503,
+      );
+    }
+    const body = await c.req
+      .json<{ api_key?: string }>()
+      .catch(() => ({} as { api_key?: string }));
+    const apiKey = body.api_key?.trim() ?? "";
+    if (!apiKey) {
+      return c.json(
+        { message: "api_key is required", code: "VALIDATION" },
+        400,
+      );
+    }
+    const saved = deps.authStore.putAgentApiKey({
+      userId: resolved.user.id,
+      provider,
+      apiKey,
+      secret,
+    });
+    audit(c, {
+      action: "agent_api.save",
+      resourceType: "agent_api_key",
+      resourceId: `${resolved.user.id}:${provider}`,
+      meta: {
+        userId: resolved.user.id,
+        uiSlug: resolved.uiSlug,
+        provider,
+        last4: saved.last4,
+      },
+    });
+    return c.json(saved);
+  });
+
+  app.delete("/v1/me/agent-apis/:provider", async (c) => {
+    const human = resolveHumanIdentity(c);
+    const resolved = await resolveSelfServiceAuthUser(
+      deps.service,
+      deps.authStore,
+      human,
+    );
+    if (!resolved.ok) {
+      return c.json(
+        { message: resolved.message, code: resolved.code },
+        resolved.status,
+      );
+    }
+    const provider = param(c, "provider");
+    if (!isWritableAgentApiProvider(provider)) {
+      return c.json(
+        {
+          message: "Only the Cursor provider can be removed in this version",
+          code: "VALIDATION",
+        },
+        400,
+      );
+    }
+    deps.authStore.deleteAgentApiKey(resolved.user.id, provider);
+    audit(c, {
+      action: "agent_api.delete",
+      resourceType: "agent_api_key",
+      resourceId: `${resolved.user.id}:${provider}`,
+      meta: {
+        userId: resolved.user.id,
+        uiSlug: resolved.uiSlug,
+        provider,
+      },
+    });
+    return c.json({ provider, configured: false, last4: null });
   });
 
   // Web UI login: personal `traceai_user` entries (preferred) or legacy
@@ -1209,6 +1338,7 @@ export function createApp(deps: {
           sort_order: t.fields.sort_order ?? null,
           claimed_agent_id: t.fields.claimed_agent_id?.trim() || null,
           claimed_agent_kind: claimedAgentKind(t.fields.claimed_agent_id),
+          claimed_by_user_id: t.fields.claimed_by_user_id?.trim() || null,
         };
       }),
     );
@@ -1366,7 +1496,12 @@ export function createApp(deps: {
         400,
       );
     }
-    const ticket = await deps.service.claimTicket(param(c, "slug"), body.agent_id);
+    const actor = c.get("actor");
+    const ticket = await deps.service.claimTicket(
+      param(c, "slug"),
+      body.agent_id,
+      actor.userId,
+    );
     const mapped = mapTicket(ticket);
     publishTicketEvent(ticketEventFromMapped("ticket.updated", mapped));
     audit(c, {
@@ -1376,6 +1511,7 @@ export function createApp(deps: {
       meta: {
         claimed_agent_id: mapped.claimed_agent_id,
         claimed_agent_kind: mapped.claimed_agent_kind,
+        claimed_by_user_id: mapped.claimed_by_user_id,
       },
     });
     return c.json(mapped);

@@ -234,6 +234,11 @@ export type TicketFields = {
    * Empty = unclaimed. Cloud ids start with `bc-`.
    */
   claimed_agent_id?: string;
+  /**
+   * AuthStore `users.id` of the actor who last claimed (TRA-114). Empty when
+   * unclaimed. Nudge decrypts this user's Cursor key — not the verdict-giver's.
+   */
+  claimed_by_user_id?: string;
 };
 
 export const TICKET_RESOLUTIONS = [

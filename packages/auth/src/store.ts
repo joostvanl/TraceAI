@@ -2,13 +2,16 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import {
+  encryptAgentApiKey,
   generateRawToken,
   hashToken,
+  last4OfSecret,
   newId,
   tokenPrefixHint,
 } from "./crypto.js";
 import {
   DEFAULT_AGENT_SCOPES,
+  type AgentApiKeyMeta,
   type AuditEntry,
   type CreatedToken,
   type Scope,
@@ -20,6 +23,12 @@ import {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function asBlob(value: unknown): Buffer {
+  if (Buffer.isBuffer(value)) return value;
+  if (value instanceof Uint8Array) return Buffer.from(value);
+  throw new Error("undecryptable");
 }
 
 function parseScopes(raw: string): Scope[] {
@@ -79,9 +88,21 @@ export class AuthStore {
         created_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS agent_api_keys (
+        user_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        ciphertext BLOB NOT NULL,
+        nonce BLOB NOT NULL,
+        last4 TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (user_id, provider),
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+
       CREATE INDEX IF NOT EXISTS idx_tokens_hash ON tokens(token_hash);
       CREATE INDEX IF NOT EXISTS idx_tokens_user ON tokens(user_id);
       CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor_user_id);
+      CREATE INDEX IF NOT EXISTS idx_agent_api_keys_user ON agent_api_keys(user_id);
     `);
   }
 
@@ -354,6 +375,90 @@ export class AuthStore {
       meta: row.meta == null ? null : String(row.meta),
       createdAt: String(row.created_at),
     }));
+  }
+
+  putAgentApiKey(input: {
+    userId: string;
+    provider: string;
+    apiKey: string;
+    secret: string;
+  }): AgentApiKeyMeta {
+    const user = this.getUser(input.userId);
+    if (!user) throw new Error(`User not found: ${input.userId}`);
+    const plaintext = input.apiKey.trim();
+    if (!plaintext) throw new Error("api_key is required");
+    const { ciphertext, nonce } = encryptAgentApiKey(plaintext, input.secret);
+    const last4 = last4OfSecret(plaintext);
+    const ts = nowIso();
+    this.db
+      .prepare(
+        `INSERT INTO agent_api_keys (user_id, provider, ciphertext, nonce, last4, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(user_id, provider) DO UPDATE SET
+           ciphertext = excluded.ciphertext,
+           nonce = excluded.nonce,
+           last4 = excluded.last4,
+           updated_at = excluded.updated_at`,
+      )
+      .run(input.userId, input.provider, ciphertext, nonce, last4, ts);
+    return { provider: input.provider, configured: true, last4 };
+  }
+
+  getAgentApiKeyRecord(
+    userId: string,
+    provider: string,
+  ): {
+    userId: string;
+    provider: string;
+    ciphertext: Buffer;
+    nonce: Buffer;
+    last4: string;
+    updatedAt: string;
+  } | null {
+    const row = this.db
+      .prepare(
+        `SELECT user_id, provider, ciphertext, nonce, last4, updated_at
+         FROM agent_api_keys WHERE user_id = ? AND provider = ?`,
+      )
+      .get(userId, provider) as
+      | {
+          user_id: string;
+          provider: string;
+          ciphertext: unknown;
+          nonce: unknown;
+          last4: string;
+          updated_at: string;
+        }
+      | undefined;
+    if (!row) return null;
+    return {
+      userId: row.user_id,
+      provider: row.provider,
+      ciphertext: asBlob(row.ciphertext),
+      nonce: asBlob(row.nonce),
+      last4: row.last4,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  listAgentApiKeyMeta(userId: string): AgentApiKeyMeta[] {
+    const rows = this.db
+      .prepare(
+        `SELECT provider, last4 FROM agent_api_keys WHERE user_id = ? ORDER BY provider ASC`,
+      )
+      .all(userId) as Array<{ provider: string; last4: string }>;
+    return rows.map((row) => ({
+      provider: row.provider,
+      configured: true,
+      last4: row.last4,
+    }));
+  }
+
+  deleteAgentApiKey(userId: string, provider: string): boolean {
+    const result = this.db
+      .prepare(`DELETE FROM agent_api_keys WHERE user_id = ? AND provider = ?`)
+      .run(userId, provider);
+    return Number(result.changes) > 0;
   }
 
   private mapToken(row: Record<string, unknown>): TraceTokenPublic {

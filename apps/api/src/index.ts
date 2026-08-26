@@ -1,6 +1,6 @@
 import { serve } from "@hono/node-server";
-import { CursorCloudAgentClient } from "@traceai/core";
 import { createApp } from "./app.js";
+import { cursorFollowUpForClaimer } from "./agent-api-keys.js";
 import { createAuthStore, createTraceService, loadEnv } from "./env.js";
 import { configureEventBus } from "./events.js";
 import { configureNotificationStore } from "./notifications.js";
@@ -15,11 +15,10 @@ const service = createTraceService(env);
 configureEventBus({ dbPath: env.eventsDbPath, pollMs: env.eventsPollMs });
 configureNotificationStore(env.notificationsDbPath);
 const nudgeQueue = configureNudgeQueueStore(env.nudgeQueueDbPath);
-const cursorCloud = CursorCloudAgentClient.fromEnv();
-const app = createApp({ authStore, service, cursorCloud, nudgeQueue });
+const app = createApp({ authStore, service, nudgeQueue });
 startNudgeQueuePoller({
   store: nudgeQueue,
-  getClient: () => cursorCloud,
+  getClient: (ticket) => cursorFollowUpForClaimer(authStore, ticket),
   loadTicket: async (slug) => {
     const wrapped = await service.getTicket(slug);
     return wrapped?.ticket ?? null;

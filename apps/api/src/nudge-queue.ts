@@ -252,7 +252,7 @@ export function enqueueBusyCloudNudgeForVerdict(
 
 export type NudgeQueueWorkerDeps = {
   store: NudgeQueueStore;
-  getClient: () => CursorCloudFollowUp | null | undefined;
+  getClient: (ticket: Ticket) => CursorCloudFollowUp | null | undefined;
   loadTicket: (slug: string) => Promise<Ticket | null>;
   addComment: (input: { ticket: string; body: string }) => Promise<unknown>;
   now?: () => Date;
@@ -320,7 +320,7 @@ async function processOneNudge(
   }
 
   const currentId = normalizeClaimedAgentId(ticket?.fields.claimed_agent_id);
-  if (claimedAgentKind(currentId) !== "cursor_cloud") {
+  if (!ticket || claimedAgentKind(currentId) !== "cursor_cloud") {
     deps.store.deleteById(row.id);
     return;
   }
@@ -330,7 +330,7 @@ async function processOneNudge(
     return;
   }
 
-  const client = deps.getClient();
+  const client = deps.getClient(ticket);
   if (!client) {
     await skipQueuedNudge(deps, row, currentId, ticket, "missing_key", log);
     return;

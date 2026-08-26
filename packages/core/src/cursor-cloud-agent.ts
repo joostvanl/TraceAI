@@ -192,15 +192,20 @@ export async function nudgeClaimedCloudAgent(
   };
 }
 
+export type CloudNudgeClientSource =
+  | CursorCloudFollowUp
+  | ((ticket: Ticket) => CursorCloudFollowUp | null);
+
 /**
  * Fire-and-forget: never await from the review HTTP handler.
  * Default scheduler is `setImmediate` so Cursor I/O cannot block the UI.
  * Busy results are reported via `onBusy` so the API can persist a queue row.
+ * Pass a per-ticket resolver so nudges use the claimer's Cursor key (TRA-114).
  */
 export function scheduleClaimedCloudNudges(
   tickets: readonly Ticket[],
   verdict: string,
-  client: CursorCloudFollowUp | null | undefined,
+  client: CloudNudgeClientSource | null | undefined,
   schedule: (fn: () => void) => void = (fn) => {
     setImmediate(fn);
   },
@@ -209,7 +214,9 @@ export function scheduleClaimedCloudNudges(
   if (!client) return;
   for (const ticket of tickets) {
     schedule(() => {
-      void nudgeClaimedCloudAgent(ticket, verdict, client)
+      const resolved = typeof client === "function" ? client(ticket) : client;
+      if (!resolved) return;
+      void nudgeClaimedCloudAgent(ticket, verdict, resolved)
         .then((result) => {
           if (result.busy) onBusy?.(ticket, result);
         })

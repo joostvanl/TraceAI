@@ -58,6 +58,9 @@ const NOT_PROJECT_SCOPED: Record<string, string> = {
   "GET /v1/me/tokens": "the caller's own tokens",
   "POST /v1/me/tokens": "the caller's own tokens",
   "POST /v1/me/tokens/:id/revoke": "the caller's own tokens",
+  "GET /v1/me/agent-apis": "the caller's own agent API keys",
+  "PUT /v1/me/agent-apis/:provider": "the caller's own agent API keys",
+  "DELETE /v1/me/agent-apis/:provider": "the caller's own agent API keys",
   "GET /v1/ui/login/status": "pre-authentication login flow",
   "POST /v1/ui/login/verify": "pre-authentication login flow",
   "GET /v1/projects": "cross-project list; filters itself on access",
@@ -130,7 +133,7 @@ function handlerBody(from: number): string {
 type Route = { key: string; path: string; body: string };
 
 function routes(): Route[] {
-  const re = /app\.(get|post|patch|delete)\(\s*\n?\s*"([^"]+)"/g;
+  const re = /app\.(get|post|put|patch|delete)\(\s*\n?\s*"([^"]+)"/g;
   const found: Route[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(source))) {
