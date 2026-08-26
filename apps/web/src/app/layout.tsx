@@ -21,15 +21,22 @@ export const metadata = {
   description: "Issue tracker for AI agent work — live boards plus backlog wish capture",
 };
 
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+};
+
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={`${sans.variable} ${mono.variable}`}>
       <body>
         <header className="site-header">
-          <Link href="/" className="brand">
-            TraceAI
-          </Link>
-          <span className="tagline">Agent work, human overview</span>
+          <div className="site-header-brand">
+            <Link href="/" className="brand">
+              TraceAI
+            </Link>
+            <span className="tagline">Agent work, human overview</span>
+          </div>
           <AuthStatus />
         </header>
         <main className="site-main">{children}</main>
