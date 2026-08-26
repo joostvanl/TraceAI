@@ -268,6 +268,39 @@ export function registerTraceAiTools(
   );
 
   server.tool(
+    "get_estimate_vs_actual",
+    "Estimate vs actual for recent comparable Done tickets, sliced by tokens_actual size. Aggregates only (no ticket rows). Default limit 50, default breakpoints 20k/80k.",
+    {
+      project: z.string().describe("Project slug"),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe("Last N comparable Done tickets; default 50"),
+      breakpoints: z
+        .array(z.number().int().positive())
+        .min(1)
+        .max(8)
+        .optional()
+        .describe(
+          "Strictly increasing tokens_actual bucket edges; default [20000, 80000]",
+        ),
+    },
+    async ({ project, limit, breakpoints }) => {
+      try {
+        return ok(
+          await client.getEstimateVsActual(project, { limit, breakpoints }),
+          apiBase,
+        );
+      } catch (error) {
+        return fail(error);
+      }
+    },
+  );
+
+  server.tool(
     "get_ticket",
     "Get a ticket by slug OR exact ticket_key (e.g. TRA-42), including comments, parent_ticket, children, and tokens_*_rollup (own + descendants).",
     { slug: z.string().describe("Ticket slug or ticket_key (TRA-42)") },
