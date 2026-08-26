@@ -50,9 +50,10 @@ describe("claimedAgentLabel (TRA-112)", () => {
   });
 
   it("prefixes Cursor Cloud and truncates ids longer than 14", () => {
+    // "bc-abcdefghijklmno" is 17 chars; first 12 + ellipsis.
     assert.equal(
       claimedAgentLabel("bc-abcdefghijklmno"),
-      "Cursor Cloud bc-abcdefghij…",
+      "Cursor Cloud bc-abcdefghi…",
     );
   });
 
@@ -62,8 +63,8 @@ describe("claimedAgentLabel (TRA-112)", () => {
 
   it("does not truncate ids of length 14", () => {
     assert.equal(
-      claimedAgentLabel("bc-abcdefghij"),
-      "Cursor Cloud bc-abcdefghij",
+      claimedAgentLabel("bc-abcdefghijk"),
+      "Cursor Cloud bc-abcdefghijk",
     );
   });
 });
