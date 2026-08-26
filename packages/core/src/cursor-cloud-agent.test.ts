@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  AGENT_BUSY_RETRY_CAP_MS,
   AGENT_BUSY_RETRY_MS,
+  AGENT_BUSY_RETRY_WINDOW_MS,
   CursorCloudAgentClient,
+  agentBusyRetryDelayMs,
+  cloudNudgeSkipComment,
+  cloudNudgeSkipReason,
   nudgeClaimedCloudAgent,
   scheduleClaimedCloudNudges,
 } from "./cursor-cloud-agent.js";
@@ -42,7 +47,14 @@ describe("nudgeClaimedCloudAgent", () => {
     };
     assert.deepEqual(
       await nudgeClaimedCloudAgent(ticket({ claimed_agent_id: "" }), "approved", client),
-      { attempted: false, calls: 0 },
+      {
+        attempted: false,
+        calls: 0,
+        busy: false,
+        status: 0,
+        agentId: "",
+        prompt: "",
+      },
     );
     assert.deepEqual(
       await nudgeClaimedCloudAgent(
@@ -50,7 +62,14 @@ describe("nudgeClaimedCloudAgent", () => {
         "approved",
         client,
       ),
-      { attempted: false, calls: 0 },
+      {
+        attempted: false,
+        calls: 0,
+        busy: false,
+        status: 0,
+        agentId: "",
+        prompt: "",
+      },
     );
     assert.equal(calls.length, 0);
   });
@@ -69,30 +88,23 @@ describe("nudgeClaimedCloudAgent", () => {
       client,
     );
     assert.equal(result.calls, 1);
+    assert.equal(result.busy, false);
     assert.match(prompts[0] ?? "", /expected_review_state=rejected/);
   });
 
-  it("retries once after agent_busy then succeeds", async () => {
-    const sleeps: number[] = [];
-    let n = 0;
+  it("returns busy after one agent_busy POST without sleeping", async () => {
     const client = {
-      followUp: async () => {
-        n += 1;
-        if (n === 1) return { ok: false, status: 409, busy: true };
-        return { ok: true, status: 201, busy: false };
-      },
+      followUp: async () => ({ ok: false, status: 409, busy: true }),
     };
-    const result = await nudgeClaimedCloudAgent(
-      ticket(),
-      "approved",
-      client,
-      { sleep: async (ms) => { sleeps.push(ms); } },
-    );
-    assert.equal(result.calls, 2);
-    assert.deepEqual(sleeps, [AGENT_BUSY_RETRY_MS]);
+    const result = await nudgeClaimedCloudAgent(ticket(), "approved", client);
+    assert.equal(result.attempted, true);
+    assert.equal(result.calls, 1);
+    assert.equal(result.busy, true);
+    assert.equal(result.status, 409);
+    assert.equal(result.agentId, "bc-cloud-1");
   });
 
-  it("does not throw on Cursor 500", async () => {
+  it("does not throw on Cursor 500 and does not report busy", async () => {
     const client = {
       followUp: async () => ({ ok: false, status: 500, busy: false }),
     };
@@ -101,17 +113,8 @@ describe("nudgeClaimedCloudAgent", () => {
     });
     assert.equal(result.attempted, true);
     assert.equal(result.calls, 1);
-  });
-
-  it("does not throw when busy twice", async () => {
-    const client = {
-      followUp: async () => ({ ok: false, status: 409, busy: true }),
-    };
-    const result = await nudgeClaimedCloudAgent(ticket(), "dismissed", client, {
-      sleep: async () => {},
-      log: () => {},
-    });
-    assert.equal(result.calls, 2);
+    assert.equal(result.busy, false);
+    assert.equal(result.status, 500);
   });
 });
 
@@ -143,6 +146,75 @@ describe("scheduleClaimedCloudNudges", () => {
       scheduled += 1;
     });
     assert.equal(scheduled, 0);
+  });
+
+  it("reports busy to onBusy after the scheduled job runs", async () => {
+    const scheduled: Array<() => void> = [];
+    const busy: string[] = [];
+    scheduleClaimedCloudNudges(
+      [ticket()],
+      "approved",
+      {
+        followUp: async () => ({ ok: false, status: 409, busy: true }),
+      },
+      (fn) => scheduled.push(fn),
+      (t) => {
+        busy.push(t.slug);
+      },
+    );
+    assert.equal(busy.length, 0);
+    scheduled[0]!();
+    await new Promise((r) => setImmediate(r));
+    assert.deepEqual(busy, ["sample"]);
+  });
+
+  it("does not call onBusy for a non-busy Cursor error", async () => {
+    const scheduled: Array<() => void> = [];
+    let onBusy = 0;
+    scheduleClaimedCloudNudges(
+      [ticket()],
+      "approved",
+      {
+        followUp: async () => ({ ok: false, status: 500, busy: false }),
+      },
+      (fn) => scheduled.push(fn),
+      () => {
+        onBusy += 1;
+      },
+    );
+    scheduled[0]!();
+    await new Promise((r) => setImmediate(r));
+    assert.equal(onBusy, 0);
+  });
+});
+
+describe("busy retry helpers", () => {
+  it("backs off 30s → 60s → cap 120s", () => {
+    assert.equal(agentBusyRetryDelayMs(1), AGENT_BUSY_RETRY_MS);
+    assert.equal(agentBusyRetryDelayMs(2), 60_000);
+    assert.equal(agentBusyRetryDelayMs(3), AGENT_BUSY_RETRY_CAP_MS);
+    assert.equal(agentBusyRetryDelayMs(4), AGENT_BUSY_RETRY_CAP_MS);
+  });
+
+  it("keeps a 30-minute retry window", () => {
+    assert.equal(AGENT_BUSY_RETRY_WINDOW_MS, 30 * 60 * 1000);
+  });
+
+  it("names slug, key, claim, attempts, and reason in the skip comment", () => {
+    const body = cloudNudgeSkipComment({
+      ticketKey: "TRA-1",
+      slug: "sample",
+      verdict: "approved",
+      agentId: "bc-cloud-1",
+      attempts: 8,
+      reason: cloudNudgeSkipReason({ kind: "window_elapsed" }),
+    });
+    assert.match(body, /TRA-1/);
+    assert.match(body, /sample/);
+    assert.match(body, /bc-cloud-1/);
+    assert.match(body, /8 attempt/);
+    assert.match(body, /agent_busy/);
+    assert.match(body, /approved/);
   });
 });
 
