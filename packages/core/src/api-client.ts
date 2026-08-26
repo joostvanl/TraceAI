@@ -190,6 +190,23 @@ export class TraceApiClient {
     );
   }
 
+  getEstimateVsActual(
+    project: string,
+    query: { limit?: number; breakpoints?: number[] } = {},
+  ) {
+    const params = new URLSearchParams();
+    if (query.limit != null) params.set("limit", String(query.limit));
+    if (query.breakpoints != null) {
+      params.set("breakpoints", query.breakpoints.join(","));
+    }
+    const q = params.toString();
+    return this.request<unknown>(
+      `/v1/projects/${encodeURIComponent(project)}/estimate-vs-actual${
+        q ? `?${q}` : ""
+      }`,
+    );
+  }
+
   getTicket(slug: string) {
     return this.request<unknown>(`/v1/tickets/${encodeURIComponent(slug)}`);
   }

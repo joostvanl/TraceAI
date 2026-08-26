@@ -98,9 +98,11 @@ import {
   type ReviewInboxItem,
 } from "./review-inbox.js";
 import {
+  computeEstimateVsActual,
   computeProjectInsights,
   paginateItems,
   sortTicketsNewestFirst,
+  type EstimateVsActualResult,
   type Paginated,
   type ProjectInsights,
 } from "./insights.js";
@@ -1104,6 +1106,33 @@ export class TraceService {
         resolution: t.fields.resolution ?? null,
       })),
       { doneStageKey: doneStage },
+    );
+  }
+
+  async getEstimateVsActual(
+    projectSlug: string,
+    options?: { limit?: number; breakpoints?: number[] },
+  ): Promise<EstimateVsActualResult> {
+    const detail = await this.getProject(projectSlug);
+    if (!detail) throw new NotFoundError(`Project not found: ${projectSlug}`);
+    const tickets = await this.listTickets({ project: projectSlug });
+    const doneStage = lastStageKey(detail.stages) ?? "done";
+    return computeEstimateVsActual(
+      tickets.map((t) => ({
+        slug: t.slug,
+        ticket_key: t.fields.ticket_key ?? null,
+        title: t.fields.title,
+        stage: t.fields.stage,
+        stage_entered_at: t.fields.stage_entered_at ?? null,
+        tokens_estimate: t.fields.tokens_estimate ?? null,
+        tokens_actual: t.fields.tokens_actual ?? null,
+        resolution: t.fields.resolution ?? null,
+      })),
+      {
+        doneStageKey: doneStage,
+        limit: options?.limit,
+        breakpoints: options?.breakpoints,
+      },
     );
   }
 

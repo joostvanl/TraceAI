@@ -1,4 +1,5 @@
 import type { TicketResolution } from "./types.js";
+import { ValidationError } from "./trace-errors.js";
 import {
   searchIndexedContent,
   type SearchFilters,
@@ -56,6 +57,40 @@ export type EstimateAccuracySummary = {
   under_estimate_count: number;
   over_estimate_count: number;
   on_target_count: number;
+};
+
+export const DEFAULT_ESTIMATE_LIMIT = 50;
+export const DEFAULT_ESTIMATE_BREAKPOINTS: readonly number[] = [20000, 80000];
+export const MAX_ESTIMATE_LIMIT = 200;
+export const MAX_BREAKPOINTS = 8;
+
+export type EstimateAccuracyExtended = EstimateAccuracySummary & {
+  avg_estimate: number | null;
+  avg_actual: number | null;
+  median_actual: number | null;
+};
+
+export type EstimateVsActualSegment = EstimateAccuracyExtended & {
+  label: string;
+  min_actual: number | null;
+  max_actual: number | null;
+  max_exclusive: boolean;
+};
+
+export type EstimateVsActualWindow = {
+  eligible_total: number;
+  sample_size: number;
+  newest_entered_at: string | null;
+  oldest_entered_at: string | null;
+};
+
+export type EstimateVsActualResult = {
+  done_stage: string;
+  limit: number;
+  breakpoints: number[];
+  window: EstimateVsActualWindow;
+  overall: EstimateAccuracyExtended;
+  segments: EstimateVsActualSegment[];
 };
 
 export type ResolutionMixItem = {
@@ -259,6 +294,188 @@ export function computeProjectInsights(
     },
     resolution_mix,
     review_returns: 0,
+  };
+}
+
+function hasComparableTokens(ticket: InsightsTicketInput): boolean {
+  return (
+    typeof ticket.tokens_estimate === "number" &&
+    ticket.tokens_estimate > 0 &&
+    typeof ticket.tokens_actual === "number" &&
+    ticket.tokens_actual >= 0
+  );
+}
+
+function roundRatio(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
+function accuracyExtended(
+  tickets: InsightsTicketInput[],
+): EstimateAccuracyExtended {
+  if (tickets.length === 0) {
+    return {
+      sample_size: 0,
+      avg_ratio: null,
+      median_ratio: null,
+      under_estimate_count: 0,
+      over_estimate_count: 0,
+      on_target_count: 0,
+      avg_estimate: null,
+      avg_actual: null,
+      median_actual: null,
+    };
+  }
+  const estimates = tickets.map((t) => t.tokens_estimate as number);
+  const actuals = tickets.map((t) => t.tokens_actual as number);
+  const ratios = tickets.map(
+    (t) => (t.tokens_actual as number) / (t.tokens_estimate as number),
+  );
+  let under = 0;
+  let over = 0;
+  let onTarget = 0;
+  for (const ratio of ratios) {
+    if (ratio < 0.9) under += 1;
+    else if (ratio > 1.1) over += 1;
+    else onTarget += 1;
+  }
+  return {
+    sample_size: tickets.length,
+    avg_ratio: roundRatio(ratios.reduce((sum, r) => sum + r, 0) / ratios.length),
+    median_ratio: roundRatio(median(ratios) as number),
+    under_estimate_count: under,
+    over_estimate_count: over,
+    on_target_count: onTarget,
+    avg_estimate: Math.round(
+      estimates.reduce((sum, n) => sum + n, 0) / estimates.length,
+    ),
+    avg_actual: Math.round(actuals.reduce((sum, n) => sum + n, 0) / actuals.length),
+    median_actual: Math.round(median(actuals) as number),
+  };
+}
+
+export function resolveEstimateLimit(limit?: number): number {
+  if (limit === undefined) return DEFAULT_ESTIMATE_LIMIT;
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_ESTIMATE_LIMIT) {
+    throw new ValidationError(
+      `limit must be an integer between 1 and ${MAX_ESTIMATE_LIMIT}`,
+    );
+  }
+  return limit;
+}
+
+export function resolveEstimateBreakpoints(breakpoints?: number[]): number[] {
+  if (breakpoints === undefined) {
+    return [...DEFAULT_ESTIMATE_BREAKPOINTS];
+  }
+  if (
+    breakpoints.length === 0 ||
+    breakpoints.length > MAX_BREAKPOINTS ||
+    breakpoints.some(
+      (value, index) =>
+        !Number.isInteger(value) ||
+        value <= 0 ||
+        (index > 0 && value <= breakpoints[index - 1]!),
+    )
+  ) {
+    throw new ValidationError(
+      "breakpoints must be 1–8 strictly increasing positive integers",
+    );
+  }
+  return breakpoints;
+}
+
+function segmentSpecs(breakpoints: number[]): Array<{
+  label: string;
+  min_actual: number | null;
+  max_actual: number | null;
+  max_exclusive: boolean;
+}> {
+  const specs: Array<{
+    label: string;
+    min_actual: number | null;
+    max_actual: number | null;
+    max_exclusive: boolean;
+  }> = [
+    {
+      label: `< ${breakpoints[0]}`,
+      min_actual: null,
+      max_actual: breakpoints[0]!,
+      max_exclusive: true,
+    },
+  ];
+  for (let i = 1; i < breakpoints.length; i++) {
+    const min = breakpoints[i - 1]!;
+    const max = breakpoints[i]!;
+    specs.push({
+      label: `${min}–${max}`,
+      min_actual: min,
+      max_actual: max,
+      max_exclusive: true,
+    });
+  }
+  const last = breakpoints[breakpoints.length - 1]!;
+  specs.push({
+    label: `>= ${last}`,
+    min_actual: last,
+    max_actual: null,
+    max_exclusive: false,
+  });
+  return specs;
+}
+
+function bucketIndex(actual: number, breakpoints: number[]): number {
+  for (let i = 0; i < breakpoints.length; i++) {
+    if (actual < breakpoints[i]!) return i;
+  }
+  return breakpoints.length;
+}
+
+/**
+ * Estimate vs actual for the most recent comparable Done tickets, sliced by
+ * tokens_actual breakpoints. Separate from computeProjectInsights (TRA-106).
+ */
+export function computeEstimateVsActual(
+  tickets: InsightsTicketInput[],
+  options?: {
+    doneStageKey?: string;
+    limit?: number;
+    breakpoints?: number[];
+  },
+): EstimateVsActualResult {
+  const doneStage = options?.doneStageKey ?? "done";
+  const limit = resolveEstimateLimit(options?.limit);
+  const breakpoints = resolveEstimateBreakpoints(options?.breakpoints);
+
+  const eligible = sortTicketsNewestFirst(
+    tickets.filter((t) => t.stage === doneStage && hasComparableTokens(t)),
+  );
+  const window = eligible.slice(0, limit);
+  const specs = segmentSpecs(breakpoints);
+  const buckets: InsightsTicketInput[][] = specs.map(() => []);
+  for (const ticket of window) {
+    const index = bucketIndex(ticket.tokens_actual as number, breakpoints);
+    buckets[index]!.push(ticket);
+  }
+
+  return {
+    done_stage: doneStage,
+    limit,
+    breakpoints,
+    window: {
+      eligible_total: eligible.length,
+      sample_size: window.length,
+      newest_entered_at: window[0]?.stage_entered_at ?? null,
+      oldest_entered_at:
+        window.length === 0
+          ? null
+          : (window[window.length - 1]?.stage_entered_at ?? null),
+    },
+    overall: accuracyExtended(window),
+    segments: specs.map((spec, index) => ({
+      ...spec,
+      ...accuracyExtended(buckets[index]!),
+    })),
   };
 }
 

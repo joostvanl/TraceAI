@@ -1110,6 +1110,27 @@ export function createApp(deps: {
     },
   );
 
+  app.get(
+    "/v1/projects/:slug/estimate-vs-actual",
+    requireScope("tickets:read"),
+    async (c) => {
+      const slug = param(c, "slug");
+      const limitRaw = c.req.query("limit");
+      const breakpointsRaw = c.req.query("breakpoints");
+      const limit =
+        limitRaw == null || limitRaw === "" ? undefined : Number(limitRaw);
+      const breakpoints =
+        breakpointsRaw == null || breakpointsRaw.trim() === ""
+          ? undefined
+          : breakpointsRaw.split(",").map((part) => Number(part.trim()));
+      const result = await deps.service.getEstimateVsActual(slug, {
+        limit,
+        breakpoints,
+      });
+      return c.json({ project: slug, ...result });
+    },
+  );
+
   app.get("/v1/tickets", requireScope("tickets:read"), async (c) => {
     const project = c.req.query("project");
     if (!project) {
