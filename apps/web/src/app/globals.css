@@ -345,6 +345,13 @@ h2 {
   color: var(--muted);
 }
 
+/* TRA-120-OVERFLOW-CONTRACT
+ * <=640px: page must not scroll horizontally; board and ticket-detail stay in the viewport.
+ * >=641px: .board-scroller is the only horizontal scrollport (themed bar at the pane bottom).
+ * never overflow-x: hidden on .live-board or .board-scroller.
+ * inner overflow-x: auto on ticket panels, tables, and code is OK.
+ * desktop .board: one row, minmax(200px, 1fr); mobile may stack.
+ */
 .live-board {
   display: flex;
   flex-direction: column;
@@ -1732,6 +1739,7 @@ h2 {
     padding: 1rem;
   }
 
+  /* TRA-120-OVERFLOW-CONTRACT: mobile board pane — stack columns, do not clip with overflow-x: hidden */
   .project-shell-main:has(.live-board) {
     display: block;
     overflow: visible;
