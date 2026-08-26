@@ -93,6 +93,7 @@ export default async function ProjectPage({ params, searchParams }: Props) {
           sortOrder: ticket.fields.sort_order ?? null,
           workflow,
           orphan: workflow !== selectedWorkflow,
+          claimedAgentId: ticket.fields.claimed_agent_id?.trim() || null,
         };
       });
 

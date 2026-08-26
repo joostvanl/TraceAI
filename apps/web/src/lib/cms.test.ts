@@ -5,6 +5,7 @@ import {
   listTicketsForProject,
   listWikiPagesForProject,
   listProjects,
+  snapshotFromRow,
 } from "./cms.js";
 
 /**
@@ -138,6 +139,48 @@ describe("listWikiPagesForProject (TRA-75)", () => {
     const { tree } = await listWikiPagesForProject("traceai", client);
     assert.equal(tree.length, 1);
     assert.equal(tree[0]?.children.length, 2);
+  });
+});
+
+describe("snapshotFromRow (TRA-112)", () => {
+  it("includes claimed_agent_id on the board snapshot", () => {
+    const claimed = snapshotFromRow(
+      {
+        slug: "claimed",
+        ticket_key: "TRA-112",
+        title: "Claimed",
+        stage: "in_progress",
+        workflow: "traceai-traceai-story",
+        claimed_agent_id: "bc-abcdefghijklmno",
+      },
+      "traceai-traceai-story",
+    );
+    assert.equal(claimed.claimedAgentId, "bc-abcdefghijklmno");
+
+    const unclaimed = snapshotFromRow(
+      {
+        slug: "open",
+        ticket_key: "TRA-1",
+        title: "Open",
+        stage: "todo",
+        workflow: "traceai-traceai-story",
+      },
+      "traceai-traceai-story",
+    );
+    assert.equal(unclaimed.claimedAgentId, null);
+  });
+
+  it("treats blank claimed_agent_id as unclaimed", () => {
+    const snap = snapshotFromRow(
+      {
+        slug: "blank",
+        title: "Blank",
+        stage: "todo",
+        claimed_agent_id: "  ",
+      },
+      "wf",
+    );
+    assert.equal(snap.claimedAgentId, null);
   });
 });
 

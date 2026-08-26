@@ -581,6 +581,11 @@ h2 {
   border-radius: 8px;
 }
 
+.ticket-card .claimed-agent-label {
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+
 .ticket-card:hover {
   border-color: #3d5266;
   color: inherit;

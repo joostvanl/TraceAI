@@ -342,13 +342,14 @@ export type BoardTicketSnapshot = {
   sortOrder: number | null;
   workflow: string;
   orphan: boolean;
+  claimedAgentId: string | null;
 };
 
 function ticketOrphan(pin: string, selectedWorkflow: string): boolean {
   return pin !== selectedWorkflow;
 }
 
-function snapshotFromRow(
+export function snapshotFromRow(
   t: {
     slug: string;
     ticket_key?: string | null;
@@ -362,6 +363,7 @@ function snapshotFromRow(
     review_state?: string | null;
     sort_order?: number | null;
     workflow?: string | null;
+    claimed_agent_id?: string | null;
   },
   selectedWorkflow: string,
 ): BoardTicketSnapshot {
@@ -380,6 +382,7 @@ function snapshotFromRow(
     sortOrder: t.sort_order ?? null,
     workflow,
     orphan: ticketOrphan(workflow, selectedWorkflow),
+    claimedAgentId: t.claimed_agent_id?.trim() || null,
   };
 }
 
@@ -429,6 +432,7 @@ export async function listBoardTicketsViaTraceAI(
       review_state?: string | null;
       sort_order?: number | null;
       workflow?: string | null;
+      claimed_agent_id?: string | null;
     }>;
     return rows
       .filter((t) =>

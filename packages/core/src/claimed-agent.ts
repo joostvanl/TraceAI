@@ -37,6 +37,21 @@ export function claimedAgentKind(
   return id.startsWith("bc-") ? "cursor_cloud" : "other";
 }
 
+/**
+ * Board-card and ticket-detail display label. Empty id → null (render nothing).
+ * Ids longer than 14 characters are truncated to the first 12 plus an ellipsis.
+ */
+export function claimedAgentLabel(
+  raw: string | null | undefined,
+): string | null {
+  const id = normalizeClaimedAgentId(raw);
+  if (!id) return null;
+  const prefix =
+    claimedAgentKind(id) === "cursor_cloud" ? "Cursor Cloud" : "Agent";
+  const shown = id.length > 14 ? `${id.slice(0, 12)}…` : id;
+  return `${prefix} ${shown}`;
+}
+
 export function cloudWakeupPrompt(input: {
   ticketKey: string | null | undefined;
   slug: string;

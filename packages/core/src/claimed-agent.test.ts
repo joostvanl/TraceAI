@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   CLAIM_TICKET_BEFORE_HUMAN_GATE,
   claimedAgentKind,
+  claimedAgentLabel,
   cloudWakeupPrompt,
   parseClaimedAgentId,
 } from "./claimed-agent.js";
@@ -37,6 +38,33 @@ describe("claimed agent id", () => {
     assert.equal(claimedAgentKind("agent-1"), "other");
     assert.equal(claimedAgentKind(""), null);
     assert.equal(claimedAgentKind(null), null);
+  });
+});
+
+describe("claimedAgentLabel (TRA-112)", () => {
+  it("returns null for empty / whitespace-only ids", () => {
+    assert.equal(claimedAgentLabel(""), null);
+    assert.equal(claimedAgentLabel("   "), null);
+    assert.equal(claimedAgentLabel(null), null);
+    assert.equal(claimedAgentLabel(undefined), null);
+  });
+
+  it("prefixes Cursor Cloud and truncates ids longer than 14", () => {
+    assert.equal(
+      claimedAgentLabel("bc-abcdefghijklmno"),
+      "Cursor Cloud bc-abcdefghij…",
+    );
+  });
+
+  it("prefixes Agent and keeps short non-bc ids intact", () => {
+    assert.equal(claimedAgentLabel("agent-1"), "Agent agent-1");
+  });
+
+  it("does not truncate ids of length 14", () => {
+    assert.equal(
+      claimedAgentLabel("bc-abcdefghij"),
+      "Cursor Cloud bc-abcdefghij",
+    );
   });
 });
 

@@ -11,6 +11,7 @@ import {
 } from "react";
 import {
   UNMAPPED_STAGE_KEY,
+  claimedAgentLabel,
   newestFirstCapped,
   remapStageForBoard,
 } from "@traceai/core";
@@ -441,6 +442,7 @@ export function LiveBoard({
                     Boolean(ticket.resolution) &&
                     (lastStageKey == null || stage.key === lastStageKey);
                   const review = reviewBadge(stage, ticket);
+                  const claimLabel = claimedAgentLabel(ticket.claimedAgentId);
                   const isDragging = draggingSlug === ticket.slug;
                   const cardReorderable =
                     isReorderColumn && !ticket.orphan && !persisting;
@@ -499,6 +501,14 @@ export function LiveBoard({
                               style={{ fontSize: "0.75rem" }}
                             >
                               {tokens}
+                            </span>
+                          ) : null}
+                          {claimLabel ? (
+                            <span
+                              className="badge claimed-agent-label"
+                              title={ticket.claimedAgentId ?? undefined}
+                            >
+                              {claimLabel}
                             </span>
                           ) : null}
                         </div>

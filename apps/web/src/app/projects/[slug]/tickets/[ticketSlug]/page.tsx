@@ -3,7 +3,7 @@ import { notFound, permanentRedirect } from "next/navigation";
 import {
   computeTokenRollup,
   firstStageKey,
-  claimedAgentKind,
+  claimedAgentLabel,
   humanApproveTarget,
   humanDismissTarget,
   humanRejectTargets,
@@ -132,6 +132,7 @@ export default async function TicketPage({ params }: Props) {
     children.length > 0 ||
     rollup.tokens_estimate_rollup !== (ownEstimate ?? 0) ||
     rollup.tokens_actual_rollup !== (ownActual ?? 0);
+  const claimedLabel = claimedAgentLabel(ticket.fields.claimed_agent_id);
 
   const descendantSlugs = listDescendantSlugs(projectTickets, ticket.slug);
   const bySlug = new Map(projectTickets.map((t) => [t.slug, t] as const));
@@ -189,15 +190,12 @@ export default async function TicketPage({ params }: Props) {
                     by {ticket.fields.created_by}
                   </span>
                 ) : null}
-                {ticket.fields.claimed_agent_id ? (
-                  <span className="badge" title={ticket.fields.claimed_agent_id}>
-                    {claimedAgentKind(ticket.fields.claimed_agent_id) ===
-                    "cursor_cloud"
-                      ? "Cursor Cloud"
-                      : "Agent"}{" "}
-                    {ticket.fields.claimed_agent_id.length > 14
-                      ? `${ticket.fields.claimed_agent_id.slice(0, 12)}…`
-                      : ticket.fields.claimed_agent_id}
+                {claimedLabel ? (
+                  <span
+                    className="badge"
+                    title={ticket.fields.claimed_agent_id}
+                  >
+                    {claimedLabel}
                   </span>
                 ) : null}
                 {ticket.fields.resolution ? (

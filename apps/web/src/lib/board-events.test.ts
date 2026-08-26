@@ -107,4 +107,35 @@ describe("applyBoardTicketEvent", () => {
     assert.equal(next[0]?.slug, "wees");
     assert.equal(next[0]?.orphan, true);
   });
+
+  it("TRA-112: keeps claimedAgentId from the previous snapshot on SSE merge", () => {
+    const prev: BoardTicket[] = [
+      {
+        slug: "claimed",
+        title: "Claimed",
+        stage: "in_progress",
+        priority: "medium",
+        workflow: "standard-worker",
+        claimedAgentId: "bc-abcdefghijklmno",
+      },
+    ];
+    const next = applyBoardTicketEvent(
+      prev,
+      {
+        type: "ticket.updated",
+        project: "traceai",
+        ticket: {
+          slug: "claimed",
+          title: "Claimed (renamed)",
+          stage: "in_progress",
+          project: "traceai",
+          workflow: "standard-worker",
+        },
+        at: "2026-08-26T12:00:00.000Z",
+      },
+      namedBoard,
+    );
+    assert.equal(next[0]?.claimedAgentId, "bc-abcdefghijklmno");
+    assert.equal(next[0]?.title, "Claimed (renamed)");
+  });
 });

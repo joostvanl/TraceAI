@@ -20,6 +20,8 @@ export type BoardTicket = {
   workflow?: string | null;
   /** Wees-pin on the default board — visible, not draggable. */
   orphan?: boolean;
+  /** Claiming agent id when set; empty/null = unclaimed. Not live-updated via SSE in TRA-112. */
+  claimedAgentId?: string | null;
 };
 
 export type BoardTicketEvent = {
@@ -92,6 +94,7 @@ export function applyBoardTicketEvent(
         : (previous?.sortOrder ?? null),
     workflow,
     orphan: workflow !== options.selectedWorkflow,
+    claimedAgentId: previous?.claimedAgentId ?? null,
   };
   return [...without, next];
 }
