@@ -729,7 +729,7 @@ const HOMEPAGE_CONNECT_FALLBACK: HomepageConnectContent = {
     },
     {
       title: "Create a TraceAI API token",
-      body: "Preferred (after you have a TraceAI web account):\n1. Sign in on the left.\n2. Open API-tokens in the header.\n3. Create a token (pick a name and optional expiry).\n4. Copy the printed trc_… value — shown only once.\n\nOperators / bootstrap without UI: from a TraceAI checkout, `pnpm --filter @traceai/api create-token -- --email <existing-user-email> --name cursor` (API user must already exist, e.g. via bootstrap).",
+      body: "Preferred (after you have a TraceAI web account):\n1. Sign in on the left.\n2. Open a project, then go to the left menu → Pagina's → API-tokens.\n3. Create a token (pick a name and optional expiry).\n4. Copy the printed trc_… value — shown only once.\n\nOperators / bootstrap without UI: from a TraceAI checkout, `pnpm --filter @traceai/api create-token -- --email <existing-user-email> --name cursor` (API user must already exist, e.g. via bootstrap).",
     },
     {
       title: "Register the TraceAI MCP server",
@@ -752,7 +752,7 @@ const HOMEPAGE_CONNECT_FALLBACK: HomepageConnectContent = {
     "Ticket created_by and comment author come from the TraceAI identity behind the API token. Prefer organizing work in projects with an explicit workflow before large implementation tasks.",
   rules: [
     "Agents use TRACEAI_TOKEN (trc_…) only — never put CMS credentials in the MCP env.",
-    "Humans create personal API tokens after sign-in via API-tokens (header link).",
+    "Humans create personal API tokens after sign-in via the project left menu (Pagina's → API-tokens).",
     "Call get_project / get_workflow first; the response includes agent_playbook / agent_policy (working agreements live in workflow JSON).",
     "Ticket descriptions must be self-contained Markdown for junior agents (Context, Goal, What to implement, Acceptance criteria).",
     "Every transition_ticket needs a comment (min ~40 chars). Required Markdown headings come from get_workflow (agent_policy.require_comment_sections and per-stage require_comment_sections_on_*). Pass tokens_used when the workflow requires it.",
