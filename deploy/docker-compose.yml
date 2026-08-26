@@ -57,7 +57,7 @@ services:
       TRACEAI_TOKEN: ${TRACEAI_TOKEN:-}
       # Session cookie HMAC (UI credentials come from Aurora app_login).
       TRACEAI_SESSION_SECRET: ${TRACEAI_SESSION_SECRET:-}
-      # Same secret as API — enables UI Goedkeuren/Afkeuren on gated stages.
+      # Same secret as API — enables UI Goedkeuren/Afkeuren/Annuleren on gated stages.
       TRACEAI_HUMAN_PROXY_SECRET: ${TRACEAI_HUMAN_PROXY_SECRET:-}
     depends_on:
       api:

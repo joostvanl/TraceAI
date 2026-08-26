@@ -24,6 +24,10 @@ Working agreements are stored in each workflow’s `stages_json` as a v2 documen
 Agents discover them via `get_project` (`agent_playbook`) / `get_workflow`
 (`agent_policy`). The API enforces them on create/update/transition.
 
+Cloud/Cursor agents must start from [AGENTS.md](AGENTS.md) (and
+`.cursor/rules/traceai-workflow.mdc`): all workflow work goes through TraceAI MCP
+on project `traceai`. Do not copy the playbook into those files.
+
 ## Packages
 
 | Package | Purpose |

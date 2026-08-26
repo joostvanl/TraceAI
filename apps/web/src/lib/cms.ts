@@ -758,7 +758,7 @@ const HOMEPAGE_CONNECT_FALLBACK: HomepageConnectContent = {
     "Every transition_ticket needs a comment (min ~40 chars). Required Markdown headings come from get_workflow (agent_policy.require_comment_sections and per-stage require_comment_sections_on_*). Pass tokens_used when the workflow requires it.",
     "Leaving Backlog / In Refinement may require tokens_estimate (see require_*_on_exit_to flags on the stage).",
     "Required comment headings are only those the current workflow lists in JSON (for example require_comment_sections_on_enter on a stage). Do not assume product heading names.",
-    "Human-gated stages: a signed-in reviewer presses Goedkeuren/Afkeuren in the UI; the agent then performs the transition.",
+    "Human-gated stages: a signed-in reviewer presses Goedkeuren/Afkeuren/Annuleren in the UI; the agent then performs the transition.",
     "Entering Done needs resolution (completed | superseded | cancelled | duplicate | verification-only) and any headings the Done stage lists (commonly ## Wiki with page slug(s) or N/A).",
     "All ticket/workflow/wiki writes go through TraceAI MCP or the TraceAI API — never bypass TraceAI.",
     "Humans can add light wish-tickets from a project board (New ticket) after signing in; they land in Backlog for agents to refine.",

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { TicketReviewState } from "@traceai/core";
@@ -21,7 +21,6 @@ export type ReviewVerdict = {
 };
 
 type VerdictAction = ReviewVerdict["state"];
-type Mode = "idle" | "approve" | "reject" | "dismiss";
 
 type Props = {
   ticketSlug: string;
@@ -42,7 +41,7 @@ function formatMoment(value: string | null): string | null {
 
 function verdictLabel(state: VerdictAction): string {
   if (state === "approved") return "Goedgekeurd";
-  if (state === "dismissed") return "Afgezien";
+  if (state === "dismissed") return "Geannuleerd";
   return "Afgekeurd";
 }
 
@@ -55,6 +54,10 @@ function targetForVerdict(
   return gate.rejectTo;
 }
 
+function commentRequiredForVerdict(action: VerdictAction): boolean {
+  return action !== "approved";
+}
+
 export function HumanReviewActions({
   ticketSlug,
   projectSlug,
@@ -65,9 +68,7 @@ export function HumanReviewActions({
   gatedChildCount = 0,
 }: Props) {
   const router = useRouter();
-  const [mode, setMode] = useState<Mode>("idle");
-  const [note, setNote] = useState("");
-  const [reason, setReason] = useState("");
+  const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [revising, setRevising] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -82,6 +83,12 @@ export function HumanReviewActions({
   const showApprove = Boolean(gate.approveTo);
   const showReject = Boolean(gate.rejectTo);
   const showDismiss = Boolean(gate.dismissTo);
+  const requiredHint = [
+    showReject ? "Afkeuren" : null,
+    showDismiss ? "Annuleren" : null,
+  ]
+    .filter(Boolean)
+    .join("/");
 
   async function postVerdict(action: VerdictAction, applyToChildren: boolean) {
     setError(null);
@@ -94,7 +101,7 @@ export function HumanReviewActions({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             verdict: action,
-            comment: action === "approved" ? note.trim() : reason.trim(),
+            comment: comment.trim(),
             apply_to_children: applyToChildren,
           }),
         },
@@ -103,9 +110,7 @@ export function HumanReviewActions({
       if (!res.ok) {
         throw new Error(data.message ?? `Request failed (${res.status})`);
       }
-      setMode("idle");
-      setNote("");
-      setReason("");
+      setComment("");
       setRevising(false);
       setPendingVerdict(null);
       router.refresh();
@@ -116,9 +121,14 @@ export function HumanReviewActions({
     }
   }
 
-  function submit(event: FormEvent, action: VerdictAction) {
-    event.preventDefault();
+  function chooseVerdict(action: VerdictAction) {
+    if (submitting) return;
+    if (commentRequiredForVerdict(action) && !comment.trim()) {
+      setError("Dit oordeel heeft een toelichting nodig.");
+      return;
+    }
     if (canCascade) {
+      setError(null);
       setPendingVerdict(action);
       return;
     }
@@ -157,7 +167,6 @@ export function HumanReviewActions({
               className="btn"
               onClick={() => {
                 setRevising(true);
-                setMode("idle");
                 setPendingVerdict(null);
               }}
             >
@@ -198,7 +207,7 @@ export function HumanReviewActions({
           oordeel (<strong>{label}</strong>) ook daar vastleggen? De stage
           verandert niet — de agent doet de transitie nog steeds per ticket.
         </p>
-        {error ? <p className="error">{error}</p> : null}
+        {error ? <p className="form-error">{error}</p> : null}
         <div className="human-review-actions">
           <button
             type="button"
@@ -229,12 +238,6 @@ export function HumanReviewActions({
     );
   }
 
-  const outcomeHints = [
-    showApprove && gate.approveTo ? `goedkeuren → ${gate.approveTo}` : null,
-    showReject && gate.rejectTo ? `afkeuren → ${gate.rejectTo}` : null,
-    showDismiss && gate.dismissTo ? `afzien → ${gate.dismissTo}` : null,
-  ].filter(Boolean);
-
   return (
     <aside className="human-review">
       <div className="human-review-header">
@@ -243,19 +246,36 @@ export function HumanReviewActions({
           <h3>Jouw oordeel</h3>
           <p className="muted">
             Beoordeel <strong>{stageName}</strong>. Je oordeel verplaatst het
-            ticket niet zelf — de agent doet de transitie
-            {outcomeHints.length ? ` (${outcomeHints.join("; ")})` : null}.
+            ticket niet zelf — de agent doet de transitie.
           </p>
         </div>
       </div>
 
-      {mode === "idle" ? (
+      <form
+        className="human-review-form"
+        onSubmit={(event) => event.preventDefault()}
+      >
+        <label>
+          Toelichting (optioneel bij Goedkeuren
+          {requiredHint ? `; verplicht bij ${requiredHint}` : ""})
+          <textarea
+            value={comment}
+            onChange={(e) => {
+              setComment(e.target.value);
+              if (error) setError(null);
+            }}
+            rows={4}
+            placeholder="Korte toelichting bij je oordeel."
+          />
+        </label>
+        {error ? <p className="form-error">{error}</p> : null}
         <div className="human-review-actions">
           {showApprove ? (
             <button
               type="button"
               className="btn primary"
-              onClick={() => setMode("approve")}
+              disabled={submitting}
+              onClick={() => chooseVerdict("approved")}
             >
               Goedkeuren
             </button>
@@ -264,7 +284,8 @@ export function HumanReviewActions({
             <button
               type="button"
               className="btn"
-              onClick={() => setMode("reject")}
+              disabled={submitting}
+              onClick={() => chooseVerdict("rejected")}
             >
               Afkeuren
             </button>
@@ -273,124 +294,14 @@ export function HumanReviewActions({
             <button
               type="button"
               className="btn"
-              onClick={() => setMode("dismiss")}
+              disabled={submitting}
+              onClick={() => chooseVerdict("dismissed")}
             >
-              Afzien
+              Annuleren
             </button>
           ) : null}
         </div>
-      ) : null}
-
-      {mode === "approve" ? (
-        <form
-          onSubmit={(e) => submit(e, "approved")}
-          className="human-review-form"
-        >
-          <div className="human-review-form-title">Goedkeuren</div>
-          <p className="muted">
-            De agent brengt dit ticket naar{" "}
-            <strong>{gate.approveTo ?? "de configureerde stage"}</strong>.
-          </p>
-          <label>
-            Toelichting (optioneel)
-            <textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              rows={3}
-              placeholder="Acceptatiecriteria gecontroleerd."
-            />
-          </label>
-          {error ? <p className="error">{error}</p> : null}
-          <div className="human-review-actions">
-            <button type="submit" className="btn primary" disabled={submitting}>
-              {submitting ? "Bezig…" : "Bevestig goedkeuring"}
-            </button>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => setMode("idle")}
-              disabled={submitting}
-            >
-              Annuleren
-            </button>
-          </div>
-        </form>
-      ) : null}
-
-      {mode === "reject" ? (
-        <form
-          onSubmit={(e) => submit(e, "rejected")}
-          className="human-review-form reject"
-        >
-          <div className="human-review-form-title">Afkeuren</div>
-          <p className="muted">
-            De agent brengt dit ticket naar{" "}
-            <strong>{gate.rejectTo ?? "de configureerde stage"}</strong>.
-          </p>
-          <label>
-            Reden van afkeuring (verplicht)
-            <textarea
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              rows={4}
-              required
-              placeholder="Wat moet er nog gebeuren?"
-            />
-          </label>
-          {error ? <p className="error">{error}</p> : null}
-          <div className="human-review-actions">
-            <button type="submit" className="btn" disabled={submitting}>
-              {submitting ? "Bezig…" : "Bevestig afkeuring"}
-            </button>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => setMode("idle")}
-              disabled={submitting}
-            >
-              Annuleren
-            </button>
-          </div>
-        </form>
-      ) : null}
-
-      {mode === "dismiss" ? (
-        <form
-          onSubmit={(e) => submit(e, "dismissed")}
-          className="human-review-form reject"
-        >
-          <div className="human-review-form-title">Afzien</div>
-          <p className="muted">
-            De agent sluit dit pad af naar{" "}
-            <strong>{gate.dismissTo ?? "de configureerde stage"}</strong>{" "}
-            (geen verdere uitvoering).
-          </p>
-          <label>
-            Reden om af te zien (verplicht)
-            <textarea
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              rows={4}
-              required
-              placeholder="Waarom wordt dit ticket niet verder opgepakt?"
-            />
-          </label>
-          {error ? <p className="error">{error}</p> : null}
-          <div className="human-review-actions">
-            <button type="submit" className="btn" disabled={submitting}>
-              {submitting ? "Bezig…" : "Bevestig afzien"}
-            </button>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => setMode("idle")}
-              disabled={submitting}
-            >
-              Annuleren
-            </button>
-          </div>
-        </form>
-      ) : null}
+      </form>
     </aside>
   );
 }

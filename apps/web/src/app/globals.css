@@ -869,17 +869,13 @@ h2 {
   margin-top: 0;
 }
 
-.human-review-kicker,
-.human-review-form-title {
+.human-review-kicker {
   color: var(--priority-medium);
   font-family: var(--mono);
   font-size: 0.72rem;
   font-weight: 650;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-}
-
-.human-review-kicker {
   margin-bottom: 0.35rem;
 }
 
@@ -892,17 +888,6 @@ h2 {
 .human-review-form {
   display: grid;
   gap: 0.85rem;
-  margin-top: 0.75rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--border);
-}
-
-.human-review-form.reject {
-  border-top-color: rgba(217, 119, 87, 0.45);
-}
-
-.human-review-form.reject .human-review-form-title {
-  color: var(--priority-high);
 }
 
 .human-review-form label {
@@ -915,6 +900,9 @@ h2 {
 .human-review-form textarea,
 .human-review-form select {
   width: 100%;
+  min-width: 0;
+  min-height: 5.5rem;
+  box-sizing: border-box;
   border: 1px solid var(--border);
   border-radius: 7px;
   background: var(--bg);

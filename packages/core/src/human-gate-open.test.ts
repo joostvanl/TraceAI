@@ -110,6 +110,8 @@ describe("assertHumanGateTransition", () => {
         assert.equal(err.review_state, null);
         assert.equal(err.to_stage, "in_progress");
         assert.ok(err.allowed_targets.includes("in_progress"));
+        assert.match(err.message, /Goedkeuren\/Afkeuren\/Annuleren/);
+        assert.equal(/Afzien/.test(err.message), false);
         return true;
       },
     );
