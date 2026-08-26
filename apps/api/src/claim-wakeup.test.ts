@@ -5,8 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthStore, DEFAULT_AGENT_SCOPES } from "@traceai/auth";
 import { createApp } from "./app.js";
+import { signHumanIdentity } from "./human-identity.js";
 import { configureNotificationStore } from "./notifications.js";
 import { projectMemberStubs } from "./test-support.js";
+import { authEmailForUiSlug } from "./self-service-tokens.js";
 import {
   NudgeQueueStore,
   processDueCloudNudges,
@@ -793,11 +795,14 @@ describe("claimer Cursor key on review (TRA-114)", () => {
     input: {
       claimerId: "alice" | "bob";
       claimedAgentId: string;
-      saveKeyFor?: "alice" | "bob";
+      saveKeyFor?: "alice" | "bob" | "reviewer";
       saveKeyValue?: string;
       saveKeySecret?: string;
+      saveReviewerKey?: string;
       envCursorKey?: string;
       cursorStatus?: number;
+      emptyClaimer?: boolean;
+      reviewerSlug?: string;
     },
     fn: (calls: Array<{ url: string; auth: string }>) => Promise<void>,
   ) {
@@ -808,13 +813,31 @@ describe("claimer Cursor key on review (TRA-114)", () => {
     try {
       const alice = store.createUser({ email: "alice@example.com", name: "A" });
       const bob = store.createUser({ email: "bob@example.com", name: "B" });
-      const ids = { alice: alice.id, bob: bob.id };
+      const reviewerSlug = input.reviewerSlug?.trim() || "";
+      const reviewer = reviewerSlug
+        ? store.createUser({
+            email: authEmailForUiSlug(reviewerSlug),
+            name: reviewerSlug,
+          })
+        : null;
+      const ids = { alice: alice.id, bob: bob.id, reviewer: reviewer?.id ?? "" };
+      const claimerUserId = input.emptyClaimer
+        ? ""
+        : ids[input.claimerId];
       if (input.saveKeyFor) {
         store.putAgentApiKey({
           userId: ids[input.saveKeyFor],
           provider: "cursor",
           apiKey: input.saveKeyValue ?? "key_saved_XXXX",
           secret: input.saveKeySecret ?? SESSION_SECRET,
+        });
+      }
+      if (input.saveReviewerKey && reviewer) {
+        store.putAgentApiKey({
+          userId: reviewer.id,
+          provider: "cursor",
+          apiKey: input.saveReviewerKey,
+          secret: SESSION_SECRET,
         });
       }
       if (input.envCursorKey !== undefined) {
@@ -850,26 +873,76 @@ describe("claimer Cursor key on review (TRA-114)", () => {
             wrappedTicket({
               slug: "gated",
               claimed_agent_id: input.claimedAgentId,
-              claimed_by_user_id: ids[input.claimerId],
+              claimed_by_user_id: claimerUserId,
             }),
           recordReviewVerdict: async () => ({
             ticket: ticketEntry({
               slug: "gated",
               claimed_agent_id: input.claimedAgentId,
-              claimed_by_user_id: ids[input.claimerId],
+              claimed_by_user_id: claimerUserId,
               review_state: "approved",
             }),
             cascaded: [],
           }),
+          getTraceaiUser: async (slug: string) =>
+            reviewerSlug && slug === reviewerSlug
+              ? {
+                  id: `id-${slug}`,
+                  slug,
+                  fields: {
+                    username: slug,
+                    display_name: slug,
+                    status: "active",
+                  },
+                }
+              : null,
+          listProjectMemberships: async () => {
+            const rows = [
+              {
+                id: "id-traceai-tester",
+                slug: "traceai-member-tester",
+                fields: {
+                  project: "traceai",
+                  user: "tester",
+                  role: "admin" as const,
+                },
+              },
+            ];
+            if (reviewerSlug) {
+              rows.push({
+                id: `id-traceai-${reviewerSlug}`,
+                slug: `traceai-member-${reviewerSlug}`,
+                fields: {
+                  project: "traceai",
+                  user: reviewerSlug,
+                  role: "admin" as const,
+                },
+              });
+            }
+            return rows;
+          },
         } as never,
         cursorCloudFetch: fetchImpl,
         scheduleWakeup: (job) => jobs.push(job),
       });
+      const extraHeaders: Record<string, string> = {
+        "x-traceai-human-proxy": PROXY_SECRET,
+      };
+      if (reviewerSlug) {
+        extraHeaders["x-traceai-human-identity"] = signHumanIdentity(
+          {
+            user: reviewerSlug,
+            slug: reviewerSlug,
+            display_name: reviewerSlug,
+            is_platform_admin: false,
+            mode: "personal",
+          },
+          SESSION_SECRET,
+        );
+      }
       const res = await app.request("/v1/tickets/gated/review", {
         method: "POST",
-        headers: authHeaders(token.token, {
-          "x-traceai-human-proxy": PROXY_SECRET,
-        }),
+        headers: authHeaders(token.token, extraHeaders),
         body: JSON.stringify({ verdict: "approved" }),
       });
       assert.equal(res.status, 200, await res.text());
@@ -985,6 +1058,68 @@ describe("claimer Cursor key on review (TRA-114)", () => {
       },
       async (calls) => {
         assert.equal(calls.length, 1);
+      },
+    );
+  });
+
+  it("uses the reviewing personal user's Agent APIs key when the claim has no claimer", async () => {
+    await withKeyApp(
+      {
+        claimerId: "alice",
+        claimedAgentId: "bc-cloud-1",
+        emptyClaimer: true,
+        reviewerSlug: "joostvl",
+        saveKeyFor: "reviewer",
+        saveKeyValue: "key_reviewer_UI_99",
+        envCursorKey: "key_env_must_not_win",
+      },
+      async (calls) => {
+        assert.equal(calls.length, 1);
+        const expected = Buffer.from("key_reviewer_UI_99:", "utf8").toString(
+          "base64",
+        );
+        assert.equal(calls[0]?.auth, `Basic ${expected}`);
+        assert.match(calls[0]?.url ?? "", /bc-cloud-1/);
+      },
+    );
+  });
+
+  it("uses the reviewing personal user's Agent APIs key when the claimer has no saved Cursor key", async () => {
+    await withKeyApp(
+      {
+        claimerId: "alice",
+        claimedAgentId: "bc-cloud-1",
+        reviewerSlug: "joostvl",
+        saveKeyFor: "reviewer",
+        saveKeyValue: "key_reviewer_UI_99",
+        envCursorKey: "key_env_must_not_win",
+      },
+      async (calls) => {
+        assert.equal(calls.length, 1);
+        const expected = Buffer.from("key_reviewer_UI_99:", "utf8").toString(
+          "base64",
+        );
+        assert.equal(calls[0]?.auth, `Basic ${expected}`);
+      },
+    );
+  });
+
+  it("still prefers the claimer's Cursor key when the reviewer also has one", async () => {
+    await withKeyApp(
+      {
+        claimerId: "alice",
+        claimedAgentId: "bc-alice",
+        reviewerSlug: "joostvl",
+        saveKeyFor: "alice",
+        saveKeyValue: "key_alice_only_1111",
+        saveReviewerKey: "key_reviewer_UI_99",
+      },
+      async (calls) => {
+        assert.equal(calls.length, 1);
+        const expected = Buffer.from("key_alice_only_1111:", "utf8").toString(
+          "base64",
+        );
+        assert.equal(calls[0]?.auth, `Basic ${expected}`);
       },
     );
   });

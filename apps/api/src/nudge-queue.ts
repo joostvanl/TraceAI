@@ -31,6 +31,8 @@ export type PendingCloudNudge = {
   attempts: number;
   lease_until: string | null;
   last_status: number | null;
+  /** AuthStore user whose Agent APIs Cursor key should be tried on retry. */
+  key_user_id: string | null;
 };
 
 /**
@@ -61,11 +63,13 @@ export class NudgeQueueStore {
         next_retry_at TEXT NOT NULL,
         attempts INTEGER NOT NULL,
         lease_until TEXT,
-        last_status INTEGER
+        last_status INTEGER,
+        key_user_id TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_pending_cloud_nudges_due
         ON pending_cloud_nudges(next_retry_at);
     `);
+    ensureNudgeColumn(this.db, "key_user_id", "TEXT");
   }
 
   upsert(
@@ -80,14 +84,17 @@ export class NudgeQueueStore {
       next_retry_at: string;
       attempts: number;
       last_status?: number | null;
+      key_user_id?: string | null;
     },
   ): PendingCloudNudge {
+    const keyUserId = input.key_user_id?.trim() || null;
     this.db
       .prepare(
         `INSERT INTO pending_cloud_nudges (
            ticket_slug, agent_id, verdict, stage, ticket_key, prompt,
-           first_attempt_at, next_retry_at, attempts, lease_until, last_status
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+           first_attempt_at, next_retry_at, attempts, lease_until, last_status,
+           key_user_id
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
          ON CONFLICT(ticket_slug) DO UPDATE SET
            agent_id = excluded.agent_id,
            verdict = excluded.verdict,
@@ -98,7 +105,8 @@ export class NudgeQueueStore {
            next_retry_at = excluded.next_retry_at,
            attempts = excluded.attempts,
            lease_until = NULL,
-           last_status = excluded.last_status`,
+           last_status = excluded.last_status,
+           key_user_id = excluded.key_user_id`,
       )
       .run(
         input.ticket_slug,
@@ -111,6 +119,7 @@ export class NudgeQueueStore {
         input.next_retry_at,
         input.attempts,
         input.last_status ?? null,
+        keyUserId,
       );
     return this.getBySlug(input.ticket_slug)!;
   }
@@ -225,7 +234,23 @@ function mapNudgeRow(row: Record<string, unknown>): PendingCloudNudge {
     attempts: Number(row.attempts),
     lease_until: row.lease_until == null ? null : String(row.lease_until),
     last_status: row.last_status == null ? null : Number(row.last_status),
+    key_user_id:
+      row.key_user_id == null || String(row.key_user_id).trim() === ""
+        ? null
+        : String(row.key_user_id),
   };
+}
+
+function ensureNudgeColumn(
+  db: DatabaseSync,
+  name: string,
+  sqlType: string,
+): void {
+  const cols = db.prepare(`PRAGMA table_info(pending_cloud_nudges)`).all() as Array<{
+    name: string;
+  }>;
+  if (cols.some((col) => col.name === name)) return;
+  db.exec(`ALTER TABLE pending_cloud_nudges ADD COLUMN ${name} ${sqlType}`);
 }
 
 export function enqueueBusyCloudNudgeForVerdict(
@@ -234,6 +259,7 @@ export function enqueueBusyCloudNudgeForVerdict(
   verdict: string,
   result: NudgeClaimResult,
   now: Date = new Date(),
+  keyUserId?: string | null,
 ): PendingCloudNudge {
   const next = new Date(now.getTime() + AGENT_BUSY_RETRY_MS);
   return store.upsert({
@@ -247,12 +273,16 @@ export function enqueueBusyCloudNudgeForVerdict(
     next_retry_at: next.toISOString(),
     attempts: 1,
     last_status: result.status || null,
+    key_user_id: keyUserId,
   });
 }
 
 export type NudgeQueueWorkerDeps = {
   store: NudgeQueueStore;
-  getClient: (ticket: Ticket) => CursorCloudFollowUp | null | undefined;
+  getClient: (
+    ticket: Ticket,
+    fallbackUserId?: string | null,
+  ) => CursorCloudFollowUp | null | undefined;
   loadTicket: (slug: string) => Promise<Ticket | null>;
   addComment: (input: { ticket: string; body: string }) => Promise<unknown>;
   now?: () => Date;
@@ -330,7 +360,7 @@ async function processOneNudge(
     return;
   }
 
-  const client = deps.getClient(ticket);
+  const client = deps.getClient(ticket, row.key_user_id);
   if (!client) {
     await skipQueuedNudge(deps, row, currentId, ticket, "missing_key", log);
     return;

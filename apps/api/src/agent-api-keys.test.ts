@@ -51,6 +51,17 @@ describe("resolveClaimerCursorApiKey", () => {
         { ok: false, reason: "no_key" },
       );
 
+      const claimerNoKeyUsesFallback = resolveClaimerCursorApiKey(
+        store,
+        ticket(owner.id),
+        env,
+        other.id,
+      );
+      assert.deepEqual(claimerNoKeyUsesFallback, {
+        ok: true,
+        apiKey: "key_only_B_zzzz",
+      });
+
       store.putAgentApiKey({
         userId: owner.id,
         provider: "cursor",
@@ -70,6 +81,22 @@ describe("resolveClaimerCursorApiKey", () => {
       assert.equal(listed.find((p) => p.provider === "cursor")?.last4, "AAAA");
       assert.equal(listed.find((p) => p.provider === "claude_code")?.configured, false);
       assert.equal(listed.find((p) => p.provider === "codex")?.configured, false);
+
+      const viaFallback = resolveClaimerCursorApiKey(
+        store,
+        ticket(""),
+        env,
+        other.id,
+      );
+      assert.deepEqual(viaFallback, { ok: true, apiKey: "key_only_B_zzzz" });
+
+      const claimerWins = resolveClaimerCursorApiKey(
+        store,
+        ticket(owner.id),
+        env,
+        other.id,
+      );
+      assert.deepEqual(claimerWins, { ok: true, apiKey: "key_owner_AAAA" });
     } finally {
       store.close();
       rmSync(dir, { recursive: true, force: true });

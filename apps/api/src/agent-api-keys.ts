@@ -30,17 +30,11 @@ export type ClaimerCursorKeyResult =
   | { ok: true; apiKey: string }
   | { ok: false; reason: ClaimerCursorKeySkip };
 
-/**
- * Decrypt the claiming user's Cursor key. Safe for the live review path and a
- * later durable queue (TRA-113) — never reads `CURSOR_API_KEY`.
- */
-export function resolveClaimerCursorApiKey(
+function decryptCursorKeyForUser(
   store: AuthStore,
-  ticket: Pick<Ticket, "fields">,
-  env: NodeJS.Dict<string> = process.env,
+  userId: string,
+  env: NodeJS.Dict<string>,
 ): ClaimerCursorKeyResult {
-  const userId = ticket.fields.claimed_by_user_id?.trim();
-  if (!userId) return { ok: false, reason: "no_claimer" };
   const record = store.getAgentApiKeyRecord(userId, "cursor");
   if (!record) return { ok: false, reason: "no_key" };
   const secret = agentApiEncryptionSecret(env);
@@ -54,6 +48,35 @@ export function resolveClaimerCursorApiKey(
   }
 }
 
+/**
+ * Decrypt the claiming user's Cursor key. Never reads `CURSOR_API_KEY`.
+ * When the claimer is missing (pre-TRA-114 claims) or has no usable key,
+ * `fallbackUserId` is the reviewing personal user's AuthStore id (TRA-54 join
+ * with Agent APIs). A claimer with a usable key still wins.
+ */
+export function resolveClaimerCursorApiKey(
+  store: AuthStore,
+  ticket: Pick<Ticket, "fields">,
+  env: NodeJS.Dict<string> = process.env,
+  fallbackUserId?: string | null,
+): ClaimerCursorKeyResult {
+  const claimer = ticket.fields.claimed_by_user_id?.trim();
+  const fallback = fallbackUserId?.trim() || "";
+  if (claimer) {
+    const fromClaimer = decryptCursorKeyForUser(store, claimer, env);
+    if (fromClaimer.ok) return fromClaimer;
+    if (fallback && fallback !== claimer) {
+      const fromFallback = decryptCursorKeyForUser(store, fallback, env);
+      if (fromFallback.ok) return fromFallback;
+    }
+    return fromClaimer;
+  }
+  if (fallback) {
+    return decryptCursorKeyForUser(store, fallback, env);
+  }
+  return { ok: false, reason: "no_claimer" };
+}
+
 export function cursorFollowUpForClaimer(
   store: AuthStore,
   ticket: Ticket,
@@ -61,14 +84,22 @@ export function cursorFollowUpForClaimer(
     fetchImpl?: typeof fetch;
     log?: (message: string) => void;
     env?: NodeJS.Dict<string>;
+    fallbackUserId?: string | null;
+    onSkip?: (ticket: Ticket, reason: ClaimerCursorKeySkip) => void;
   },
 ): CursorCloudFollowUp | null {
-  const result = resolveClaimerCursorApiKey(store, ticket, options?.env);
+  const result = resolveClaimerCursorApiKey(
+    store,
+    ticket,
+    options?.env,
+    options?.fallbackUserId,
+  );
   if (!result.ok) {
     const log = options?.log ?? ((message: string) => console.warn(message));
     log(
       `[traceai] cursor cloud nudge skipped (${result.reason}) for ${ticket.slug}`,
     );
+    options?.onSkip?.(ticket, result.reason);
     return null;
   }
   return new CursorCloudAgentClient(result.apiKey, options?.fetchImpl);

@@ -18,7 +18,8 @@ const nudgeQueue = configureNudgeQueueStore(env.nudgeQueueDbPath);
 const app = createApp({ authStore, service, nudgeQueue });
 startNudgeQueuePoller({
   store: nudgeQueue,
-  getClient: (ticket) => cursorFollowUpForClaimer(authStore, ticket),
+  getClient: (ticket, fallbackUserId) =>
+    cursorFollowUpForClaimer(authStore, ticket, { fallbackUserId }),
   loadTicket: async (slug) => {
     const wrapped = await service.getTicket(slug);
     return wrapped?.ticket ?? null;

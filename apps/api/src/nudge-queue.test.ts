@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import {
   AGENT_BUSY_RETRY_MS,
   AGENT_BUSY_RETRY_WINDOW_MS,
@@ -141,6 +142,55 @@ describe("NudgeQueueStore", () => {
     assert.equal(rows.length, 1);
     assert.equal(rows[0]?.ticket_slug, "sample");
     reopened.close();
+  });
+
+  it("stores the reviewing user's AuthStore id for busy retries", () => {
+    const store = new NudgeQueueStore(":memory:");
+    const t = new Date("2026-08-26T00:00:00.000Z");
+    enqueueBusyCloudNudgeForVerdict(
+      store,
+      ticket(),
+      "approved",
+      busyResult(),
+      t,
+      "usr_reviewer",
+    );
+    assert.equal(store.listAll()[0]?.key_user_id, "usr_reviewer");
+    store.close();
+  });
+
+  it("adds key_user_id on an existing queue database that predates the column", () => {
+    const db = new DatabaseSync(dbPath);
+    db.exec(`
+      CREATE TABLE pending_cloud_nudges (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticket_slug TEXT UNIQUE NOT NULL,
+        agent_id TEXT NOT NULL,
+        verdict TEXT NOT NULL,
+        stage TEXT NOT NULL,
+        ticket_key TEXT,
+        prompt TEXT NOT NULL,
+        first_attempt_at TEXT NOT NULL,
+        next_retry_at TEXT NOT NULL,
+        attempts INTEGER NOT NULL,
+        lease_until TEXT,
+        last_status INTEGER
+      );
+    `);
+    db.close();
+
+    const store = new NudgeQueueStore(dbPath);
+    const t = new Date("2026-08-26T00:00:00.000Z");
+    enqueueBusyCloudNudgeForVerdict(
+      store,
+      ticket(),
+      "approved",
+      busyResult(),
+      t,
+      "usr_migrated",
+    );
+    assert.equal(store.listAll()[0]?.key_user_id, "usr_migrated");
+    store.close();
   });
 });
 
@@ -339,6 +389,40 @@ describe("processDueCloudNudges", () => {
     await processDueCloudNudges(deps);
     assert.equal(calls.length, 0);
     assert.equal(comments.length, 0);
+    store.close();
+  });
+
+  it("passes the stored key_user_id to getClient on retry", async () => {
+    const store = new NudgeQueueStore(":memory:");
+    const t0 = new Date("2026-08-26T00:00:00.000Z");
+    enqueueBusyCloudNudgeForVerdict(
+      store,
+      ticket({ claimed_by_user_id: "" }),
+      "approved",
+      busyResult(),
+      t0,
+      "usr_reviewer",
+    );
+    const seen: Array<string | null | undefined> = [];
+    const calls: string[] = [];
+    await processDueCloudNudges({
+      store,
+      getClient: (_ticket, fallbackUserId) => {
+        seen.push(fallbackUserId);
+        return {
+          followUp: async (id) => {
+            calls.push(id);
+            return { ok: true, status: 201, busy: false };
+          },
+        };
+      },
+      loadTicket: async () => ticket({ claimed_by_user_id: "" }),
+      addComment: async () => {},
+      now: () => new Date(t0.getTime() + AGENT_BUSY_RETRY_MS),
+      log: () => {},
+    });
+    assert.deepEqual(seen, ["usr_reviewer"]);
+    assert.deepEqual(calls, ["bc-cloud-1"]);
     store.close();
   });
 

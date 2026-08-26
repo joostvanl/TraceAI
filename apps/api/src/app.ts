@@ -1792,10 +1792,49 @@ export function createApp(deps: {
       );
       getNotificationStore().markTicketReviewRead(child.slug);
     }
+    let reviewerAuthUserId: string | null = null;
+    if (human?.mode === "personal" && human.slug) {
+      try {
+        const resolved = await resolveSelfServiceAuthUser(
+          deps.service,
+          deps.authStore,
+          human,
+        );
+        if (resolved.ok) reviewerAuthUserId = resolved.user.id;
+      } catch (error) {
+        console.warn("[traceai] reviewer Agent APIs join failed", error);
+      }
+    }
+    const liveCursorCloud =
+      deps.cursorCloud !== undefined
+        ? cursorCloud
+        : (ticket: Ticket) =>
+            cursorFollowUpForClaimer(deps.authStore, ticket, {
+              fetchImpl: deps.cursorCloudFetch,
+              fallbackUserId: reviewerAuthUserId,
+              onSkip: (skipped, reason) => {
+                const addComment = deps.service.addComment?.bind(deps.service);
+                if (!addComment) return;
+                void addComment({
+                    ticket: skipped.slug,
+                    body:
+                      `Cloud wake-up skipped for ${skipped.slug} ` +
+                      `(${skipped.fields.ticket_key ?? skipped.slug}): ${reason}. ` +
+                      `Save a Cursor key on Agent APIs (same personal login as the claim or this review). ` +
+                      `Verdict and claim are unchanged.`,
+                    author: "traceai",
+                  }).catch((error) => {
+                    console.warn(
+                      "[traceai] cursor cloud nudge skip comment failed",
+                      error,
+                    );
+                  });
+              },
+            });
     scheduleClaimedCloudNudges(
       [result.ticket, ...result.cascaded],
       verdict,
-      cursorCloud,
+      liveCursorCloud,
       deps.scheduleWakeup,
       (ticket, nudgeResult) => {
         if (!nudgeQueue) return;
@@ -1806,6 +1845,7 @@ export function createApp(deps: {
             verdict,
             nudgeResult,
             now(),
+            reviewerAuthUserId,
           );
         } catch (error) {
           console.warn("[traceai] cursor cloud nudge enqueue failed", error);
