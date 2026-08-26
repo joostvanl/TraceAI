@@ -74,6 +74,11 @@ import {
 } from "./project-guard.js";
 import { getNotificationStore } from "./notifications.js";
 import {
+  enqueueBusyCloudNudgeForVerdict,
+  getNudgeQueueStore,
+  type NudgeQueueStore,
+} from "./nudge-queue.js";
+import {
   resolveSelfServiceAuthUser,
   sanitizeSelfServiceScopes,
 } from "./self-service-tokens.js";
@@ -426,6 +431,8 @@ export function createApp(deps: {
   service: TraceService;
   cursorCloud?: CursorCloudFollowUp | null;
   scheduleWakeup?: (fn: () => void) => void;
+  nudgeQueue?: NudgeQueueStore | null;
+  now?: () => Date;
 }) {
   const app = new Hono<{ Variables: AppVariables }>();
   const auth = createAuthMiddleware(deps.authStore);
@@ -433,6 +440,9 @@ export function createApp(deps: {
     deps.cursorCloud === undefined
       ? CursorCloudAgentClient.fromEnv()
       : deps.cursorCloud;
+  const nudgeQueue =
+    deps.nudgeQueue === undefined ? getNudgeQueueStore() : deps.nudgeQueue;
+  const now = deps.now ?? (() => new Date());
 
   app.use(
     "*",
@@ -1607,6 +1617,7 @@ export function createApp(deps: {
         400,
       );
     }
+    const verdict = body.verdict;
     const existing = await deps.service.getTicket(param(c, "slug"));
     if (!existing) {
       return c.json({ message: "Ticket not found", code: "NOT_FOUND" }, 404);
@@ -1628,7 +1639,7 @@ export function createApp(deps: {
     }
     const actor = c.get("actor");
     const result = await deps.service.recordReviewVerdict(param(c, "slug"), {
-      verdict: body.verdict,
+      verdict: verdict,
       comment: body.comment,
       author: attributionName(
         human,
@@ -1647,9 +1658,23 @@ export function createApp(deps: {
     }
     scheduleClaimedCloudNudges(
       [result.ticket, ...result.cascaded],
-      body.verdict,
+      verdict,
       cursorCloud,
       deps.scheduleWakeup,
+      (ticket, nudgeResult) => {
+        if (!nudgeQueue) return;
+        try {
+          enqueueBusyCloudNudgeForVerdict(
+            nudgeQueue,
+            ticket,
+            verdict,
+            nudgeResult,
+            now(),
+          );
+        } catch (error) {
+          console.warn("[traceai] cursor cloud nudge enqueue failed", error);
+        }
+      },
     );
     audit(c, {
       action: "ticket.review_verdict",
