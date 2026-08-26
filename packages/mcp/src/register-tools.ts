@@ -378,6 +378,26 @@ export function registerTraceAiTools(
   );
 
   server.tool(
+    "claim_ticket",
+    "Claim this ticket for the calling agent (last writer wins). Pass your Cursor agent id. On Cursor-managed Cloud Agent VMs read it from the metadata socket, not the dashboard URL: curl -fsS --unix-socket \"${CURSOR_AGENT_SOCKET:-/run/cursor/api.sock}\" http://cursor-agent/v1/meta-data/agent/id . Fallback: Cloud MCP run-info → bcId. Empty agent_id clears the claim. Cloud ids start with bc- and receive a wake-up after a human-gate verdict. Call this before transition_ticket into a stage with require_human_approval_on_exit.",
+    {
+      ticket: z.string().describe("Ticket slug or TRA-n"),
+      agent_id: z
+        .string()
+        .describe(
+          "Cursor agent id (bc-… for Cloud). Empty string clears the claim.",
+        ),
+    },
+    async ({ ticket, agent_id }) => {
+      try {
+        return okWrite(await client.claimTicket(ticket, agent_id), apiBase);
+      } catch (error) {
+        return fail(error);
+      }
+    },
+  );
+
+  server.tool(
     "add_comment",
     "Add a Markdown comment to a ticket (author comes from TraceAI token)",
     {

@@ -28,6 +28,7 @@ const PROJECT_SCOPED = [
   "POST /v1/tickets/reorder",
   "POST /v1/tickets/:slug/transition",
   "POST /v1/tickets/:slug/review",
+  "POST /v1/tickets/:slug/claim",
   "POST /v1/comments",
   "GET /v1/wiki-pages",
   "GET /v1/wiki-pages/:slug",

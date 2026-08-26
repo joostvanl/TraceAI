@@ -123,6 +123,7 @@ describe("hosted MCP /mcp", () => {
       assert.ok(names.includes("list_projects"));
       assert.ok(names.includes("get_ticket"));
       assert.ok(names.includes("transition_ticket"));
+      assert.ok(names.includes("claim_ticket"));
       assert.ok(names.includes("create_wiki_page"));
     } finally {
       store.close();

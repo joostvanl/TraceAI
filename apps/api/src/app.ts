@@ -16,12 +16,16 @@ import {
   parseWorkflowDocument,
   relationSlug,
   requiredRoleForAction,
+  claimedAgentKind,
+  CursorCloudAgentClient,
+  scheduleClaimedCloudNudges,
   StageConflictError,
   TICKET_REVIEW_STATES,
   TraceError,
   ValidationError,
   WorkflowValidationError,
   wikiLogicalSlug,
+  type CursorCloudFollowUp,
   type FieldEdit,
   type ProjectRole,
   type Ticket,
@@ -285,6 +289,8 @@ function mapTicket(t: NonNullable<
     review_at: t.fields.review_at || null,
     parent: t.fields.parent || null,
     sort_order: t.fields.sort_order ?? null,
+    claimed_agent_id: t.fields.claimed_agent_id?.trim() || null,
+    claimed_agent_kind: claimedAgentKind(t.fields.claimed_agent_id),
   };
 }
 
@@ -418,9 +424,15 @@ function httpRouteLabel(c: Context): string {
 export function createApp(deps: {
   authStore: AuthStore;
   service: TraceService;
+  cursorCloud?: CursorCloudFollowUp | null;
+  scheduleWakeup?: (fn: () => void) => void;
 }) {
   const app = new Hono<{ Variables: AppVariables }>();
   const auth = createAuthMiddleware(deps.authStore);
+  const cursorCloud =
+    deps.cursorCloud === undefined
+      ? CursorCloudAgentClient.fromEnv()
+      : deps.cursorCloud;
 
   app.use(
     "*",
@@ -1185,6 +1197,8 @@ export function createApp(deps: {
           review_at: t.fields.review_at || null,
           parent: t.fields.parent || null,
           sort_order: t.fields.sort_order ?? null,
+          claimed_agent_id: t.fields.claimed_agent_id?.trim() || null,
+          claimed_agent_kind: claimedAgentKind(t.fields.claimed_agent_id),
         };
       }),
     );
@@ -1314,6 +1328,45 @@ export function createApp(deps: {
       action: "ticket.update",
       resourceType: "ticket",
       resourceId: ticket.slug,
+    });
+    return c.json(mapped);
+  });
+
+  app.post("/v1/tickets/:slug/claim", requireScope("tickets:write"), async (c) => {
+    const existing = await deps.service.getTicket(param(c, "slug"));
+    if (!existing) {
+      return c.json({ message: "Ticket not found", code: "NOT_FOUND" }, 404);
+    }
+    const project = existing.ticket.fields.project;
+    const hidden = await denyUnlessProjectVisible(c, project, "Ticket not found");
+    if (hidden) return hidden;
+    const denied = await enforceProjectRole(
+      deps.service,
+      await principalFor(c, deps.service),
+      project,
+      requiredRoleForAction("write_tickets"),
+    );
+    if (denied) {
+      return c.json({ message: denied, code: "FORBIDDEN" }, 403);
+    }
+    const body = await c.req.json<{ agent_id?: string | null }>();
+    if (!("agent_id" in (body ?? {})) || body.agent_id === undefined) {
+      return c.json(
+        { message: "agent_id is required (empty string clears the claim)", code: "VALIDATION" },
+        400,
+      );
+    }
+    const ticket = await deps.service.claimTicket(param(c, "slug"), body.agent_id);
+    const mapped = mapTicket(ticket);
+    publishTicketEvent(ticketEventFromMapped("ticket.updated", mapped));
+    audit(c, {
+      action: "ticket.claim",
+      resourceType: "ticket",
+      resourceId: ticket.slug,
+      meta: {
+        claimed_agent_id: mapped.claimed_agent_id,
+        claimed_agent_kind: mapped.claimed_agent_kind,
+      },
     });
     return c.json(mapped);
   });
@@ -1592,6 +1645,12 @@ export function createApp(deps: {
       );
       getNotificationStore().markTicketReviewRead(child.slug);
     }
+    scheduleClaimedCloudNudges(
+      [result.ticket, ...result.cascaded],
+      body.verdict,
+      cursorCloud,
+      deps.scheduleWakeup,
+    );
     audit(c, {
       action: "ticket.review_verdict",
       resourceType: "ticket",

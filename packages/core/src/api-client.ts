@@ -314,6 +314,16 @@ export class TraceApiClient {
     });
   }
 
+  claimTicket(slug: string, agentId: string) {
+    return this.request<unknown>(
+      `/v1/tickets/${encodeURIComponent(slug)}/claim`,
+      {
+        method: "POST",
+        body: JSON.stringify({ agent_id: agentId }),
+      },
+    );
+  }
+
   listWorkflows(project?: string) {
     const params = new URLSearchParams();
     if (project) params.set("project", project);

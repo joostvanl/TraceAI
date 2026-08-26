@@ -1,3 +1,5 @@
+import { CLAIM_TICKET_BEFORE_HUMAN_GATE } from "./claimed-agent.js";
+
 export type Priority = "low" | "medium" | "high";
 
 /** Per-stage instructions the agent must follow around this status. */
@@ -227,6 +229,11 @@ export type TicketFields = {
    * Input may be slug or TRA-n; stored/exposed as slug.
    */
   parent?: string | null;
+  /**
+   * Cursor (or other) agent that currently owns this ticket for wake-up.
+   * Empty = unclaimed. Cloud ids start with `bc-`.
+   */
+  claimed_agent_id?: string;
 };
 
 export const TICKET_RESOLUTIONS = [
@@ -390,6 +397,7 @@ export const DEFAULT_AGENT_POLICY: WorkflowAgentPolicy = {
     "Pass tokens_used: a non-negative integer estimate of LLM tokens (prompt+completion) spent on this step.",
     "Call get_ticket immediately before transition_ticket. Pass expected_stage (current stage). When the current stage has require_human_approval_on_exit, also pass expected_review_state (current review_state, or null). Workflows with require_expected_stage_on_transition refuse the call without the required fields. On STAGE_CONFLICT, read the error body; do not retry the same transition.",
     "Stages with require_human_approval_on_exit need a human verdict in the UI (configured outcomes: approved / rejected / dismissed as applicable) before the agent may transition out.",
+    CLAIM_TICKET_BEFORE_HUMAN_GATE,
   ],
   min_description_chars: 280,
   require_description_headings: [

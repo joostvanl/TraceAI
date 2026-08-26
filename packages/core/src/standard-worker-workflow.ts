@@ -1,4 +1,5 @@
-﻿import type { WorkflowDocument } from "./types.js";
+﻿import { CLAIM_TICKET_BEFORE_HUMAN_GATE } from "./claimed-agent.js";
+import type { WorkflowDocument } from "./types.js";
 
 /** Live TraceAI Standard Worker playbook (v3), used when seeding new projects. */
 export const STANDARD_WORKER_WORKFLOW_DOCUMENT: WorkflowDocument = {
@@ -25,6 +26,7 @@ export const STANDARD_WORKER_WORKFLOW_DOCUMENT: WorkflowDocument = {
       "Pass tokens_used: a non-negative integer estimate of LLM tokens (prompt+completion) spent on this step.",
       "Call get_ticket immediately before transition_ticket. Pass expected_stage (current stage). When the current stage has require_human_approval_on_exit, also pass expected_review_state (current review_state, or null). Workflows with require_expected_stage_on_transition refuse the call without the required fields. On STAGE_CONFLICT, read the error body; do not retry the same transition.",
       "Stages with require_human_approval_on_exit need a human verdict (Goedkeuren/Afkeuren in the UI) before the agent may transition out. Exit requirements that name targets (require_*_on_exit_to) apply only to those destinations.",
+      CLAIM_TICKET_BEFORE_HUMAN_GATE,
       "Wiki writes only via TraceAI MCP (create_wiki_page / update_wiki_page). Never Aurora MCP for wiki.",
     ],
     min_description_chars: 280,

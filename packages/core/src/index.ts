@@ -1,4 +1,6 @@
 export * from "./types.js";
+export * from "./claimed-agent.js";
+export * from "./cursor-cloud-agent.js";
 export * from "./trace-errors.js";
 export * from "./aurora.js";
 export * from "./list-all-entries.js";

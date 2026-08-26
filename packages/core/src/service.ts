@@ -93,6 +93,7 @@ import {
   type ProjectRole,
 } from "./roles.js";
 import { relationSlug, relationSlugOrEmpty } from "./relations.js";
+import { parseClaimedAgentId } from "./claimed-agent.js";
 import {
   buildReviewInboxItems,
   type ReviewInboxItem,
@@ -1596,6 +1597,23 @@ export class TraceService {
         author: input.author,
       });
     }
+    return updated;
+  }
+
+  async claimTicket(
+    slug: string,
+    agentId: string | null | undefined,
+  ): Promise<Ticket> {
+    await this.ensureReady();
+    const ticket = await this.resolveTicket(slug);
+    if (!ticket) throw new NotFoundError(`Ticket not found: ${slug}`);
+    const parsed = parseClaimedAgentId(agentId);
+    if (!parsed.ok) throw new ValidationError(parsed.message);
+    const updated = await this.client.updateEntry<Ticket>("ticket", ticket.id, {
+      fields: { claimed_agent_id: parsed.value },
+    });
+    await this.ensurePublished("ticket", updated);
+    await this.upsertSearchTicket(updated);
     return updated;
   }
 

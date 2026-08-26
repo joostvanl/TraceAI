@@ -3,6 +3,7 @@ import { notFound, permanentRedirect } from "next/navigation";
 import {
   computeTokenRollup,
   firstStageKey,
+  claimedAgentKind,
   humanApproveTarget,
   humanDismissTarget,
   humanRejectTargets,
@@ -186,6 +187,17 @@ export default async function TicketPage({ params }: Props) {
                 {ticket.fields.created_by ? (
                   <span className="muted" style={{ fontSize: "0.85rem" }}>
                     by {ticket.fields.created_by}
+                  </span>
+                ) : null}
+                {ticket.fields.claimed_agent_id ? (
+                  <span className="badge" title={ticket.fields.claimed_agent_id}>
+                    {claimedAgentKind(ticket.fields.claimed_agent_id) ===
+                    "cursor_cloud"
+                      ? "Cursor Cloud"
+                      : "Agent"}{" "}
+                    {ticket.fields.claimed_agent_id.length > 14
+                      ? `${ticket.fields.claimed_agent_id.slice(0, 12)}…`
+                      : ticket.fields.claimed_agent_id}
                   </span>
                 ) : null}
                 {ticket.fields.resolution ? (
