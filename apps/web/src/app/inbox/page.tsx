@@ -130,7 +130,10 @@ async function InboxTicketBody({
         Project{" "}
         <Link href={`/projects/${item.project}`}>{item.project}</Link>
         {" · "}
-        <Link href={`/projects/${item.project}/tickets/${ticket.slug}`}>
+        <Link
+          href={`/projects/${item.project}/tickets/${ticket.slug}`}
+          prefetch={false}
+        >
           Open op board
         </Link>
         {" · "}

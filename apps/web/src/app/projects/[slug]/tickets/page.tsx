@@ -179,12 +179,18 @@ export default async function ProjectTicketsPage({
                 {page.items.map((ticket) => (
                   <tr key={ticket.slug}>
                     <td className="mono">
-                      <Link href={`/projects/${slug}/tickets/${ticket.slug}`}>
+                      <Link
+                        href={`/projects/${slug}/tickets/${ticket.slug}`}
+                        prefetch={false}
+                      >
                         {ticket.ticket_key ?? ticket.slug}
                       </Link>
                     </td>
                     <td>
-                      <Link href={`/projects/${slug}/tickets/${ticket.slug}`}>
+                      <Link
+                        href={`/projects/${slug}/tickets/${ticket.slug}`}
+                        prefetch={false}
+                      >
                         {ticket.title}
                       </Link>
                     </td>

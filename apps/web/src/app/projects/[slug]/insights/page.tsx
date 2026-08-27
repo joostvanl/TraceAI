@@ -157,7 +157,10 @@ export default async function ProjectInsightsPage({
               <li key={`${hit.type}:${hit.slug}`}>
                 <span className="insights-type">{hit.type}</span>
                 {hit.type === "ticket" ? (
-                  <Link href={`/projects/${slug}/tickets/${hit.slug}`}>
+                  <Link
+                    href={`/projects/${slug}/tickets/${hit.slug}`}
+                    prefetch={false}
+                  >
                     {hit.ticket_key ? `${hit.ticket_key} · ` : ""}
                     {hit.title}
                   </Link>
@@ -226,7 +229,10 @@ export default async function ProjectInsightsPage({
                 {history.items.map((ticket) => (
                   <tr key={ticket.slug}>
                     <td className="mono">
-                      <Link href={`/projects/${slug}/tickets/${ticket.slug}`}>
+                      <Link
+                        href={`/projects/${slug}/tickets/${ticket.slug}`}
+                        prefetch={false}
+                      >
                         {ticket.ticket_key ?? ticket.slug}
                       </Link>
                     </td>
@@ -401,7 +407,10 @@ export default async function ProjectInsightsPage({
                       {insights.open_wip.items.map((item) => (
                         <tr key={item.slug}>
                           <td className="mono">
-                            <Link href={`/projects/${slug}/tickets/${item.slug}`}>
+                            <Link
+                              href={`/projects/${slug}/tickets/${item.slug}`}
+                              prefetch={false}
+                            >
                               {item.ticket_key ?? item.slug}
                             </Link>
                           </td>

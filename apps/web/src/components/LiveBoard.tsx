@@ -458,6 +458,7 @@ export function LiveBoard({
                       ) : null}
                       <Link
                         href={`/projects/${projectSlug}/tickets/${ticket.slug}`}
+                        prefetch={false}
                         className={`ticket-card${review ? ` ${review.cardClass}` : ""}${flashSlug === ticket.slug ? " ticket-flash" : ""}${cardReorderable ? " ticket-reorderable" : ""}${ticket.orphan ? " ticket-orphan" : ""}${isDragging ? " ticket-dragging" : ""}`}
                         draggable={cardReorderable}
                         onDragStart={

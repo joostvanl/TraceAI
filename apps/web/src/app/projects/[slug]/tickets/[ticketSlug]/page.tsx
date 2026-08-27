@@ -17,6 +17,7 @@ import {
 } from "@traceai/core";
 import { HumanReviewActions } from "@/components/HumanReviewActions";
 import { Markdown } from "@/components/Markdown";
+import { TicketDetailRefresh } from "@/components/TicketDetailRefresh";
 import { TicketWorkflowSelect } from "@/components/TicketWorkflowSelect";
 import {
   getProject,
@@ -31,6 +32,7 @@ import { requireProjectAccess } from "@/lib/project-access";
 import { getSessionUser } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
 
 type Props = {
   params: Promise<{ slug: string; ticketSlug: string }>;
@@ -146,6 +148,7 @@ export default async function TicketPage({ params }: Props) {
 
   return (
     <>
+      <TicketDetailRefresh ticketSlug={ticket.slug} />
       <nav className="breadcrumb">
         <Link href="/">Projects</Link>
         <span>/</span>
