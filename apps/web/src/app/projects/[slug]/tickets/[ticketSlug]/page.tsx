@@ -15,6 +15,7 @@ import {
   relationSlug,
   resolveTicketRef,
 } from "@traceai/core";
+import { CopyClaimedAgentIdButton } from "@/components/CopyClaimedAgentIdButton";
 import { HumanReviewActions } from "@/components/HumanReviewActions";
 import { Markdown } from "@/components/Markdown";
 import { TicketDetailRefresh } from "@/components/TicketDetailRefresh";
@@ -194,11 +195,16 @@ export default async function TicketPage({ params }: Props) {
                   </span>
                 ) : null}
                 {claimedLabel ? (
-                  <span
-                    className="badge"
-                    title={ticket.fields.claimed_agent_id}
-                  >
-                    {claimedLabel}
+                  <span className="claimed-agent-detail">
+                    <span
+                      className="badge"
+                      title={ticket.fields.claimed_agent_id}
+                    >
+                      {claimedLabel}
+                    </span>
+                    <CopyClaimedAgentIdButton
+                      agentId={ticket.fields.claimed_agent_id}
+                    />
                   </span>
                 ) : null}
                 {ticket.fields.resolution ? (

@@ -737,6 +737,19 @@ h2 {
   align-items: center;
 }
 
+.claimed-agent-detail {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.copy-claimed-agent-id {
+  padding: 0.15rem 0.45rem;
+  font-size: 0.72rem;
+}
+
 .badge {
   font-size: 0.72rem;
   font-family: var(--mono);
