@@ -92,6 +92,23 @@ describe("nudgeClaimedCloudAgent", () => {
     assert.match(prompts[0] ?? "", /expected_review_state=rejected/);
   });
 
+  it("uses an explicit prompt override (TRA-122 create)", async () => {
+    const prompts: string[] = [];
+    const client = {
+      followUp: async (_id: string, prompt: string) => {
+        prompts.push(prompt);
+        return { ok: true, status: 201, busy: false };
+      },
+    };
+    await nudgeClaimedCloudAgent(
+      ticket({ claimed_agent_id: "bc-abc", stage: "backlog" }),
+      "created",
+      client,
+      { prompt: "New ticket TRA-1 landed on backlog." },
+    );
+    assert.equal(prompts[0], "New ticket TRA-1 landed on backlog.");
+  });
+
   it("returns busy after one agent_busy POST without sleeping", async () => {
     const client = {
       followUp: async () => ({ ok: false, status: 409, busy: true }),

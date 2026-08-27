@@ -164,6 +164,96 @@ describe("GET/PUT/DELETE /v1/me/agent-apis (TRA-114)", () => {
     });
   });
 
+  it("saves, replaces, and clears default_cursor_agent_id without touching the key", async () => {
+    await withApp(async ({ app, token }) => {
+      const headers = personalHeaders(token, "alice");
+      await app.request("/v1/me/agent-apis/cursor", {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ api_key: "key_keep_THIS" }),
+      });
+
+      const put = await app.request("/v1/me/default-agent", {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ agent_id: "bc-default-1" }),
+      });
+      assert.equal(put.status, 200, await put.clone().text());
+      const saved = (await put.json()) as { agent_id?: string | null };
+      assert.equal(saved.agent_id, "bc-default-1");
+
+      const listed = await app.request("/v1/me/agent-apis", { headers });
+      const body = (await listed.json()) as {
+        default_cursor_agent_id?: string | null;
+        items: Array<{ provider: string; last4: string | null }>;
+      };
+      assert.equal(body.default_cursor_agent_id, "bc-default-1");
+      assert.equal(
+        body.items.find((i) => i.provider === "cursor")?.last4,
+        "THIS",
+      );
+      assert.equal(JSON.stringify(body).includes("key_keep_THIS"), false);
+
+      const other = await app.request("/v1/me/default-agent", {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ agent_id: "local-agent" }),
+      });
+      assert.equal(other.status, 200);
+      assert.equal(
+        ((await other.json()) as { agent_id?: string }).agent_id,
+        "local-agent",
+      );
+
+      const cleared = await app.request("/v1/me/default-agent", {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ agent_id: "" }),
+      });
+      assert.equal(cleared.status, 200);
+      assert.equal(
+        ((await cleared.json()) as { agent_id?: string | null }).agent_id,
+        null,
+      );
+      const after = await app.request("/v1/me/agent-apis", { headers });
+      const afterBody = (await after.json()) as {
+        default_cursor_agent_id?: string | null;
+        items: Array<{ provider: string; last4: string | null }>;
+      };
+      assert.equal(afterBody.default_cursor_agent_id, null);
+      assert.equal(
+        afterBody.items.find((i) => i.provider === "cursor")?.last4,
+        "THIS",
+      );
+    });
+  });
+
+  it("lets a bearer token (MCP) set the default without a human proxy", async () => {
+    await withApp(async ({ app, token }) => {
+      const res = await app.request("/v1/me/default-agent", {
+        method: "PUT",
+        headers: authHeaders(token),
+        body: JSON.stringify({ agent_id: "bc-mcp-self" }),
+      });
+      assert.equal(res.status, 200, await res.clone().text());
+      assert.equal(
+        ((await res.json()) as { agent_id?: string }).agent_id,
+        "bc-mcp-self",
+      );
+    });
+  });
+
+  it("rejects whitespace agent ids", async () => {
+    await withApp(async ({ app, token }) => {
+      const res = await app.request("/v1/me/default-agent", {
+        method: "PUT",
+        headers: personalHeaders(token, "alice"),
+        body: JSON.stringify({ agent_id: "bc one" }),
+      });
+      assert.equal(res.status, 400);
+    });
+  });
+
   it("rejects empty keys and non-cursor providers", async () => {
     await withApp(async ({ app, token }) => {
       const headers = personalHeaders(token, "alice");
@@ -211,6 +301,12 @@ describe("GET/PUT/DELETE /v1/me/agent-apis (TRA-114)", () => {
         body: JSON.stringify({ api_key: "key_nope" }),
       });
       assert.equal(res.status, 403);
+      const defaultRes = await app.request("/v1/me/default-agent", {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ agent_id: "bc-nope" }),
+      });
+      assert.equal(defaultRes.status, 403);
     });
   });
 });

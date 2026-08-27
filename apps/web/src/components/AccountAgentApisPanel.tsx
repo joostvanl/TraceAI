@@ -16,10 +16,13 @@ const LABELS: Record<string, string> = {
 
 export function AccountAgentApisPanel() {
   const [items, setItems] = useState<ProviderRow[]>([]);
+  const [defaultAgentId, setDefaultAgentId] = useState<string | null>(null);
+  const [defaultAgentDraft, setDefaultAgentDraft] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [cursorKey, setCursorKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [defaultError, setDefaultError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -29,12 +32,16 @@ export function AccountAgentApisPanel() {
       const body = (await res.json().catch(() => ({}))) as {
         message?: string;
         items?: ProviderRow[];
+        default_cursor_agent_id?: string | null;
       };
       if (!res.ok) {
         setLoadError(body.message || `Laden mislukt (${res.status})`);
         return;
       }
       setItems(body.items ?? []);
+      const current = body.default_cursor_agent_id?.trim() || null;
+      setDefaultAgentId(current);
+      setDefaultAgentDraft(current ?? "");
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : String(err));
     }
@@ -112,6 +119,62 @@ export function AccountAgentApisPanel() {
     }
   }
 
+  async function onSaveDefault(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setDefaultError(null);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/account/default-agent", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: defaultAgentDraft }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        message?: string;
+        agent_id?: string | null;
+      };
+      if (!res.ok) {
+        setDefaultError(body.message || `Opslaan mislukt (${res.status})`);
+        return;
+      }
+      setNotice(
+        body.agent_id
+          ? `Default agent opgeslagen (${body.agent_id}).`
+          : "Default agent gewist.",
+      );
+      await refresh();
+    } catch (err) {
+      setDefaultError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onClearDefault() {
+    setBusy(true);
+    setDefaultError(null);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/account/default-agent", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent_id: "" }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { message?: string };
+      if (!res.ok) {
+        setDefaultError(body.message || `Wissen mislukt (${res.status})`);
+        return;
+      }
+      setNotice("Default agent gewist.");
+      await refresh();
+    } catch (err) {
+      setDefaultError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="account-tokens">
       {loadError ? (
@@ -160,6 +223,54 @@ export function AccountAgentApisPanel() {
                   onClick={() => void onRemove()}
                 >
                   Verwijderen
+                </button>
+              ) : null}
+            </div>
+          </form>
+
+          <form
+            className="create-ticket-form"
+            onSubmit={(e) => void onSaveDefault(e)}
+          >
+            <h3>Default agent</h3>
+            <p className="muted note">
+              Cursor Cloud-id (<code>bc-…</code>). Wijzigt vaak; dit veld is
+              los van de API-key. Nieuwe tickets op Backlog wekken deze agent.
+            </p>
+            {defaultAgentId ? (
+              <p className="muted">
+                Huidig: <code>{defaultAgentId}</code>
+              </p>
+            ) : (
+              <p className="muted">Nog geen default agent.</p>
+            )}
+            <label>
+              Default agent
+              <input
+                type="text"
+                value={defaultAgentDraft}
+                onChange={(e) => setDefaultAgentDraft(e.target.value)}
+                placeholder="bc-…"
+                autoComplete="off"
+                spellCheck={false}
+                disabled={busy}
+              />
+            </label>
+            {defaultError ? (
+              <p className="create-ticket-error">{defaultError}</p>
+            ) : null}
+            <div className="account-agent-api-actions">
+              <button type="submit" className="btn" disabled={busy}>
+                Opslaan
+              </button>
+              {defaultAgentId ? (
+                <button
+                  type="button"
+                  className="btn btn-small"
+                  disabled={busy}
+                  onClick={() => void onClearDefault()}
+                >
+                  Wissen
                 </button>
               ) : null}
             </div>

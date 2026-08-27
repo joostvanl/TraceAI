@@ -59,7 +59,8 @@ export class AuthStore {
         name TEXT NOT NULL,
         status TEXT NOT NULL,
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        default_cursor_agent_id TEXT
       );
 
       CREATE TABLE IF NOT EXISTS tokens (
@@ -104,6 +105,15 @@ export class AuthStore {
       CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor_user_id);
       CREATE INDEX IF NOT EXISTS idx_agent_api_keys_user ON agent_api_keys(user_id);
     `);
+    this.ensureColumn("users", "default_cursor_agent_id", "TEXT");
+  }
+
+  private ensureColumn(table: string, name: string, sqlType: string) {
+    const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
+      name: string;
+    }>;
+    if (cols.some((col) => col.name === name)) return;
+    this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${sqlType}`);
   }
 
   close() {
@@ -459,6 +469,30 @@ export class AuthStore {
       .prepare(`DELETE FROM agent_api_keys WHERE user_id = ? AND provider = ?`)
       .run(userId, provider);
     return Number(result.changes) > 0;
+  }
+
+  getDefaultCursorAgentId(userId: string): string | null {
+    const row = this.db
+      .prepare(`SELECT default_cursor_agent_id FROM users WHERE id = ?`)
+      .get(userId) as { default_cursor_agent_id?: string | null } | undefined;
+    if (!row) return null;
+    const value =
+      typeof row.default_cursor_agent_id === "string"
+        ? row.default_cursor_agent_id.trim()
+        : "";
+    return value || null;
+  }
+
+  setDefaultCursorAgentId(userId: string, agentId: string): string | null {
+    const user = this.getUser(userId);
+    if (!user) throw new Error(`User not found: ${userId}`);
+    const value = agentId.trim();
+    this.db
+      .prepare(
+        `UPDATE users SET default_cursor_agent_id = ?, updated_at = ? WHERE id = ?`,
+      )
+      .run(value || null, nowIso(), userId);
+    return value || null;
   }
 
   private mapToken(row: Record<string, unknown>): TraceTokenPublic {

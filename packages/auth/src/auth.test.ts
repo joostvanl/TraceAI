@@ -92,6 +92,35 @@ describe("agent API keys", () => {
   });
 });
 
+describe("default Cursor agent id (TRA-122)", () => {
+  it("saves, replaces, and clears a plain-text agent id", () => {
+    const dir = mkdtempSync(join(tmpdir(), "traceai-auth-"));
+    const store = new AuthStore(join(dir, "test.sqlite"));
+    try {
+      const user = store.createUser({
+        email: "owner@example.com",
+        name: "Owner",
+      });
+      assert.equal(store.getDefaultCursorAgentId(user.id), null);
+      assert.equal(
+        store.setDefaultCursorAgentId(user.id, "bc-aaaa"),
+        "bc-aaaa",
+      );
+      assert.equal(store.getDefaultCursorAgentId(user.id), "bc-aaaa");
+      assert.equal(
+        store.setDefaultCursorAgentId(user.id, "  other-agent  "),
+        "other-agent",
+      );
+      assert.equal(store.getDefaultCursorAgentId(user.id), "other-agent");
+      assert.equal(store.setDefaultCursorAgentId(user.id, "  "), null);
+      assert.equal(store.getDefaultCursorAgentId(user.id), null);
+    } finally {
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("AES-256-GCM agent key crypto", () => {
   it("round-trips and fails closed on tamper", async () => {
     const { decryptAgentApiKey, encryptAgentApiKey } = await import("./crypto.js");

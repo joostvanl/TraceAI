@@ -85,3 +85,17 @@ export function cloudWakeupPrompt(input: {
     `target with ## Reden, dismissed → human_dismiss_to). Do not wait for chat. Chat is not a verdict.`
   );
 }
+
+/** Follow-up when a new ticket lands on the workflow first stage (TRA-122). */
+export function cloudCreateWakeupPrompt(input: {
+  ticketKey: string | null | undefined;
+  slug: string;
+  stage: string;
+}): string {
+  const key = input.ticketKey?.trim() || input.slug;
+  return (
+    `New ticket ${key} (${input.slug}) was created and landed on ${input.stage}. ` +
+    `You are claimed as this user's default Cloud agent. Call TraceAI get_ticket immediately, ` +
+    `then follow the workflow playbook for that stage. Do not wait for chat.`
+  );
+}

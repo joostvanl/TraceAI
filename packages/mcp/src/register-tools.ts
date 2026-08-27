@@ -398,6 +398,25 @@ export function registerTraceAiTools(
   );
 
   server.tool(
+    "set_default_agent",
+    "Set this TraceAI user as using the given Cursor Cloud agent as the default. That agent is nudged (and claimed) when a new ticket lands on Backlog. Pass your Cursor agent id. On Cursor-managed Cloud Agent VMs read it from the metadata socket, not the dashboard URL: curl -fsS --unix-socket \"${CURSOR_AGENT_SOCKET:-/run/cursor/api.sock}\" http://cursor-agent/v1/meta-data/agent/id . Fallback: Cloud MCP run-info → bcId. Empty agent_id clears the default. Non-bc- ids may be stored but are never nudged.",
+    {
+      agent_id: z
+        .string()
+        .describe(
+          "Cursor agent id (bc-… for Cloud). Empty string clears the default.",
+        ),
+    },
+    async ({ agent_id }) => {
+      try {
+        return okWrite(await client.putMyDefaultAgent(agent_id), apiBase);
+      } catch (error) {
+        return fail(error);
+      }
+    },
+  );
+
+  server.tool(
     "add_comment",
     "Add a Markdown comment to a ticket (author comes from TraceAI token)",
     {

@@ -16,6 +16,7 @@ import {
   relationSlug,
   requiredRoleForAction,
   claimedAgentKind,
+  parseClaimedAgentId,
   scheduleClaimedCloudNudges,
   StageConflictError,
   TICKET_REVIEW_STATES,
@@ -85,6 +86,7 @@ import {
   cursorFollowUpForClaimer,
   listedAgentApiProviders,
 } from "./agent-api-keys.js";
+import { claimAndNudgeDefaultAgentOnCreate } from "./default-agent.js";
 
 const HUMAN_PROXY_HEADER = "x-traceai-human-proxy";
 
@@ -827,7 +829,66 @@ export function createApp(deps: {
     }
     return c.json({
       items: listedAgentApiProviders(deps.authStore, resolved.user.id),
+      default_cursor_agent_id: deps.authStore.getDefaultCursorAgentId(
+        resolved.user.id,
+      ),
     });
+  });
+
+  app.put("/v1/me/default-agent", async (c) => {
+    const human = resolveHumanIdentity(c);
+    let userId: string | null = null;
+    if (human) {
+      const resolved = await resolveSelfServiceAuthUser(
+        deps.service,
+        deps.authStore,
+        human,
+      );
+      if (!resolved.ok) {
+        return c.json(
+          { message: resolved.message, code: resolved.code },
+          resolved.status,
+        );
+      }
+      userId = resolved.user.id;
+    } else {
+      const actor = c.get("actor");
+      const user = deps.authStore.getUser(actor.userId);
+      if (!user) {
+        return c.json(
+          {
+            message: "Authenticated user not found",
+            code: "USER_NOT_FOUND",
+          },
+          404,
+        );
+      }
+      userId = user.id;
+    }
+    const body = await c.req
+      .json<{ agent_id?: string }>()
+      .catch(() => ({} as { agent_id?: string }));
+    if (!("agent_id" in body) || body.agent_id === undefined) {
+      return c.json(
+        {
+          message: "agent_id is required (empty string clears the default)",
+          code: "VALIDATION",
+        },
+        400,
+      );
+    }
+    const parsed = parseClaimedAgentId(body.agent_id);
+    if (!parsed.ok) {
+      return c.json({ message: parsed.message, code: "VALIDATION" }, 400);
+    }
+    const saved = deps.authStore.setDefaultCursorAgentId(userId, parsed.value);
+    audit(c, {
+      action: "default_agent.save",
+      resourceType: "default_agent",
+      resourceId: userId,
+      meta: { agent_id: saved },
+    });
+    return c.json({ agent_id: saved });
   });
 
   app.put("/v1/me/agent-apis/:provider", async (c) => {
@@ -1416,7 +1477,33 @@ export function createApp(deps: {
       parent: body.parent,
       created_by: attributionName(human, body.created_by?.trim() || actor.name),
     });
-    const mapped = mapTicket(ticket);
+    let ownerUserId: string | null = null;
+    if (human?.mode === "personal") {
+      try {
+        const resolved = await resolveSelfServiceAuthUser(
+          deps.service,
+          deps.authStore,
+          human,
+        );
+        if (resolved.ok) ownerUserId = resolved.user.id;
+      } catch (error) {
+        console.warn("[traceai] default-agent owner join failed", error);
+      }
+    } else if (!human) {
+      ownerUserId = actor.userId;
+    }
+    const maybeClaimed = await claimAndNudgeDefaultAgentOnCreate({
+      ticket,
+      ownerUserId,
+      authStore: deps.authStore,
+      service: deps.service,
+      cursorCloud: deps.cursorCloud !== undefined ? cursorCloud : undefined,
+      cursorCloudFetch: deps.cursorCloudFetch,
+      scheduleWakeup: deps.scheduleWakeup,
+      nudgeQueue,
+      now,
+    });
+    const mapped = mapTicket(maybeClaimed);
     publishTicketEvent(ticketEventFromMapped("ticket.created", mapped));
     audit(c, {
       action: "ticket.create",

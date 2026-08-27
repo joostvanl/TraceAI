@@ -134,6 +134,7 @@ export async function nudgeClaimedCloudAgent(
   client: CursorCloudFollowUp,
   options?: {
     log?: (message: string) => void;
+    prompt?: string;
   },
 ): Promise<NudgeClaimResult> {
   const id = normalizeClaimedAgentId(ticket.fields.claimed_agent_id);
@@ -147,12 +148,14 @@ export async function nudgeClaimedCloudAgent(
       prompt: "",
     };
   }
-  const prompt = cloudWakeupPrompt({
-    ticketKey: ticket.fields.ticket_key,
-    slug: ticket.slug,
-    verdict,
-    stage: ticket.fields.stage,
-  });
+  const prompt =
+    options?.prompt ??
+    cloudWakeupPrompt({
+      ticketKey: ticket.fields.ticket_key,
+      slug: ticket.slug,
+      verdict,
+      stage: ticket.fields.stage,
+    });
   const log = options?.log ?? ((message: string) => console.warn(message));
 
   const first = await client.followUp(id, prompt);
@@ -210,13 +213,18 @@ export function scheduleClaimedCloudNudges(
     setImmediate(fn);
   },
   onBusy?: (ticket: Ticket, result: NudgeClaimResult) => void,
+  options?: {
+    prompt?: (ticket: Ticket) => string;
+  },
 ): void {
   if (!client) return;
   for (const ticket of tickets) {
     schedule(() => {
       const resolved = typeof client === "function" ? client(ticket) : client;
       if (!resolved) return;
-      void nudgeClaimedCloudAgent(ticket, verdict, resolved)
+      void nudgeClaimedCloudAgent(ticket, verdict, resolved, {
+        prompt: options?.prompt?.(ticket),
+      })
         .then((result) => {
           if (result.busy) onBusy?.(ticket, result);
         })

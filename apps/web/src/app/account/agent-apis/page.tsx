@@ -18,9 +18,10 @@ export default async function AccountAgentApisPage() {
       <p className="eyebrow">Account</p>
       <h1 id="account-agent-apis-heading">Agent APIs</h1>
       <p className="lede">
-        Koppel je eigen Cursor API-key zodat TraceAI Cloud-agents kan wekken na
-        een human-gate oordeel. De key blijft van jou; nudges gebruiken de key
-        van wie het ticket claimde.
+        Koppel je eigen Cursor API-key en optioneel een default Cloud-agent
+        (<code>bc-…</code>). Nieuwe tickets op Backlog wekken die agent. De
+        key blijft van jou; nudges gebruiken de key van wie het ticket
+        claimde.
       </p>
       {identity.mode !== "personal" ? (
         <div className="empty">

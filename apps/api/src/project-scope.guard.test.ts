@@ -61,6 +61,7 @@ const NOT_PROJECT_SCOPED: Record<string, string> = {
   "GET /v1/me/agent-apis": "the caller's own agent API keys",
   "PUT /v1/me/agent-apis/:provider": "the caller's own agent API keys",
   "DELETE /v1/me/agent-apis/:provider": "the caller's own agent API keys",
+  "PUT /v1/me/default-agent": "the caller's own default Cloud agent id",
   "GET /v1/ui/login/status": "pre-authentication login flow",
   "POST /v1/ui/login/verify": "pre-authentication login flow",
   "GET /v1/projects": "cross-project list; filters itself on access",
