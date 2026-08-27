@@ -19,7 +19,12 @@ describe("MCP set_default_agent (TRA-122)", () => {
     assert.match(tool, /meta-data\/agent\/id/);
     assert.doesNotMatch(tool, /copy the .*URL/i);
     assert.match(tool, /Empty agent_id clears/);
+    assert.match(tool, /project slug/);
+    assert.match(tool, /this project's membership default only/);
     assert.doesNotMatch(tool, /display_name/);
     assert.doesNotMatch(tool, /weergave/i);
+    assert.match(source, /project: z/);
+    assert.match(source, /putProjectDefaultAgent\(project, agent_id\)/);
+    assert.doesNotMatch(source, /putMyDefaultAgent/);
   });
 });

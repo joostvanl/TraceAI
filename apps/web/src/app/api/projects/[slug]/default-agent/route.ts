@@ -6,6 +6,10 @@ import { createTraceServerClient } from "@/lib/traceai-server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+type RouteContext = {
+  params: Promise<{ slug: string }>;
+};
+
 function proxyError(error: unknown) {
   if (error instanceof TraceApiError) {
     return NextResponse.json(
@@ -22,7 +26,7 @@ function proxyError(error: unknown) {
   );
 }
 
-export async function PUT(request: Request) {
+export async function GET(_request: Request, context: RouteContext) {
   if (!(await isLoginConfigured())) {
     return NextResponse.json(
       { message: "UI login is not configured", code: "NOT_CONFIGURED" },
@@ -36,6 +40,34 @@ export async function PUT(request: Request) {
       { status: 401 },
     );
   }
+  const { slug } = await context.params;
+  try {
+    const client = createTraceServerClient({
+      asHumanCapable: true,
+      identity,
+    });
+    const result = await client.getProjectDefaultAgent(slug);
+    return NextResponse.json(result);
+  } catch (error) {
+    return proxyError(error);
+  }
+}
+
+export async function PUT(request: Request, context: RouteContext) {
+  if (!(await isLoginConfigured())) {
+    return NextResponse.json(
+      { message: "UI login is not configured", code: "NOT_CONFIGURED" },
+      { status: 503 },
+    );
+  }
+  const identity = await getSessionIdentity();
+  if (!identity) {
+    return NextResponse.json(
+      { message: "Sign in required", code: "UNAUTHORIZED" },
+      { status: 401 },
+    );
+  }
+  const { slug } = await context.params;
   let body: { agent_id?: string };
   try {
     body = (await request.json()) as typeof body;
@@ -59,7 +91,7 @@ export async function PUT(request: Request) {
       asHumanCapable: true,
       identity,
     });
-    const result = await client.putMyDefaultAgent(body.agent_id);
+    const result = await client.putProjectDefaultAgent(slug, body.agent_id);
     return NextResponse.json(result);
   } catch (error) {
     return proxyError(error);

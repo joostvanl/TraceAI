@@ -51,6 +51,9 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
   async function withCreateApp(
     extras: {
       defaultAgentId?: string | null;
+      defaultByProject?: Record<string, string | null>;
+      projects?: string[];
+      ticketProject?: string;
       saveCursorKey?: boolean;
       stage?: string;
       cursorStatus?: number;
@@ -84,9 +87,6 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
         name: "agent",
         scopes: [...DEFAULT_AGENT_SCOPES],
       });
-      if (extras.defaultAgentId) {
-        store.setDefaultCursorAgentId(user.id, extras.defaultAgentId);
-      }
       if (extras.saveCursorKey) {
         store.putAgentApiKey({
           userId: user.id,
@@ -96,10 +96,17 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
         });
       }
       const stage = extras.stage ?? "backlog";
+      const ticketProject = extras.ticketProject ?? "traceai";
+      const projects = extras.projects ?? ["traceai"];
+      const defaultByProject =
+        extras.defaultByProject ??
+        (extras.defaultAgentId
+          ? { [ticketProject]: extras.defaultAgentId }
+          : undefined);
       const created = {
         id: "id-new",
         slug: "new-wish",
-        fields: ticketFields({ stage }),
+        fields: ticketFields({ stage, project: ticketProject }),
       };
       const app = createApp({
         authStore: store,
@@ -119,7 +126,8 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
         service: {
           ...projectMemberStubs({
             email: "owner@example.com",
-            projects: ["traceai"],
+            projects,
+            defaultByProject,
           }),
           getWorkflow: async () => ({
             workflow: { slug: "traceai-traceai-story" },
@@ -367,6 +375,67 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
       },
     );
   });
+
+  it("create in project A nudges A's membership default, not B's", async () => {
+    await withCreateApp(
+      {
+        saveCursorKey: true,
+        projects: ["alpha", "beta"],
+        ticketProject: "alpha",
+        defaultByProject: { alpha: "bc-alpha-1", beta: "bc-beta-9" },
+      },
+      async ({ app, token, followUps, claimed, flush }) => {
+        const res = await app.request("/v1/tickets", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            project: "alpha",
+            title: "Wish",
+            description: "A short wish for the backlog",
+          }),
+        });
+        assert.equal(res.status, 201, await res.clone().text());
+        const body = (await res.json()) as { claimed_agent_id?: string | null };
+        assert.equal(body.claimed_agent_id, "bc-alpha-1");
+        assert.equal(claimed[0]?.agentId, "bc-alpha-1");
+        await flush();
+        assert.equal(followUps[0]?.id, "bc-alpha-1");
+      },
+    );
+  });
+
+  it("create in project B does not use A's membership default", async () => {
+    await withCreateApp(
+      {
+        saveCursorKey: true,
+        projects: ["alpha", "beta"],
+        ticketProject: "beta",
+        defaultByProject: { alpha: "bc-alpha-1", beta: "bc-beta-9" },
+      },
+      async ({ app, token, claimed, flush }) => {
+        const res = await app.request("/v1/tickets", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            project: "beta",
+            title: "Wish",
+            description: "A short wish for the backlog",
+          }),
+        });
+        assert.equal(res.status, 201, await res.clone().text());
+        const body = (await res.json()) as { claimed_agent_id?: string | null };
+        assert.equal(body.claimed_agent_id, "bc-beta-9");
+        assert.equal(claimed[0]?.agentId, "bc-beta-9");
+        await flush();
+      },
+    );
+  });
 });
 
 describe("POST /v1/tickets default-agent live resolver (TRA-124)", () => {
@@ -405,7 +474,6 @@ describe("POST /v1/tickets default-agent live resolver (TRA-124)", () => {
         name: "agent",
         scopes: [...DEFAULT_AGENT_SCOPES],
       });
-      store.setDefaultCursorAgentId(owner.id, "bc-live-1");
       store.putAgentApiKey({
         userId: owner.id,
         provider: "cursor",
@@ -435,6 +503,7 @@ describe("POST /v1/tickets default-agent live resolver (TRA-124)", () => {
           ...projectMemberStubs({
             email: "owner@example.com",
             projects: ["traceai"],
+            defaultByProject: { traceai: "bc-live-1" },
           }),
           getWorkflow: async () => ({
             workflow: { slug: "traceai-traceai-story" },
@@ -502,7 +571,6 @@ describe("POST /v1/tickets default-agent live resolver (TRA-124)", () => {
         name: "web",
         scopes: [...DEFAULT_AGENT_SCOPES],
       });
-      store.setDefaultCursorAgentId(person.id, "bc-alice-9");
       store.putAgentApiKey({
         userId: person.id,
         provider: "cursor",
@@ -565,9 +633,15 @@ describe("POST /v1/tickets default-agent live resolver (TRA-124)", () => {
                 project: "traceai",
                 user: "alice",
                 role: "admin" as const,
+                default_cursor_agent_id: "bc-alice-9",
               },
             },
           ],
+          getOwnMembershipDefaultAgent: async (
+            project: string,
+            user: string,
+          ) =>
+            project === "traceai" && user === "alice" ? "bc-alice-9" : null,
           getWorkflow: async () => ({
             workflow: { slug: "traceai-traceai-story" },
             stages: [

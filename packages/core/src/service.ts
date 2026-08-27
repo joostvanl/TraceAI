@@ -2710,6 +2710,7 @@ export class TraceService {
       slug,
     );
     if (existing) {
+      const current = this.normalizeMembershipRelations(existing);
       const updated = await this.client.updateEntry<ProjectMembership>(
         PROJECT_MEMBERSHIP_CONTENT_TYPE,
         existing.id,
@@ -2718,6 +2719,8 @@ export class TraceService {
             project,
             user,
             role: input.role,
+            default_cursor_agent_id:
+              current.fields.default_cursor_agent_id?.trim() || "",
           },
         },
       );
@@ -2738,6 +2741,61 @@ export class TraceService {
     );
     await this.ensurePublished(PROJECT_MEMBERSHIP_CONTENT_TYPE, created);
     return created;
+  }
+
+  async getOwnMembershipDefaultAgent(
+    project: string,
+    userSlug: string,
+  ): Promise<string | null> {
+    const wantUser = userSlug.trim();
+    if (!project.trim() || !wantUser) return null;
+    const memberships = await this.listProjectMemberships(project);
+    const match = memberships.find((m) => m.fields.user === wantUser);
+    const value = match?.fields.default_cursor_agent_id?.trim() || "";
+    return value || null;
+  }
+
+  /**
+   * Write the actor's own membership default Cursor Cloud id (TRA-128).
+   * Empty `agentId` clears this membership only. Does not create a membership.
+   */
+  async setOwnMembershipDefaultAgent(input: {
+    project: string;
+    user: string;
+    agentId: string;
+  }): Promise<string | null> {
+    await this.ensureReady();
+    const project = input.project.trim();
+    const user = input.user.trim();
+    if (!project || !user) {
+      throw new ValidationError("project and user are required");
+    }
+    const slug = membershipSlug(project, user);
+    const existing = await this.client.getEntryBySlug<ProjectMembership>(
+      PROJECT_MEMBERSHIP_CONTENT_TYPE,
+      slug,
+    );
+    if (!existing) {
+      throw new NotFoundError(
+        `Project membership not found for ${user} on ${project}`,
+      );
+    }
+    const current = this.normalizeMembershipRelations(existing);
+    const value = input.agentId.trim();
+    const updated = await this.client.updateEntry<ProjectMembership>(
+      PROJECT_MEMBERSHIP_CONTENT_TYPE,
+      existing.id,
+      {
+        fields: {
+          project: current.fields.project,
+          user: current.fields.user,
+          role: current.fields.role,
+          default_cursor_agent_id: value,
+        },
+      },
+    );
+    await this.ensurePublished(PROJECT_MEMBERSHIP_CONTENT_TYPE, updated);
+    return value || null;
   }
 
   async removeProjectMembership(
@@ -2892,6 +2950,9 @@ export class TraceService {
         project: relationSlugOrEmpty(membership.fields.project),
         user: relationSlugOrEmpty(membership.fields.user),
         role: String(membership.fields.role ?? ""),
+        default_cursor_agent_id:
+          String(membership.fields.default_cursor_agent_id ?? "").trim() ||
+          null,
       },
     };
   }
