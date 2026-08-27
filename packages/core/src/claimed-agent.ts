@@ -39,13 +39,18 @@ export function claimedAgentKind(
 
 /**
  * Board-card and ticket-detail display label. Empty id → null (render nothing).
- * Ids longer than 14 characters are truncated to the first 12 plus an ellipsis.
+ * Non-empty `displayName` is returned as-is (no prefix, no truncation).
+ * Otherwise ids longer than 14 characters are truncated to the first 12 plus
+ * an ellipsis (TRA-112 fallback).
  */
 export function claimedAgentLabel(
   raw: string | null | undefined,
+  displayName?: string | null,
 ): string | null {
   const id = normalizeClaimedAgentId(raw);
   if (!id) return null;
+  const name = typeof displayName === "string" ? displayName.trim() : "";
+  if (name) return name;
   const prefix =
     claimedAgentKind(id) === "cursor_cloud" ? "Cursor Cloud" : "Agent";
   const shown = id.length > 14 ? `${id.slice(0, 12)}…` : id;

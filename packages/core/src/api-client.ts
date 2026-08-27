@@ -207,6 +207,32 @@ export class TraceApiClient {
     );
   }
 
+  listProjectAgents(project: string) {
+    return this.request<{
+      items: Array<{
+        slug: string;
+        project: string;
+        cursor_agent_id: string;
+        display_name: string;
+      }>;
+    }>(`/v1/projects/${encodeURIComponent(project)}/agents`);
+  }
+
+  upsertProjectAgent(
+    project: string,
+    body: { cursor_agent_id: string; display_name?: string | null },
+  ) {
+    return this.request<{
+      slug: string;
+      project: string;
+      cursor_agent_id: string;
+      display_name: string;
+    }>(`/v1/projects/${encodeURIComponent(project)}/agents`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  }
+
   getTicket(slug: string) {
     return this.request<unknown>(`/v1/tickets/${encodeURIComponent(slug)}`);
   }

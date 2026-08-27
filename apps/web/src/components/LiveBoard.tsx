@@ -442,7 +442,10 @@ export function LiveBoard({
                     Boolean(ticket.resolution) &&
                     (lastStageKey == null || stage.key === lastStageKey);
                   const review = reviewBadge(stage, ticket);
-                  const claimLabel = claimedAgentLabel(ticket.claimedAgentId);
+                  const claimLabel = claimedAgentLabel(
+                    ticket.claimedAgentId,
+                    ticket.claimedAgentDisplayName,
+                  );
                   const isDragging = draggingSlug === ticket.slug;
                   const cardReorderable =
                     isReorderColumn && !ticket.orphan && !persisting;

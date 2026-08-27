@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  ConflictError,
   ForbiddenError,
   NotFoundError,
   TraceError,
@@ -30,6 +31,16 @@ describe("trace-errors (TRA-79)", () => {
     const err = new ForbiddenError("User is disabled");
     assert.equal(err.status, 403);
     assert.equal(err.code, "FORBIDDEN");
+    assert.ok(err instanceof TraceError);
+  });
+
+  it("C3b: ConflictError is 409 (TRA-127 display_name uniqueness)", () => {
+    const err = new ConflictError(
+      "display_name already used in this project",
+      "AGENT_DISPLAY_NAME_CONFLICT",
+    );
+    assert.equal(err.status, 409);
+    assert.equal(err.code, "AGENT_DISPLAY_NAME_CONFLICT");
     assert.ok(err instanceof TraceError);
   });
 

@@ -14,6 +14,7 @@ import {
   assertNoErrors,
 } from "./trace-errors.js";
 import { listAllEntries as listAllEntriesShared } from "./list-all-entries.js";
+import { listEntriesForProject } from "./list-entries-for-project.js";
 import {
   isProjectWorkflow,
   isTicketWorkflowReassignable,
@@ -61,12 +62,14 @@ import {
   APP_LOGIN_ENTRY_SLUG,
   TRACEAI_USER_CONTENT_TYPE,
   PROJECT_MEMBERSHIP_CONTENT_TYPE,
+  PROJECT_AGENT_CONTENT_TYPE,
   WIKI_PAGE_CONTENT_TYPE,
   type AppLogin,
   type Comment,
   type Priority,
   type Project,
   type ProjectMembership,
+  type ProjectAgent,
   type Ticket,
   type TraceaiUser,
   type UiIdentity,
@@ -97,6 +100,11 @@ import {
   claimPersistenceFields,
   parseClaimedAgentId,
 } from "./claimed-agent.js";
+import {
+  assertUniqueProjectAgentDisplayName,
+  projectAgentSlug,
+  trimDisplayName,
+} from "./project-agent.js";
 import {
   buildReviewInboxItems,
   type ReviewInboxItem,
@@ -2747,6 +2755,95 @@ export class TraceService {
     return true;
   }
 
+  /** Project-level Cursor agent weergavenaam rows (TRA-127). */
+  async listProjectAgents(project: string): Promise<ProjectAgent[]> {
+    await this.ensureReady();
+    const want = project.trim();
+    if (!want) return [];
+    try {
+      const items = await listEntriesForProject<ProjectAgent>(
+        this.client,
+        PROJECT_AGENT_CONTENT_TYPE,
+        want,
+        (row) => relationSlug(row.fields.project),
+        { status: "published" },
+      );
+      return items.map((row) => this.normalizeProjectAgentRelations(row));
+    } catch (error) {
+      if (error instanceof AuroraApiError && error.status === 404) return [];
+      throw error;
+    }
+  }
+
+  /**
+   * Upsert one project_agent row. Empty display_name is valid. A new
+   * cursor_agent_id never copies a previous name (no rebind / migration).
+   */
+  async upsertProjectAgent(input: {
+    project: string;
+    cursor_agent_id: string;
+    display_name?: string | null;
+  }): Promise<ProjectAgent> {
+    await this.ensureReady();
+    const project = input.project.trim();
+    if (!project) throw new ValidationError("project is required");
+    const parsed = parseClaimedAgentId(input.cursor_agent_id);
+    if (!parsed.ok) throw new ValidationError(parsed.message);
+    if (!parsed.value) {
+      throw new ValidationError("cursor_agent_id is required");
+    }
+    const displayName = trimDisplayName(input.display_name);
+    const projectEntry = await this.client.getEntryBySlug<Project>(
+      "project",
+      project,
+    );
+    if (!projectEntry) throw new NotFoundError(`Project not found: ${project}`);
+
+    const existing = await this.listProjectAgents(project);
+    assertUniqueProjectAgentDisplayName({
+      agents: existing.map((row) => ({
+        cursor_agent_id: row.fields.cursor_agent_id,
+        display_name: row.fields.display_name,
+      })),
+      cursorAgentId: parsed.value,
+      displayName,
+    });
+
+    const fields = {
+      project,
+      cursor_agent_id: parsed.value,
+      display_name: displayName,
+    };
+    const match = existing.find(
+      (row) => row.fields.cursor_agent_id === parsed.value,
+    );
+    if (match) {
+      const updated = await this.client.updateEntry<ProjectAgent>(
+        PROJECT_AGENT_CONTENT_TYPE,
+        match.id,
+        { fields },
+      );
+      await this.ensurePublished(PROJECT_AGENT_CONTENT_TYPE, updated);
+      return this.normalizeProjectAgentRelations(updated);
+    }
+
+    const slug = await allocateUniqueEntrySlug(
+      this.client,
+      PROJECT_AGENT_CONTENT_TYPE,
+      projectAgentSlug(project, parsed.value),
+    );
+    const created = await this.client.createEntry<ProjectAgent>(
+      PROJECT_AGENT_CONTENT_TYPE,
+      {
+        slug,
+        status: "published",
+        fields,
+      },
+    );
+    await this.ensurePublished(PROJECT_AGENT_CONTENT_TYPE, created);
+    return this.normalizeProjectAgentRelations(created);
+  }
+
   /** Remove every membership for a user (used when disabling the account). */
   async removeMembershipsForUser(userSlug: string): Promise<number> {
     const want = userSlug.trim();
@@ -2795,6 +2892,18 @@ export class TraceService {
         project: relationSlugOrEmpty(membership.fields.project),
         user: relationSlugOrEmpty(membership.fields.user),
         role: String(membership.fields.role ?? ""),
+      },
+    };
+  }
+
+  private normalizeProjectAgentRelations(agent: ProjectAgent): ProjectAgent {
+    return {
+      ...agent,
+      fields: {
+        ...agent.fields,
+        project: relationSlugOrEmpty(agent.fields.project),
+        cursor_agent_id: String(agent.fields.cursor_agent_id ?? "").trim(),
+        display_name: trimDisplayName(agent.fields.display_name),
       },
     };
   }

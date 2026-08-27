@@ -17,9 +17,11 @@ import {
   sortTicketsNewestFirst,
   ticketBelongsOnBoard,
   wikiLogicalSlug,
+  PROJECT_AGENT_CONTENT_TYPE,
   type Comment,
   type EntriesReader,
   type Project,
+  type ProjectAgent,
   type ProjectInsights,
   type SearchHit,
   type Ticket,
@@ -103,6 +105,44 @@ export async function listTicketsForProject(
   return tickets.sort(
     (a, b) => (a.fields.sort_order ?? 0) - (b.fields.sort_order ?? 0),
   );
+}
+
+export async function listProjectAgentsForProject(
+  projectSlug: string,
+  client: EntriesReader = getPublicClient(),
+): Promise<ProjectAgent[]> {
+  try {
+    return await listEntriesForProject<ProjectAgent>(
+      client,
+      PROJECT_AGENT_CONTENT_TYPE,
+      projectSlug,
+      (a) => relationSlug(a.fields.project),
+    );
+  } catch {
+    return [];
+  }
+}
+
+export async function resolveProjectAgentNames(
+  projectSlug: string,
+): Promise<Array<{ cursor_agent_id: string; display_name: string }>> {
+  const client = getTraceClient();
+  if (client) {
+    try {
+      const page = await client.listProjectAgents(projectSlug);
+      return page.items.map((item) => ({
+        cursor_agent_id: item.cursor_agent_id,
+        display_name: item.display_name,
+      }));
+    } catch {
+      // Fall through to Aurora public read.
+    }
+  }
+  const rows = await listProjectAgentsForProject(projectSlug);
+  return rows.map((row) => ({
+    cursor_agent_id: row.fields.cursor_agent_id,
+    display_name: row.fields.display_name,
+  }));
 }
 
 export async function listProjectTicketsPublic(
@@ -344,6 +384,7 @@ export type BoardTicketSnapshot = {
   workflow: string;
   orphan: boolean;
   claimedAgentId: string | null;
+  claimedAgentDisplayName: string | null;
 };
 
 function ticketOrphan(pin: string, selectedWorkflow: string): boolean {
@@ -365,6 +406,7 @@ export function snapshotFromRow(
     sort_order?: number | null;
     workflow?: string | null;
     claimed_agent_id?: string | null;
+    claimed_agent_display_name?: string | null;
   },
   selectedWorkflow: string,
 ): BoardTicketSnapshot {
@@ -384,6 +426,7 @@ export function snapshotFromRow(
     workflow,
     orphan: ticketOrphan(workflow, selectedWorkflow),
     claimedAgentId: t.claimed_agent_id?.trim() || null,
+    claimedAgentDisplayName: t.claimed_agent_display_name?.trim() || null,
   };
 }
 
@@ -434,6 +477,7 @@ export async function listBoardTicketsViaTraceAI(
       sort_order?: number | null;
       workflow?: string | null;
       claimed_agent_id?: string | null;
+      claimed_agent_display_name?: string | null;
     }>;
     return rows
       .filter((t) =>

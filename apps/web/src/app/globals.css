@@ -1615,6 +1615,16 @@ h2 {
   align-items: center;
 }
 
+.account-cursor-panel form {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.account-cursor-panel form + form {
+  border-top: 1px solid var(--border);
+  padding-top: 0.85rem;
+}
+
 .account-agent-api-later {
   opacity: 0.78;
 }

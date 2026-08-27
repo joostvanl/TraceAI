@@ -17,7 +17,7 @@ describe("project access route coverage (TRA-81)", () => {
     // Registered routes: app.get("/v1/projects/:slug..."), app.post(...), etc.
     const routes = [
       ...source.matchAll(
-        /app\.(get|post|patch|delete)\(\s*\n?\s*"(\/v1\/projects\/[^"]*)"/g,
+        /app\.(get|post|put|patch|delete)\(\s*\n?\s*"(\/v1\/projects\/[^"]*)"/g,
       ),
     ].map((m) => m[2]);
 

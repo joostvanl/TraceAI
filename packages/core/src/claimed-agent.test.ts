@@ -79,6 +79,37 @@ describe("claimedAgentLabel (TRA-112)", () => {
       "Cursor Cloud bc-abcdefghijk",
     );
   });
+
+  it("returns a non-empty displayName as-is without prefix or truncation (TRA-127)", () => {
+    assert.equal(
+      claimedAgentLabel("bc-abcdefghijklmno", "Henk"),
+      "Henk",
+    );
+    assert.equal(
+      claimedAgentLabel("bc-abcdefghijklmno", "  Henk  "),
+      "Henk",
+    );
+  });
+
+  it("falls back to the truncated TRA-112 label when displayName is empty", () => {
+    assert.equal(
+      claimedAgentLabel("bc-abcdefghijklmno", ""),
+      "Cursor Cloud bc-abcdefghi…",
+    );
+    assert.equal(
+      claimedAgentLabel("bc-abcdefghijklmno", "   "),
+      "Cursor Cloud bc-abcdefghi…",
+    );
+    assert.equal(
+      claimedAgentLabel("bc-abcdefghijklmno", null),
+      "Cursor Cloud bc-abcdefghi…",
+    );
+  });
+
+  it("still returns null for unclaimed tickets even when a displayName is passed", () => {
+    assert.equal(claimedAgentLabel("", "Henk"), null);
+    assert.equal(claimedAgentLabel(null, "Henk"), null);
+  });
 });
 
 describe("cloudWakeupPrompt", () => {

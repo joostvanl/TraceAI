@@ -4,6 +4,7 @@ import {
   computeTokenRollup,
   firstStageKey,
   claimedAgentLabel,
+  displayNameForCursorAgentId,
   humanApproveTarget,
   humanDismissTarget,
   humanRejectTargets,
@@ -27,6 +28,7 @@ import {
   listCommentsForTicket,
   listTicketsForProject,
   listWorkflowsForProject,
+  resolveProjectAgentNames,
 } from "@/lib/cms";
 import { sortWorkflowsForNav } from "@/lib/project-nav";
 import { requireProjectAccess } from "@/lib/project-access";
@@ -42,10 +44,11 @@ type Props = {
 export default async function TicketPage({ params }: Props) {
   const { slug, ticketSlug } = await params;
   await requireProjectAccess(slug);
-  const [project, sessionUser, projectTickets] = await Promise.all([
+  const [project, sessionUser, projectTickets, agentNames] = await Promise.all([
     getProject(slug),
     getSessionUser(),
     listTicketsForProject(slug),
+    resolveProjectAgentNames(slug),
   ]);
 
   if (!project) {
@@ -135,7 +138,10 @@ export default async function TicketPage({ params }: Props) {
     children.length > 0 ||
     rollup.tokens_estimate_rollup !== (ownEstimate ?? 0) ||
     rollup.tokens_actual_rollup !== (ownActual ?? 0);
-  const claimedLabel = claimedAgentLabel(ticket.fields.claimed_agent_id);
+  const claimedLabel = claimedAgentLabel(
+    ticket.fields.claimed_agent_id,
+    displayNameForCursorAgentId(agentNames, ticket.fields.claimed_agent_id),
+  );
 
   const descendantSlugs = listDescendantSlugs(projectTickets, ticket.slug);
   const bySlug = new Map(projectTickets.map((t) => [t.slug, t] as const));

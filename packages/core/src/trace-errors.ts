@@ -35,6 +35,14 @@ export class ForbiddenError extends TraceError {
   }
 }
 
+/** Unique-constraint failure (e.g. project_agent display_name). */
+export class ConflictError extends TraceError {
+  constructor(message: string, code = "CONFLICT") {
+    super(message, 409, code);
+    this.name = "ConflictError";
+  }
+}
+
 export function assertNoErrors(errors: string[]): void {
   if (errors.length) {
     throw new ValidationError(errors.join(" "), errors);

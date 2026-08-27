@@ -17,6 +17,7 @@ import {
   requiredRoleForAction,
   claimedAgentKind,
   parseClaimedAgentId,
+  projectAgentNameMap,
   scheduleClaimedCloudNudges,
   StageConflictError,
   TICKET_REVIEW_STATES,
@@ -276,9 +277,10 @@ function mapProject(p: Awaited<ReturnType<TraceService["listProjects"]>>[number]
   };
 }
 
-function mapTicket(t: NonNullable<
-  Awaited<ReturnType<TraceService["getTicket"]>>
->["ticket"]) {
+function mapTicket(
+  t: NonNullable<Awaited<ReturnType<TraceService["getTicket"]>>>["ticket"],
+  displayName?: string | null,
+) {
   return {
     slug: t.slug,
     ticket_key: t.fields.ticket_key ?? null,
@@ -302,6 +304,7 @@ function mapTicket(t: NonNullable<
     claimed_agent_id: t.fields.claimed_agent_id?.trim() || null,
     claimed_agent_kind: claimedAgentKind(t.fields.claimed_agent_id),
     claimed_by_user_id: t.fields.claimed_by_user_id?.trim() || null,
+    claimed_agent_display_name: displayName?.trim() || null,
   };
 }
 
@@ -344,6 +347,36 @@ function mapWikiPage(
     updated_by: p.fields.updated_by ?? null,
     updatedAt: p.updatedAt,
   };
+}
+
+function mapProjectAgent(
+  a: Awaited<ReturnType<TraceService["listProjectAgents"]>>[number],
+) {
+  return {
+    slug: a.slug,
+    project: a.fields.project,
+    cursor_agent_id: a.fields.cursor_agent_id,
+    display_name: a.fields.display_name ?? "",
+  };
+}
+
+async function loadProjectAgentNameMap(
+  service: TraceService,
+  project: string,
+): Promise<Map<string, string>> {
+  const list = service.listProjectAgents;
+  if (typeof list !== "function") return new Map();
+  try {
+    const agents = await list.call(service, project);
+    return projectAgentNameMap(
+      agents.map((row) => ({
+        cursor_agent_id: row.fields.cursor_agent_id,
+        display_name: row.fields.display_name,
+      })),
+    );
+  } catch {
+    return new Map();
+  }
 }
 
 /** Validate an `edits` payload before it reaches Aurora. */
@@ -1343,6 +1376,61 @@ export function createApp(deps: {
     },
   );
 
+  app.get(
+    "/v1/projects/:slug/agents",
+    requireScope("tickets:read"),
+    async (c) => {
+      const slug = param(c, "slug");
+      const items = await deps.service.listProjectAgents(slug);
+      return c.json({ items: items.map(mapProjectAgent) });
+    },
+  );
+
+  app.put(
+    "/v1/projects/:slug/agents",
+    requireScope("tickets:write"),
+    async (c) => {
+      const slug = param(c, "slug");
+      const denied = await enforceProjectRole(
+        deps.service,
+        await principalFor(c, deps.service),
+        slug,
+        requiredRoleForAction("write_tickets"),
+      );
+      if (denied) {
+        return c.json({ message: denied, code: "FORBIDDEN" }, 403);
+      }
+      const body = await c.req.json<{
+        cursor_agent_id?: string | null;
+        display_name?: string | null;
+      }>();
+      const parsed = parseClaimedAgentId(body.cursor_agent_id);
+      if (!parsed.ok) {
+        return c.json({ message: parsed.message, code: "VALIDATION" }, 400);
+      }
+      if (!parsed.value) {
+        return c.json(
+          { message: "cursor_agent_id is required", code: "VALIDATION" },
+          400,
+        );
+      }
+      const agent = await deps.service.upsertProjectAgent({
+        project: slug,
+        cursor_agent_id: parsed.value,
+        display_name: body.display_name,
+      });
+      audit(c, {
+        action: "project_agent.upsert",
+        resourceType: "project_agent",
+        resourceId: agent.slug,
+        meta: {
+          cursor_agent_id: agent.fields.cursor_agent_id,
+        },
+      });
+      return c.json(mapProjectAgent(agent));
+    },
+  );
+
   app.get("/v1/tickets", requireScope("tickets:read"), async (c) => {
     const project = c.req.query("project");
     if (!project) {
@@ -1374,9 +1462,11 @@ export function createApp(deps: {
         return value === parent;
       })
       .filter((t) => (workflow ? t.fields.workflow === workflow : true));
+    const names = await loadProjectAgentNameMap(deps.service, project);
     return c.json(
       tickets.map((t) => {
         const rollup = computeTokenRollup(projectTickets, t.slug);
+        const claimedId = t.fields.claimed_agent_id?.trim() || "";
         return {
           slug: t.slug,
           ticket_key: t.fields.ticket_key ?? null,
@@ -1397,9 +1487,10 @@ export function createApp(deps: {
           review_at: t.fields.review_at || null,
           parent: t.fields.parent || null,
           sort_order: t.fields.sort_order ?? null,
-          claimed_agent_id: t.fields.claimed_agent_id?.trim() || null,
+          claimed_agent_id: claimedId || null,
           claimed_agent_kind: claimedAgentKind(t.fields.claimed_agent_id),
           claimed_by_user_id: t.fields.claimed_by_user_id?.trim() || null,
+          claimed_agent_display_name: names.get(claimedId) ?? null,
         };
       }),
     );
@@ -1418,8 +1509,13 @@ export function createApp(deps: {
       "Ticket not found",
     );
     if (hidden) return hidden;
+    const names = await loadProjectAgentNameMap(
+      deps.service,
+      result.ticket.fields.project,
+    );
+    const claimedId = result.ticket.fields.claimed_agent_id?.trim() || "";
     return c.json({
-      ...mapTicket(result.ticket),
+      ...mapTicket(result.ticket, names.get(claimedId) ?? null),
       tokens_estimate_rollup: result.tokens_estimate_rollup,
       tokens_actual_rollup: result.tokens_actual_rollup,
       parent_ticket: result.parent_ticket
@@ -1503,7 +1599,15 @@ export function createApp(deps: {
       nudgeQueue,
       now,
     });
-    const mapped = mapTicket(maybeClaimed);
+    const createdNames = await loadProjectAgentNameMap(
+      deps.service,
+      maybeClaimed.fields.project,
+    );
+    const createdClaimed = maybeClaimed.fields.claimed_agent_id?.trim() || "";
+    const mapped = mapTicket(
+      maybeClaimed,
+      createdNames.get(createdClaimed) ?? null,
+    );
     publishTicketEvent(ticketEventFromMapped("ticket.created", mapped));
     audit(c, {
       action: "ticket.create",
@@ -1589,7 +1693,12 @@ export function createApp(deps: {
       body.agent_id,
       actor.userId,
     );
-    const mapped = mapTicket(ticket);
+    const claimNames = await loadProjectAgentNameMap(
+      deps.service,
+      ticket.fields.project,
+    );
+    const claimId = ticket.fields.claimed_agent_id?.trim() || "";
+    const mapped = mapTicket(ticket, claimNames.get(claimId) ?? null);
     publishTicketEvent(ticketEventFromMapped("ticket.updated", mapped));
     audit(c, {
       action: "ticket.claim",
@@ -1953,7 +2062,7 @@ export function createApp(deps: {
     });
     return c.json({
       ...mapped,
-      cascaded: result.cascaded.map(mapTicket),
+      cascaded: result.cascaded.map((t) => mapTicket(t)),
     });
   });
 
@@ -3007,7 +3116,7 @@ export function createApp(deps: {
       if (err instanceof ValidationError && err.issues !== undefined) {
         body.issues = err.issues;
       }
-      return c.json(body, err.status as 400 | 403 | 404);
+      return c.json(body, err.status as 400 | 403 | 404 | 409);
     }
     if (err instanceof AuroraNetworkError) {
       return c.json({ message: err.message, code: "BAD_GATEWAY" }, 502);

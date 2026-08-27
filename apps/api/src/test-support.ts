@@ -41,6 +41,7 @@ export function projectMemberStubs(input: {
         slug: `${project}-member-${userSlug}`,
         fields: { project, user: userSlug, role },
       })),
+    listProjectAgents: async () => [],
     assertProjectRole: async () => role,
   };
 }

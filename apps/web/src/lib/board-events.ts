@@ -22,6 +22,8 @@ export type BoardTicket = {
   orphan?: boolean;
   /** Claiming agent id when set; empty/null = unclaimed. Not live-updated via SSE in TRA-112. */
   claimedAgentId?: string | null;
+  /** Project-level weergavenaam when mapped (TRA-127). Not live-updated via SSE. */
+  claimedAgentDisplayName?: string | null;
 };
 
 export type BoardTicketEvent = {
@@ -95,6 +97,7 @@ export function applyBoardTicketEvent(
     workflow,
     orphan: workflow !== options.selectedWorkflow,
     claimedAgentId: previous?.claimedAgentId ?? null,
+    claimedAgentDisplayName: previous?.claimedAgentDisplayName ?? null,
   };
   return [...without, next];
 }

@@ -181,100 +181,104 @@ export function AccountAgentApisPanel() {
         <div className="empty">Kon Agent APIs niet laden: {loadError}</div>
       ) : (
         <>
-          <form className="create-ticket-form" onSubmit={(e) => void onSave(e)}>
-            <h3>Cursor</h3>
-            <p className="muted note">
-              Plak een Cursor API-key. Na opslaan toont TraceAI alleen de
-              laatste vier tekens — nooit de volledige key.
-            </p>
-            {cursor?.configured && cursor.last4 ? (
-              <p className="muted">
-                Geconfigureerd: <code>****{cursor.last4}</code>
-              </p>
-            ) : (
-              <p className="muted">Nog geen Cursor-key opgeslagen.</p>
-            )}
-            <label>
-              API-key
-              <input
-                type="password"
-                value={cursorKey}
-                onChange={(e) => setCursorKey(e.target.value)}
-                placeholder="Cursor API-key"
-                autoComplete="off"
-                disabled={busy}
-              />
-            </label>
-            {formError ? <p className="create-ticket-error">{formError}</p> : null}
-            {notice ? <p className="muted note">{notice}</p> : null}
-            <div className="account-agent-api-actions">
-              <button
-                type="submit"
-                className="btn"
-                disabled={busy || !cursorKey.trim()}
-              >
-                {cursor?.configured ? "Vervangen" : "Opslaan"}
-              </button>
-              {cursor?.configured ? (
-                <button
-                  type="button"
-                  className="btn btn-small"
-                  disabled={busy}
-                  onClick={() => void onRemove()}
-                >
-                  Verwijderen
-                </button>
-              ) : null}
-            </div>
-          </form>
-
-          <form
-            className="create-ticket-form"
-            onSubmit={(e) => void onSaveDefault(e)}
+          <section
+            className="create-ticket-form account-cursor-panel"
+            aria-labelledby="cursor-agent-apis-heading"
           >
-            <h3>Default agent</h3>
-            <p className="muted note">
-              Cursor Cloud-id (<code>bc-…</code>). Wijzigt vaak; dit veld is
-              los van de API-key. Nieuwe tickets op Backlog wekken deze agent.
-            </p>
-            {defaultAgentId ? (
-              <p className="muted">
-                Huidig: <code>{defaultAgentId}</code>
+            <h3 id="cursor-agent-apis-heading">Cursor</h3>
+            {notice ? <p className="muted note">{notice}</p> : null}
+
+            <form onSubmit={(e) => void onSave(e)}>
+              <p className="muted note">
+                Plak een Cursor API-key. Na opslaan toont TraceAI alleen de
+                laatste vier tekens — nooit de volledige key.
               </p>
-            ) : (
-              <p className="muted">Nog geen default agent.</p>
-            )}
-            <label>
-              Default agent
-              <input
-                type="text"
-                value={defaultAgentDraft}
-                onChange={(e) => setDefaultAgentDraft(e.target.value)}
-                placeholder="bc-…"
-                autoComplete="off"
-                spellCheck={false}
-                disabled={busy}
-              />
-            </label>
-            {defaultError ? (
-              <p className="create-ticket-error">{defaultError}</p>
-            ) : null}
-            <div className="account-agent-api-actions">
-              <button type="submit" className="btn" disabled={busy}>
-                Opslaan
-              </button>
-              {defaultAgentId ? (
-                <button
-                  type="button"
-                  className="btn btn-small"
+              {cursor?.configured && cursor.last4 ? (
+                <p className="muted">
+                  Geconfigureerd: <code>****{cursor.last4}</code>
+                </p>
+              ) : (
+                <p className="muted">Nog geen Cursor-key opgeslagen.</p>
+              )}
+              <label>
+                API-key
+                <input
+                  type="password"
+                  value={cursorKey}
+                  onChange={(e) => setCursorKey(e.target.value)}
+                  placeholder="Cursor API-key"
+                  autoComplete="off"
                   disabled={busy}
-                  onClick={() => void onClearDefault()}
-                >
-                  Wissen
-                </button>
+                />
+              </label>
+              {formError ? (
+                <p className="create-ticket-error">{formError}</p>
               ) : null}
-            </div>
-          </form>
+              <div className="account-agent-api-actions">
+                <button
+                  type="submit"
+                  className="btn"
+                  disabled={busy || !cursorKey.trim()}
+                >
+                  {cursor?.configured ? "Vervangen" : "Opslaan"}
+                </button>
+                {cursor?.configured ? (
+                  <button
+                    type="button"
+                    className="btn btn-small"
+                    disabled={busy}
+                    onClick={() => void onRemove()}
+                  >
+                    Verwijderen
+                  </button>
+                ) : null}
+              </div>
+            </form>
+
+            <form onSubmit={(e) => void onSaveDefault(e)}>
+              <p className="muted note">
+                Cursor Cloud-id (<code>bc-…</code>). Wijzigt vaak; dit veld is
+                los van de API-key. Nieuwe tickets op Backlog wekken deze agent.
+              </p>
+              {defaultAgentId ? (
+                <p className="muted">
+                  Huidig: <code>{defaultAgentId}</code>
+                </p>
+              ) : (
+                <p className="muted">Nog geen default agent.</p>
+              )}
+              <label>
+                Default agent
+                <input
+                  type="text"
+                  value={defaultAgentDraft}
+                  onChange={(e) => setDefaultAgentDraft(e.target.value)}
+                  placeholder="bc-…"
+                  autoComplete="off"
+                  spellCheck={false}
+                  disabled={busy}
+                />
+              </label>
+              {defaultError ? (
+                <p className="create-ticket-error">{defaultError}</p>
+              ) : null}
+              <div className="account-agent-api-actions">
+                <button type="submit" className="btn" disabled={busy}>
+                  Opslaan
+                </button>
+                {defaultAgentId ? (
+                  <button
+                    type="button"
+                    className="btn btn-small"
+                    disabled={busy}
+                    onClick={() => void onClearDefault()}
+                  >
+                    Wissen
+                  </button>
+                ) : null}
+              </div>
+            </form>
+          </section>
 
           <section
             className="account-token-list"

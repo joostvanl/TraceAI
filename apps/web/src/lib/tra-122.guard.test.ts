@@ -12,7 +12,7 @@ describe("TRA-122 default agent on Agent APIs", () => {
       join(srcDir, "components", "AccountAgentApisPanel.tsx"),
       "utf8",
     );
-    assert.match(source, />Default agent</);
+    assert.match(source, /Default agent/);
     assert.match(source, /placeholder="bc-…"/);
     assert.match(source, /\/api\/account\/default-agent/);
     assert.match(source, /\/api\/account\/agent-apis/);

@@ -1,9 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { UNMAPPED_STAGE_KEY, relationSlug } from "@traceai/core";
+import { UNMAPPED_STAGE_KEY, displayNameForCursorAgentId, relationSlug } from "@traceai/core";
 import { CreateTicketForm } from "@/components/CreateTicketForm";
 import { LiveBoard } from "@/components/LiveBoard";
-import { getProjectBoard, listBoardTicketsViaTraceAI } from "@/lib/cms";
+import {
+  getProjectBoard,
+  listBoardTicketsViaTraceAI,
+  resolveProjectAgentNames,
+} from "@/lib/cms";
 import { requireProjectAccess } from "@/lib/project-access";
 import { getSessionUser } from "@/lib/session";
 
@@ -27,6 +31,7 @@ export default async function ProjectPage({ params, searchParams }: Props) {
   const board = await getProjectBoard(slug, requestedWorkflow);
   if (!board) notFound();
   const sessionUser = await getSessionUser();
+  const agentNames = await resolveProjectAgentNames(slug);
 
   const {
     project,
@@ -94,6 +99,10 @@ export default async function ProjectPage({ params, searchParams }: Props) {
           workflow,
           orphan: workflow !== selectedWorkflow,
           claimedAgentId: ticket.fields.claimed_agent_id?.trim() || null,
+          claimedAgentDisplayName: displayNameForCursorAgentId(
+            agentNames,
+            ticket.fields.claimed_agent_id,
+          ),
         };
       });
 

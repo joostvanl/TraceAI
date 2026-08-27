@@ -349,6 +349,20 @@ export type ProjectMembershipFields = {
   role: string;
 };
 
+/**
+ * Per-project Cursor agent weergavenaam (Aurora `project_agent`, TRA-127).
+ * Operators set the name on this entity; uniqueness is enforced in TraceAI.
+ * Empty `display_name` is valid. Names are not stored on tickets or AuthStore.
+ */
+export type ProjectAgentFields = {
+  /** Aurora relation → `project` (slug string at API boundary). */
+  project: string;
+  /** Cursor (or other) agent id; same parse as `parseClaimedAgentId`. */
+  cursor_agent_id: string;
+  /** Trimmed weergavenaam; empty allowed. */
+  display_name: string;
+};
+
 export type Project = AuroraEntry<ProjectFields>;
 export type Workflow = AuroraEntry<WorkflowFields>;
 export type Ticket = AuroraEntry<TicketFields>;
@@ -357,11 +371,13 @@ export type WikiPage = AuroraEntry<WikiPageFields>;
 export type AppLogin = AuroraEntry<AppLoginFields>;
 export type TraceaiUser = AuroraEntry<TraceaiUserFields>;
 export type ProjectMembership = AuroraEntry<ProjectMembershipFields>;
+export type ProjectAgent = AuroraEntry<ProjectAgentFields>;
 
 export const APP_LOGIN_CONTENT_TYPE = "app_login";
 export const APP_LOGIN_ENTRY_SLUG = "default";
 export const TRACEAI_USER_CONTENT_TYPE = "traceai_user";
 export const PROJECT_MEMBERSHIP_CONTENT_TYPE = "project_membership";
+export const PROJECT_AGENT_CONTENT_TYPE = "project_agent";
 export const WIKI_PAGE_CONTENT_TYPE = "wiki_page";
 /** Upper bound (and default) for one page of a wiki listing. */
 export const WIKI_PAGE_LIST_MAX = 500;

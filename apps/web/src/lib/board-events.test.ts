@@ -117,6 +117,7 @@ describe("applyBoardTicketEvent", () => {
         priority: "medium",
         workflow: "standard-worker",
         claimedAgentId: "bc-abcdefghijklmno",
+        claimedAgentDisplayName: "Henk",
       },
     ];
     const next = applyBoardTicketEvent(
@@ -136,6 +137,7 @@ describe("applyBoardTicketEvent", () => {
       namedBoard,
     );
     assert.equal(next[0]?.claimedAgentId, "bc-abcdefghijklmno");
+    assert.equal(next[0]?.claimedAgentDisplayName, "Henk");
     assert.equal(next[0]?.title, "Claimed (renamed)");
   });
 });

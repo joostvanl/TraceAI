@@ -156,6 +156,21 @@ describe("snapshotFromRow (TRA-112)", () => {
       "traceai-traceai-story",
     );
     assert.equal(claimed.claimedAgentId, "bc-abcdefghijklmno");
+    assert.equal(claimed.claimedAgentDisplayName, null);
+
+    const named = snapshotFromRow(
+      {
+        slug: "named",
+        ticket_key: "TRA-127",
+        title: "Named",
+        stage: "in_progress",
+        workflow: "traceai-traceai-story",
+        claimed_agent_id: "bc-abcdefghijklmno",
+        claimed_agent_display_name: "Henk",
+      },
+      "traceai-traceai-story",
+    );
+    assert.equal(named.claimedAgentDisplayName, "Henk");
 
     const unclaimed = snapshotFromRow(
       {
@@ -168,6 +183,7 @@ describe("snapshotFromRow (TRA-112)", () => {
       "traceai-traceai-story",
     );
     assert.equal(unclaimed.claimedAgentId, null);
+    assert.equal(unclaimed.claimedAgentDisplayName, null);
   });
 
   it("treats blank claimed_agent_id as unclaimed", () => {
