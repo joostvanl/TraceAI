@@ -367,12 +367,15 @@ async function processOneNudge(
   }
 
   const verdict = row.verdict;
-  const prompt = cloudWakeupPrompt({
-    ticketKey: ticket?.fields.ticket_key ?? row.ticket_key,
-    slug: row.ticket_slug,
-    verdict,
-    stage: ticket?.fields.stage ?? row.stage,
-  });
+  const stored = row.prompt.trim();
+  const prompt =
+    stored ||
+    cloudWakeupPrompt({
+      ticketKey: ticket?.fields.ticket_key ?? row.ticket_key,
+      slug: row.ticket_slug,
+      verdict,
+      stage: ticket?.fields.stage ?? row.stage,
+    });
 
   const result = await client.followUp(currentId, prompt);
   if (result.ok) {

@@ -80,6 +80,16 @@ export async function claimAndNudgeDefaultAgentOnCreate(input: {
       parsed.value,
       ownerUserId,
     );
+    // Aurora may persist claimed_agent_id but drop claimed_by_user_id (TRA-123).
+    // Overlay the owner so cursorFollowUpForClaimer still decrypts the key.
+    const claimedForNudge: Ticket = {
+      ...claimed,
+      fields: {
+        ...claimed.fields,
+        claimed_by_user_id:
+          claimed.fields.claimed_by_user_id?.trim() || ownerUserId,
+      },
+    };
 
     const liveCursorCloud =
       input.cursorCloud !== undefined
@@ -87,10 +97,11 @@ export async function claimAndNudgeDefaultAgentOnCreate(input: {
         : (ticket: Ticket) =>
             cursorFollowUpForClaimer(input.authStore, ticket, {
               fetchImpl: input.cursorCloudFetch,
+              fallbackUserId: ownerUserId,
             });
 
     scheduleClaimedCloudNudges(
-      [claimed],
+      [claimedForNudge],
       DEFAULT_AGENT_CREATE_VERDICT,
       liveCursorCloud,
       input.scheduleWakeup,

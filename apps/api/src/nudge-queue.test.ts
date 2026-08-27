@@ -245,6 +245,36 @@ describe("processDueCloudNudges", () => {
     store.close();
   });
 
+  it("retries with the stored create prompt, not cloudWakeupPrompt (TRA-124)", async () => {
+    const store = new NudgeQueueStore(":memory:");
+    const t0 = new Date("2026-08-26T00:00:00.000Z");
+    const createPrompt =
+      "New ticket TRA-124 (nudge-bij-nieuw-ticket-ontbreekt) was created and landed on backlog. You are claimed as this user's default Cloud agent.";
+    enqueueBusyCloudNudgeForVerdict(
+      store,
+      ticket({ stage: "backlog", ticket_key: "TRA-124" }),
+      "created",
+      busyResult({ prompt: createPrompt }),
+      t0,
+    );
+    const prompts: string[] = [];
+    const { deps } = worker({
+      store,
+      now: new Date(t0.getTime() + AGENT_BUSY_RETRY_MS),
+      live: ticket({ stage: "backlog", ticket_key: "TRA-124" }),
+      client: {
+        followUp: async (_id, prompt) => {
+          prompts.push(prompt);
+          return { ok: true, status: 201, busy: false };
+        },
+      },
+    });
+    await processDueCloudNudges(deps);
+    assert.deepEqual(prompts, [createPrompt]);
+    assert.doesNotMatch(prompts[0] ?? "", /Human verdict/);
+    store.close();
+  });
+
   it("targets an overwritten current bc- claim (TRA-107 last-writer-wins)", async () => {
     const store = new NudgeQueueStore(":memory:");
     const t0 = new Date("2026-08-26T00:00:00.000Z");
