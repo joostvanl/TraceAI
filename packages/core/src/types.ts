@@ -347,6 +347,12 @@ export type ProjectMembershipFields = {
   /** Aurora relation → `traceai_user` (slug string at API boundary). */
   user: string;
   role: string;
+  /**
+   * Per-membership default Cursor Cloud id (TRA-128). Plain text; empty = none.
+   * Only the membership owner may write this. Create-nudge reads the actor's
+   * row for the ticket's project.
+   */
+  default_cursor_agent_id?: string | null;
 };
 
 /**

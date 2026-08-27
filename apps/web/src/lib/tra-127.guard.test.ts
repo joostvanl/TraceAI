@@ -19,9 +19,8 @@ describe("TRA-127 Cursor panel + display name surfaces", () => {
     );
     assert.deepEqual(headings, ["Cursor", "Later"]);
     assert.match(source, /\/api\/account\/agent-apis/);
-    assert.match(source, /\/api\/account\/default-agent/);
     assert.match(source, /JSON\.stringify\(\{\s*provider: "cursor",\s*api_key: cursorKey/);
-    assert.match(source, /JSON\.stringify\(\{ agent_id: defaultAgentDraft \}\)/);
+    assert.doesNotMatch(source, /\/api\/account\/default-agent/);
     assert.doesNotMatch(source, /weergavenaam/i);
     assert.doesNotMatch(source, /display_name/);
     assert.doesNotMatch(source, /displayName/);

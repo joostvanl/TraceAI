@@ -29,15 +29,20 @@ export function defaultAgentCreatePrompt(ticket: Ticket): string {
 }
 
 /**
- * After create: if the actor has a `bc-` default agent and a Cursor key, and
- * the ticket is on the workflow first stage, claim + fire-and-forget nudge.
- * Never throws — ticket create must stay 201.
+ * After create: if the actor has a `bc-` default agent on **this ticket's
+ * project membership** and a Cursor key, and the ticket is on the workflow
+ * first stage, claim + fire-and-forget nudge. Never throws — ticket create
+ * must stay 201.
  */
 export async function claimAndNudgeDefaultAgentOnCreate(input: {
   ticket: Ticket;
   ownerUserId: string | null | undefined;
+  actorUserSlug: string | null | undefined;
   authStore: AuthStore;
-  service: Pick<TraceService, "getWorkflow" | "claimTicket">;
+  service: Pick<
+    TraceService,
+    "getWorkflow" | "claimTicket" | "getOwnMembershipDefaultAgent"
+  >;
   cursorCloud?:
     | CursorCloudFollowUp
     | ((ticket: Ticket) => CursorCloudFollowUp | null)
@@ -50,10 +55,15 @@ export async function claimAndNudgeDefaultAgentOnCreate(input: {
 }): Promise<Ticket> {
   const log = input.log ?? ((message: string) => console.warn(message));
   const ownerUserId = input.ownerUserId?.trim() || "";
-  if (!ownerUserId) return input.ticket;
+  const actorUserSlug = input.actorUserSlug?.trim() || "";
+  const project = input.ticket.fields.project?.trim() || "";
+  if (!ownerUserId || !actorUserSlug || !project) return input.ticket;
 
   try {
-    const rawId = input.authStore.getDefaultCursorAgentId(ownerUserId);
+    const rawId = await input.service.getOwnMembershipDefaultAgent(
+      project,
+      actorUserSlug,
+    );
     const parsed = parseClaimedAgentId(rawId);
     if (!parsed.ok || !parsed.value) return input.ticket;
     if (claimedAgentKind(parsed.value) !== "cursor_cloud") return input.ticket;

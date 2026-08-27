@@ -792,7 +792,7 @@ const HOMEPAGE_CONNECT_FALLBACK: HomepageConnectContent = {
   tools: [
     "list_projects / get_project / create_project",
     "list_tickets / get_ticket / create_ticket / update_ticket (slug or TRA-n; optional parent)",
-    "claim_ticket / set_default_agent (Cursor bc-… id; metadata socket, not URL paste)",
+    "claim_ticket / set_default_agent (project slug + Cursor bc-… id; metadata socket, not URL paste)",
     "add_comment / transition_ticket (tokens_used / tokens_estimate / resolution when required)",
     "list_workflows / get_workflow / create_workflow / update_workflow",
     "list_wiki_pages / get_wiki_page / create_wiki_page / update_wiki_page",

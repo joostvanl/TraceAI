@@ -37,6 +37,8 @@ const PROXY_ONLY: Record<string, string> = {
     "proxies GET/POST /v1/projects/:slug/members and forwards the API status",
   "api/projects/[slug]/members/[user]/route.ts":
     "proxies DELETE /v1/projects/:slug/members/:user and forwards the API status",
+  "api/projects/[slug]/default-agent/route.ts":
+    "proxies GET/PUT /v1/projects/:slug/me/default-agent and forwards the API status",
 };
 
 /**
