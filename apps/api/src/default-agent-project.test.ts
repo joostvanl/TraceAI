@@ -22,7 +22,11 @@ function authHeaders(
   };
 }
 
-function personalHeaders(token: string, slug: string): Record<string, string> {
+function personalHeaders(
+  token: string,
+  slug: string,
+  extras: { platformAdmin?: boolean } = {},
+): Record<string, string> {
   return authHeaders(token, {
     "x-traceai-human-proxy": PROXY_SECRET,
     "x-traceai-human-identity": signHumanIdentity(
@@ -30,7 +34,7 @@ function personalHeaders(token: string, slug: string): Record<string, string> {
         user: slug,
         slug,
         display_name: slug,
-        is_platform_admin: false,
+        is_platform_admin: extras.platformAdmin === true,
         mode: "personal",
       },
       SESSION_SECRET,
@@ -38,7 +42,7 @@ function personalHeaders(token: string, slug: string): Record<string, string> {
   });
 }
 
-describe("GET/PUT /v1/projects/:slug/me/default-agent (TRA-128)", () => {
+describe("GET/PUT /v1/projects/:slug/default-agent (TRA-137)", () => {
   const prevProxy = process.env.TRACEAI_HUMAN_PROXY_SECRET;
   const prevSession = process.env.TRACEAI_SESSION_SECRET;
   const prevAgent = process.env.TRACEAI_AGENT_API_SECRET;
@@ -64,14 +68,21 @@ describe("GET/PUT /v1/projects/:slug/me/default-agent (TRA-128)", () => {
       token: string;
       stubs: ReturnType<typeof projectMemberStubs>;
     }) => Promise<void>,
-    extras: { projects?: string[] } = {},
+    extras: {
+      projects?: string[];
+      role?: "admin" | "editor" | "viewer";
+      enforceRoles?: boolean;
+      isPlatformAdmin?: boolean;
+      userSlug?: string;
+    } = {},
   ) {
     const dir = mkdtempSync(join(tmpdir(), "traceai-default-project-"));
     const store = new AuthStore(join(dir, "auth.sqlite"));
     try {
+      const userSlug = extras.userSlug ?? "alice";
       const user = store.createUser({
-        email: "ui+alice@users.traceai.local",
-        name: "Alice",
+        email: `ui+${userSlug}@users.traceai.local`,
+        name: userSlug,
       });
       const token = store.createToken({
         userId: user.id,
@@ -79,23 +90,27 @@ describe("GET/PUT /v1/projects/:slug/me/default-agent (TRA-128)", () => {
         scopes: [...DEFAULT_AGENT_SCOPES],
       });
       const stubs = projectMemberStubs({
-        email: "ui+alice@users.traceai.local",
-        userSlug: "alice",
+        email: `ui+${userSlug}@users.traceai.local`,
+        userSlug,
         projects: extras.projects ?? ["traceai", "other"],
+        role: extras.role ?? "admin",
+        enforceRoles: extras.enforceRoles,
+        isPlatformAdmin: extras.isPlatformAdmin,
       });
       const app = createApp({
         authStore: store,
         service: {
           ...stubs,
           getTraceaiUser: async (slug: string) =>
-            slug === "alice"
+            slug === userSlug
               ? {
-                  id: "id-alice",
-                  slug: "alice",
+                  id: `id-${userSlug}`,
+                  slug: userSlug,
                   fields: {
-                    username: "alice",
-                    display_name: "Alice",
+                    username: userSlug,
+                    display_name: userSlug,
                     status: "active",
+                    is_platform_admin: extras.isPlatformAdmin === true,
                   },
                 }
               : null,
@@ -112,7 +127,7 @@ describe("GET/PUT /v1/projects/:slug/me/default-agent (TRA-128)", () => {
   it("saves, replaces, and clears per project without leaking across projects", async () => {
     await withApp(async ({ app, token }) => {
       const headers = personalHeaders(token, "alice");
-      const put = await app.request("/v1/projects/traceai/me/default-agent", {
+      const put = await app.request("/v1/projects/traceai/default-agent", {
         method: "PUT",
         headers,
         body: JSON.stringify({ agent_id: "bc-default-1" }),
@@ -123,7 +138,7 @@ describe("GET/PUT /v1/projects/:slug/me/default-agent (TRA-128)", () => {
         "bc-default-1",
       );
 
-      const got = await app.request("/v1/projects/traceai/me/default-agent", {
+      const got = await app.request("/v1/projects/traceai/default-agent", {
         headers,
       });
       assert.equal(
@@ -131,7 +146,7 @@ describe("GET/PUT /v1/projects/:slug/me/default-agent (TRA-128)", () => {
         "bc-default-1",
       );
 
-      const other = await app.request("/v1/projects/other/me/default-agent", {
+      const other = await app.request("/v1/projects/other/default-agent", {
         headers,
       });
       assert.equal(
@@ -140,7 +155,7 @@ describe("GET/PUT /v1/projects/:slug/me/default-agent (TRA-128)", () => {
       );
 
       const replaced = await app.request(
-        "/v1/projects/traceai/me/default-agent",
+        "/v1/projects/traceai/default-agent",
         {
           method: "PUT",
           headers,
@@ -154,7 +169,7 @@ describe("GET/PUT /v1/projects/:slug/me/default-agent (TRA-128)", () => {
       );
 
       const cleared = await app.request(
-        "/v1/projects/traceai/me/default-agent",
+        "/v1/projects/traceai/default-agent",
         {
           method: "PUT",
           headers,
@@ -171,7 +186,7 @@ describe("GET/PUT /v1/projects/:slug/me/default-agent (TRA-128)", () => {
 
   it("lets a bearer token (MCP) set the default without a human proxy", async () => {
     await withApp(async ({ app, token }) => {
-      const res = await app.request("/v1/projects/traceai/me/default-agent", {
+      const res = await app.request("/v1/projects/traceai/default-agent", {
         method: "PUT",
         headers: authHeaders(token),
         body: JSON.stringify({ agent_id: "bc-mcp-self" }),
@@ -182,6 +197,42 @@ describe("GET/PUT /v1/projects/:slug/me/default-agent (TRA-128)", () => {
         "bc-mcp-self",
       );
     });
+  });
+
+  it("rejects editor PUT with 403", async () => {
+    await withApp(
+      async ({ app, token }) => {
+        const res = await app.request("/v1/projects/traceai/default-agent", {
+          method: "PUT",
+          headers: personalHeaders(token, "alice"),
+          body: JSON.stringify({ agent_id: "bc-nope" }),
+        });
+        assert.equal(res.status, 403, await res.clone().text());
+      },
+      { role: "editor", enforceRoles: true },
+    );
+  });
+
+  it("lets a platform admin set the default without a membership row", async () => {
+    await withApp(
+      async ({ app, token }) => {
+        const headers = personalHeaders(token, "boss", { platformAdmin: true });
+        const put = await app.request("/v1/projects/traceai/default-agent", {
+          method: "PUT",
+          headers,
+          body: JSON.stringify({ agent_id: "bc-platform-1" }),
+        });
+        assert.equal(put.status, 200, await put.clone().text());
+        const got = await app.request("/v1/projects/traceai/default-agent", {
+          headers,
+        });
+        assert.equal(
+          ((await got.json()) as { agent_id?: string | null }).agent_id,
+          "bc-platform-1",
+        );
+      },
+      { userSlug: "boss", isPlatformAdmin: true, projects: [] },
+    );
   });
 
   it("rejects legacy login", async () => {
@@ -199,21 +250,22 @@ describe("GET/PUT /v1/projects/:slug/me/default-agent (TRA-128)", () => {
           SESSION_SECRET,
         ),
       });
-      const res = await app.request("/v1/projects/traceai/me/default-agent", {
+      const res = await app.request("/v1/projects/traceai/default-agent", {
         method: "PUT",
         headers,
         body: JSON.stringify({ agent_id: "bc-nope" }),
       });
-      // Project middleware 404s when there is no membership slug (TRA-81).
-      // That still prevents setting a default (AC: legacy cannot set).
-      assert.equal(res.status, 404);
+      assert.ok(
+        res.status === 404 || res.status === 403,
+        `expected 404 or 403, got ${res.status}`,
+      );
     });
   });
 
-  it("role updates do not wipe the membership default", async () => {
+  it("role updates do not wipe the project default", async () => {
     await withApp(async ({ app, token, stubs }) => {
       const headers = personalHeaders(token, "alice");
-      await app.request("/v1/projects/traceai/me/default-agent", {
+      await app.request("/v1/projects/traceai/default-agent", {
         method: "PUT",
         headers,
         body: JSON.stringify({ agent_id: "bc-keep-me" }),
@@ -223,7 +275,7 @@ describe("GET/PUT /v1/projects/:slug/me/default-agent (TRA-128)", () => {
         user: "alice",
         role: "editor",
       });
-      const got = await app.request("/v1/projects/traceai/me/default-agent", {
+      const got = await app.request("/v1/projects/traceai/default-agent", {
         headers,
       });
       assert.equal(
@@ -231,5 +283,51 @@ describe("GET/PUT /v1/projects/:slug/me/default-agent (TRA-128)", () => {
         "bc-keep-me",
       );
     });
+  });
+
+  it("ignores leftover membership defaults after the project field is cleared", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "traceai-default-cleared-"));
+    const store = new AuthStore(join(dir, "auth.sqlite"));
+    try {
+      const user = store.createUser({
+        email: "ui+alice@users.traceai.local",
+        name: "Alice",
+      });
+      const token = store.createToken({
+        userId: user.id,
+        name: "web",
+        scopes: [...DEFAULT_AGENT_SCOPES],
+      });
+      const stubs = projectMemberStubs({
+        email: "ui+alice@users.traceai.local",
+        userSlug: "alice",
+        projects: ["traceai"],
+        defaultByProject: { traceai: null },
+        membershipDefaultByProject: { traceai: "bc-old-membership" },
+      });
+      const app = createApp({
+        authStore: store,
+        service: {
+          ...stubs,
+          getTraceaiUser: async () => ({
+            id: "id-alice",
+            slug: "alice",
+            fields: { username: "alice", status: "active" },
+          }),
+        } as never,
+        cursorCloud: null,
+      });
+      const got = await app.request("/v1/projects/traceai/default-agent", {
+        headers: personalHeaders(token.token, "alice"),
+      });
+      assert.equal(got.status, 200, await got.clone().text());
+      assert.equal(
+        ((await got.json()) as { agent_id?: string | null }).agent_id,
+        null,
+      );
+    } finally {
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

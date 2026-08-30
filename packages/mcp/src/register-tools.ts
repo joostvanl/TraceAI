@@ -399,11 +399,11 @@ export function registerTraceAiTools(
 
   server.tool(
     "set_default_agent",
-    "Set this TraceAI user's default Cursor Cloud agent for one project (the caller's project_membership row only). That agent is nudged (and claimed) when a new ticket in that project lands on Backlog. Pass the project slug and your Cursor agent id. On Cursor-managed Cloud Agent VMs read the id from the metadata socket, not the dashboard URL: curl -fsS --unix-socket \"${CURSOR_AGENT_SOCKET:-/run/cursor/api.sock}\" http://cursor-agent/v1/meta-data/agent/id . Fallback: Cloud MCP run-info → bcId. Empty agent_id clears this project's membership default only — not other projects. Non-bc- ids may be stored but are never nudged.",
+    "Set this project's default Cursor Cloud agent (one bc- id on the project; project-admin or platform-admin only). That agent is claimed (and nudged when a Cursor key exists) when a new ticket in that project lands on the first workflow stage. Pass the project slug and the Cursor agent id. On Cursor-managed Cloud Agent VMs read the id from the metadata socket, not the dashboard URL: curl -fsS --unix-socket \"${CURSOR_AGENT_SOCKET:-/run/cursor/api.sock}\" http://cursor-agent/v1/meta-data/agent/id . Fallback: Cloud MCP run-info → bcId. Empty agent_id clears that project's default only. Non-admin callers get 403. Non-bc- ids may be stored but are never nudged.",
     {
       project: z
         .string()
-        .describe("Project slug whose membership default to write"),
+        .describe("Project slug whose default agent to write"),
       agent_id: z
         .string()
         .describe(

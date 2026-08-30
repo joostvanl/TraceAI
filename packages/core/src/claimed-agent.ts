@@ -100,7 +100,7 @@ export function cloudCreateWakeupPrompt(input: {
   const key = input.ticketKey?.trim() || input.slug;
   return (
     `New ticket ${key} (${input.slug}) was created and landed on ${input.stage}. ` +
-    `You are claimed as this user's default Cloud agent. Call TraceAI get_ticket immediately, ` +
+    `You are claimed as this project's default Cloud agent. Call TraceAI get_ticket immediately, ` +
     `then follow the workflow playbook for that stage. Do not wait for chat.`
   );
 }
