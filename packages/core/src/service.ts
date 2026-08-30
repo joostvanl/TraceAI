@@ -101,6 +101,10 @@ import {
   parseClaimedAgentId,
 } from "./claimed-agent.js";
 import {
+  projectDefaultFieldState,
+  uniqueMembershipBcDefault,
+} from "./project-default-agent.js";
+import {
   assertUniqueProjectAgentDisplayName,
   projectAgentSlug,
   trimDisplayName,
@@ -2710,6 +2714,7 @@ export class TraceService {
       slug,
     );
     if (existing) {
+      const current = this.normalizeMembershipRelations(existing);
       const updated = await this.client.updateEntry<ProjectMembership>(
         PROJECT_MEMBERSHIP_CONTENT_TYPE,
         existing.id,
@@ -2718,6 +2723,8 @@ export class TraceService {
             project,
             user,
             role: input.role,
+            default_cursor_agent_id:
+              current.fields.default_cursor_agent_id?.trim() || "",
           },
         },
       );
@@ -2738,6 +2745,64 @@ export class TraceService {
     );
     await this.ensurePublished(PROJECT_MEMBERSHIP_CONTENT_TYPE, created);
     return created;
+  }
+
+  /**
+   * Resolve the project-owned default Cursor Cloud id (TRA-137).
+   * When the project field has never been written, copy the single distinct
+   * membership `bc-` default (if any) and persist it. After that first write,
+   * membership defaults are never read again — including after an admin clear.
+   */
+  async getProjectDefaultAgent(projectSlug: string): Promise<string | null> {
+    await this.ensureReady();
+    const project = projectSlug.trim();
+    if (!project) throw new ValidationError("project is required");
+    const entry = await this.client.getEntryBySlug<Project>("project", project);
+    if (!entry) throw new NotFoundError(`Project not found: ${project}`);
+    const state = projectDefaultFieldState(entry.fields.default_cursor_agent_id);
+    if (state.written) return state.value;
+
+    const memberships = await this.listProjectMemberships(project);
+    const copied = uniqueMembershipBcDefault(
+      memberships.map((m) => m.fields.default_cursor_agent_id),
+    );
+    await this.persistProjectDefaultAgent(entry, copied ?? "");
+    if (!copied) {
+      console.warn(
+        `[traceai] no unique membership bc- default to copy for ${project}`,
+      );
+    }
+    return copied;
+  }
+
+  /**
+   * Write the project-owned default Cursor Cloud id. Empty `agentId` clears
+   * this project only. After this write, membership defaults are ignored.
+   */
+  async setProjectDefaultAgent(input: {
+    project: string;
+    agentId: string;
+  }): Promise<string | null> {
+    await this.ensureReady();
+    const project = input.project.trim();
+    if (!project) throw new ValidationError("project is required");
+    const entry = await this.client.getEntryBySlug<Project>("project", project);
+    if (!entry) throw new NotFoundError(`Project not found: ${project}`);
+    const value = input.agentId.trim();
+    await this.persistProjectDefaultAgent(entry, value);
+    return value || null;
+  }
+
+  private async persistProjectDefaultAgent(
+    project: Project,
+    value: string,
+  ): Promise<void> {
+    const updated = await this.client.updateEntry<Project>(
+      "project",
+      project.id,
+      { fields: { default_cursor_agent_id: value } },
+    );
+    await this.ensurePublished("project", updated);
   }
 
   async removeProjectMembership(
@@ -2892,6 +2957,9 @@ export class TraceService {
         project: relationSlugOrEmpty(membership.fields.project),
         user: relationSlugOrEmpty(membership.fields.user),
         role: String(membership.fields.role ?? ""),
+        default_cursor_agent_id:
+          String(membership.fields.default_cursor_agent_id ?? "").trim() ||
+          null,
       },
     };
   }

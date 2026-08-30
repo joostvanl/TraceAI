@@ -51,6 +51,10 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
   async function withCreateApp(
     extras: {
       defaultAgentId?: string | null;
+      defaultByProject?: Record<string, string | null>;
+      membershipDefaultByProject?: Record<string, string | null>;
+      projects?: string[];
+      ticketProject?: string;
       saveCursorKey?: boolean;
       stage?: string;
       cursorStatus?: number;
@@ -84,9 +88,6 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
         name: "agent",
         scopes: [...DEFAULT_AGENT_SCOPES],
       });
-      if (extras.defaultAgentId) {
-        store.setDefaultCursorAgentId(user.id, extras.defaultAgentId);
-      }
       if (extras.saveCursorKey) {
         store.putAgentApiKey({
           userId: user.id,
@@ -96,10 +97,17 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
         });
       }
       const stage = extras.stage ?? "backlog";
+      const ticketProject = extras.ticketProject ?? "traceai";
+      const projects = extras.projects ?? ["traceai"];
+      const defaultByProject =
+        extras.defaultByProject ??
+        (extras.defaultAgentId
+          ? { [ticketProject]: extras.defaultAgentId }
+          : undefined);
       const created = {
         id: "id-new",
         slug: "new-wish",
-        fields: ticketFields({ stage }),
+        fields: ticketFields({ stage, project: ticketProject }),
       };
       const app = createApp({
         authStore: store,
@@ -119,7 +127,9 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
         service: {
           ...projectMemberStubs({
             email: "owner@example.com",
-            projects: ["traceai"],
+            projects,
+            defaultByProject,
+            membershipDefaultByProject: extras.membershipDefaultByProject,
           }),
           getWorkflow: async () => ({
             workflow: { slug: "traceai-traceai-story" },
@@ -232,7 +242,7 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
     );
   });
 
-  it("does not claim without a Cursor key", async () => {
+  it("claims without a Cursor key and does not nudge", async () => {
     await withCreateApp(
       { defaultAgentId: "bc-default-9", saveCursorKey: false },
       async ({ app, token, followUps, claimed, flush }) => {
@@ -249,7 +259,12 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
           }),
         });
         assert.equal(res.status, 201);
-        assert.deepEqual(claimed, []);
+        const body = (await res.json()) as {
+          claimed_agent_id?: string | null;
+        };
+        assert.equal(body.claimed_agent_id, "bc-default-9");
+        assert.equal(claimed.length, 1);
+        assert.equal(claimed[0]?.agentId, "bc-default-9");
         await flush();
         assert.deepEqual(followUps, []);
       },
@@ -367,6 +382,149 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
       },
     );
   });
+
+  it("create in project A nudges A's project default, not B's", async () => {
+    await withCreateApp(
+      {
+        saveCursorKey: true,
+        projects: ["alpha", "beta"],
+        ticketProject: "alpha",
+        defaultByProject: { alpha: "bc-alpha-1", beta: "bc-beta-9" },
+      },
+      async ({ app, token, followUps, claimed, flush }) => {
+        const res = await app.request("/v1/tickets", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            project: "alpha",
+            title: "Wish",
+            description: "A short wish for the backlog",
+          }),
+        });
+        assert.equal(res.status, 201, await res.clone().text());
+        const body = (await res.json()) as { claimed_agent_id?: string | null };
+        assert.equal(body.claimed_agent_id, "bc-alpha-1");
+        assert.equal(claimed[0]?.agentId, "bc-alpha-1");
+        await flush();
+        assert.equal(followUps[0]?.id, "bc-alpha-1");
+      },
+    );
+  });
+
+  it("create in project B does not use A's project default", async () => {
+    await withCreateApp(
+      {
+        saveCursorKey: true,
+        projects: ["alpha", "beta"],
+        ticketProject: "beta",
+        defaultByProject: { alpha: "bc-alpha-1", beta: "bc-beta-9" },
+      },
+      async ({ app, token, claimed, flush }) => {
+        const res = await app.request("/v1/tickets", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            project: "beta",
+            title: "Wish",
+            description: "A short wish for the backlog",
+          }),
+        });
+        assert.equal(res.status, 201, await res.clone().text());
+        const body = (await res.json()) as { claimed_agent_id?: string | null };
+        assert.equal(body.claimed_agent_id, "bc-beta-9");
+        assert.equal(claimed[0]?.agentId, "bc-beta-9");
+        await flush();
+      },
+    );
+  });
+
+  it("first empty project field copies the unique membership bc- and claims it", async () => {
+    await withCreateApp(
+      {
+        saveCursorKey: true,
+        membershipDefaultByProject: { traceai: "bc-copied-1" },
+      },
+      async ({ app, token, claimed, flush }) => {
+        const res = await app.request("/v1/tickets", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            project: "traceai",
+            title: "Wish",
+            description: "A short wish for the backlog",
+          }),
+        });
+        assert.equal(res.status, 201, await res.clone().text());
+        const body = (await res.json()) as { claimed_agent_id?: string | null };
+        assert.equal(body.claimed_agent_id, "bc-copied-1");
+        assert.equal(claimed[0]?.agentId, "bc-copied-1");
+        await flush();
+      },
+    );
+  });
+
+  it("empty project default and no unique membership bc- stays unclaimed", async () => {
+    await withCreateApp(
+      { saveCursorKey: true },
+      async ({ app, token, claimed, flush }) => {
+        const res = await app.request("/v1/tickets", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            project: "traceai",
+            title: "Wish",
+            description: "A short wish for the backlog",
+          }),
+        });
+        assert.equal(res.status, 201);
+        const body = (await res.json()) as { claimed_agent_id?: string | null };
+        assert.equal(body.claimed_agent_id, null);
+        assert.deepEqual(claimed, []);
+        await flush();
+      },
+    );
+  });
+
+  it("cleared project field ignores leftover membership defaults", async () => {
+    await withCreateApp(
+      {
+        saveCursorKey: true,
+        defaultByProject: { traceai: null },
+        membershipDefaultByProject: { traceai: "bc-old-membership" },
+      },
+      async ({ app, token, claimed, flush }) => {
+        const res = await app.request("/v1/tickets", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            project: "traceai",
+            title: "Wish",
+            description: "A short wish for the backlog",
+          }),
+        });
+        assert.equal(res.status, 201);
+        const body = (await res.json()) as { claimed_agent_id?: string | null };
+        assert.equal(body.claimed_agent_id, null);
+        assert.deepEqual(claimed, []);
+        await flush();
+      },
+    );
+  });
 });
 
 describe("POST /v1/tickets default-agent live resolver (TRA-124)", () => {
@@ -405,7 +563,6 @@ describe("POST /v1/tickets default-agent live resolver (TRA-124)", () => {
         name: "agent",
         scopes: [...DEFAULT_AGENT_SCOPES],
       });
-      store.setDefaultCursorAgentId(owner.id, "bc-live-1");
       store.putAgentApiKey({
         userId: owner.id,
         provider: "cursor",
@@ -435,6 +592,7 @@ describe("POST /v1/tickets default-agent live resolver (TRA-124)", () => {
           ...projectMemberStubs({
             email: "owner@example.com",
             projects: ["traceai"],
+            defaultByProject: { traceai: "bc-live-1" },
           }),
           getWorkflow: async () => ({
             workflow: { slug: "traceai-traceai-story" },
@@ -483,7 +641,7 @@ describe("POST /v1/tickets default-agent live resolver (TRA-124)", () => {
     }
   });
 
-  it("UI human-proxy create uses the personal user's key, not the BFF token user", async () => {
+  it("UI human-proxy create uses the project default id and the personal user's key", async () => {
     const dir = mkdtempSync(join(tmpdir(), "traceai-default-ui-"));
     const store = new AuthStore(join(dir, "auth.sqlite"));
     const jobs: Array<() => void> = [];
@@ -502,7 +660,6 @@ describe("POST /v1/tickets default-agent live resolver (TRA-124)", () => {
         name: "web",
         scopes: [...DEFAULT_AGENT_SCOPES],
       });
-      store.setDefaultCursorAgentId(person.id, "bc-alice-9");
       store.putAgentApiKey({
         userId: person.id,
         provider: "cursor",
@@ -539,6 +696,8 @@ describe("POST /v1/tickets default-agent live resolver (TRA-124)", () => {
             email: "bff@example.com",
             userSlug: "bff",
             projects: ["traceai"],
+            defaultByProject: { traceai: "bc-project-1" },
+            membershipDefaultByProject: { traceai: "bc-bff-ignored" },
           }),
           getTraceaiUser: async (slug: string) =>
             slug === "alice"
@@ -556,7 +715,12 @@ describe("POST /v1/tickets default-agent live resolver (TRA-124)", () => {
             {
               id: "id-traceai-bff",
               slug: "traceai-member-bff",
-              fields: { project: "traceai", user: "bff", role: "admin" as const },
+              fields: {
+                project: "traceai",
+                user: "bff",
+                role: "admin" as const,
+                default_cursor_agent_id: "bc-bff-ignored",
+              },
             },
             {
               id: "id-traceai-alice",
@@ -565,6 +729,7 @@ describe("POST /v1/tickets default-agent live resolver (TRA-124)", () => {
                 project: "traceai",
                 user: "alice",
                 role: "admin" as const,
+                default_cursor_agent_id: "bc-alice-9",
               },
             },
           ],
@@ -613,7 +778,7 @@ describe("POST /v1/tickets default-agent live resolver (TRA-124)", () => {
       for (const job of jobs) job();
       await new Promise((r) => setImmediate(r));
       assert.equal(fetchCalls.length, 1);
-      assert.match(fetchCalls[0]?.url ?? "", /bc-alice-9/);
+      assert.match(fetchCalls[0]?.url ?? "", /bc-project-1/);
       const aliceAuth = Buffer.from("key_alice_ui_9999:", "utf8").toString(
         "base64",
       );
@@ -622,6 +787,79 @@ describe("POST /v1/tickets default-agent live resolver (TRA-124)", () => {
       );
       assert.match(fetchCalls[0]?.auth ?? "", new RegExp(aliceAuth));
       assert.doesNotMatch(fetchCalls[0]?.auth ?? "", new RegExp(bffAuth));
+    } finally {
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("MCP admin-scope token without userSlug still claims the project default", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "traceai-default-mcp-"));
+    const store = new AuthStore(join(dir, "auth.sqlite"));
+    const claimed: Array<{ agentId: string }> = [];
+    try {
+      const user = store.createUser({
+        email: "operator@example.com",
+        name: "Joost",
+      });
+      const token = store.createToken({
+        userId: user.id,
+        name: "Joost",
+        scopes: [...DEFAULT_AGENT_SCOPES, "admin"],
+      });
+      const created = {
+        id: "id-mcp",
+        slug: "mcp-wish",
+        fields: ticketFields(),
+      };
+      const stubs = projectMemberStubs({
+        email: "nobody@example.com",
+        projects: ["traceai"],
+        defaultByProject: { traceai: "bc-project-default" },
+      });
+      const app = createApp({
+        authStore: store,
+        nudgeQueue: null,
+        service: {
+          ...stubs,
+          getWorkflow: async () => ({
+            workflow: { slug: "traceai-traceai-story" },
+            stages: [
+              { key: "backlog", name: "Backlog", transitions: ["in_refinement"] },
+            ],
+            workflow_document: { version: 1, stages: [] },
+          }),
+          createTicket: async () => created,
+          claimTicket: async (_slug: string, agentId: string) => {
+            claimed.push({ agentId });
+            return {
+              ...created,
+              fields: {
+                ...created.fields,
+                claimed_agent_id: agentId,
+                claimed_by_user_id: "",
+              },
+            };
+          },
+        } as never,
+        cursorCloud: null,
+      });
+      const res = await app.request("/v1/tickets", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token.token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          project: "traceai",
+          title: "Wish",
+          description: "A short wish for the backlog",
+        }),
+      });
+      assert.equal(res.status, 201, await res.clone().text());
+      const body = (await res.json()) as { claimed_agent_id?: string | null };
+      assert.equal(body.claimed_agent_id, "bc-project-default");
+      assert.equal(claimed[0]?.agentId, "bc-project-default");
     } finally {
       store.close();
       rmSync(dir, { recursive: true, force: true });

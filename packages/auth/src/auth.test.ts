@@ -1,9 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { AuthStore, generateRawToken, hashToken, hasScope } from "./index.js";
+
+const here = dirname(fileURLToPath(import.meta.url));
 
 describe("auth crypto", () => {
   it("hashes deterministically", () => {
@@ -92,32 +95,12 @@ describe("agent API keys", () => {
   });
 });
 
-describe("default Cursor agent id (TRA-122)", () => {
-  it("saves, replaces, and clears a plain-text agent id", () => {
-    const dir = mkdtempSync(join(tmpdir(), "traceai-auth-"));
-    const store = new AuthStore(join(dir, "test.sqlite"));
-    try {
-      const user = store.createUser({
-        email: "owner@example.com",
-        name: "Owner",
-      });
-      assert.equal(store.getDefaultCursorAgentId(user.id), null);
-      assert.equal(
-        store.setDefaultCursorAgentId(user.id, "bc-aaaa"),
-        "bc-aaaa",
-      );
-      assert.equal(store.getDefaultCursorAgentId(user.id), "bc-aaaa");
-      assert.equal(
-        store.setDefaultCursorAgentId(user.id, "  other-agent  "),
-        "other-agent",
-      );
-      assert.equal(store.getDefaultCursorAgentId(user.id), "other-agent");
-      assert.equal(store.setDefaultCursorAgentId(user.id, "  "), null);
-      assert.equal(store.getDefaultCursorAgentId(user.id), null);
-    } finally {
-      store.close();
-      rmSync(dir, { recursive: true, force: true });
-    }
+describe("TRA-128 drops users.default_cursor_agent_id", () => {
+  it("AuthStore no longer has a user-global default agent column or accessors", () => {
+    const source = readFileSync(join(here, "store.ts"), "utf8");
+    assert.doesNotMatch(source, /getDefaultCursorAgentId/);
+    assert.doesNotMatch(source, /setDefaultCursorAgentId/);
+    assert.match(source, /dropColumnIfExists\("users", "default_cursor_agent_id"\)/);
   });
 });
 

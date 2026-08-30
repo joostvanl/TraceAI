@@ -683,13 +683,20 @@ export class TraceApiClient {
         configured: boolean;
         last4: string | null;
       }>;
-      default_cursor_agent_id: string | null;
     }>("/v1/me/agent-apis", {}, { asHuman: Boolean(this.humanIdentityHeader) });
   }
 
-  putMyDefaultAgent(agentId: string) {
-    return this.request<{ agent_id: string | null }>(
-      "/v1/me/default-agent",
+  getProjectDefaultAgent(project: string) {
+    return this.request<{ agent_id: string | null; project: string }>(
+      `/v1/projects/${encodeURIComponent(project)}/default-agent`,
+      {},
+      { asHuman: Boolean(this.humanIdentityHeader) },
+    );
+  }
+
+  putProjectDefaultAgent(project: string, agentId: string) {
+    return this.request<{ agent_id: string | null; project: string }>(
+      `/v1/projects/${encodeURIComponent(project)}/default-agent`,
       { method: "PUT", body: JSON.stringify({ agent_id: agentId }) },
       { asHuman: Boolean(this.humanIdentityHeader) },
     );

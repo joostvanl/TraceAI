@@ -29,15 +29,18 @@ export function defaultAgentCreatePrompt(ticket: Ticket): string {
 }
 
 /**
- * After create: if the actor has a `bc-` default agent and a Cursor key, and
- * the ticket is on the workflow first stage, claim + fire-and-forget nudge.
- * Never throws — ticket create must stay 201.
+ * After create: if the ticket's project has a `bc-` default agent and the
+ * ticket is on the workflow first stage, claim it. Nudge only when a
+ * decryptable Cursor key exists. Never throws — ticket create must stay 201.
  */
 export async function claimAndNudgeDefaultAgentOnCreate(input: {
   ticket: Ticket;
   ownerUserId: string | null | undefined;
   authStore: AuthStore;
-  service: Pick<TraceService, "getWorkflow" | "claimTicket">;
+  service: Pick<
+    TraceService,
+    "getWorkflow" | "claimTicket" | "getProjectDefaultAgent"
+  >;
   cursorCloud?:
     | CursorCloudFollowUp
     | ((ticket: Ticket) => CursorCloudFollowUp | null)
@@ -50,12 +53,18 @@ export async function claimAndNudgeDefaultAgentOnCreate(input: {
 }): Promise<Ticket> {
   const log = input.log ?? ((message: string) => console.warn(message));
   const ownerUserId = input.ownerUserId?.trim() || "";
-  if (!ownerUserId) return input.ticket;
+  const project = input.ticket.fields.project?.trim() || "";
+  if (!project) return input.ticket;
 
   try {
-    const rawId = input.authStore.getDefaultCursorAgentId(ownerUserId);
+    const rawId = await input.service.getProjectDefaultAgent(project);
     const parsed = parseClaimedAgentId(rawId);
-    if (!parsed.ok || !parsed.value) return input.ticket;
+    if (!parsed.ok || !parsed.value) {
+      log(
+        `[traceai] default-agent create skipped for ${input.ticket.slug}: no_project_default`,
+      );
+      return input.ticket;
+    }
     if (claimedAgentKind(parsed.value) !== "cursor_cloud") return input.ticket;
 
     const workflowSlug = input.ticket.fields.workflow?.trim();
@@ -64,21 +73,10 @@ export async function claimAndNudgeDefaultAgentOnCreate(input: {
     const first = wf ? firstStageKey(wf.stages) : null;
     if (!first || input.ticket.fields.stage !== first) return input.ticket;
 
-    const key = resolveClaimerCursorApiKey(
-      input.authStore,
-      {
-        fields: {
-          ...input.ticket.fields,
-          claimed_by_user_id: ownerUserId,
-        },
-      } as Pick<Ticket, "fields">,
-    );
-    if (!key.ok) return input.ticket;
-
     const claimed = await input.service.claimTicket(
       input.ticket.slug,
       parsed.value,
-      ownerUserId,
+      ownerUserId || null,
     );
     // Aurora may persist claimed_agent_id but drop claimed_by_user_id (TRA-123).
     // Overlay the owner so cursorFollowUpForClaimer still decrypts the key.
@@ -91,13 +89,24 @@ export async function claimAndNudgeDefaultAgentOnCreate(input: {
       },
     };
 
+    const key = resolveClaimerCursorApiKey(
+      input.authStore,
+      {
+        fields: {
+          ...claimedForNudge.fields,
+          claimed_by_user_id: ownerUserId || claimedForNudge.fields.claimed_by_user_id,
+        },
+      } as Pick<Ticket, "fields">,
+    );
+    if (!key.ok) return claimed;
+
     const liveCursorCloud =
       input.cursorCloud !== undefined
         ? input.cursorCloud
         : (ticket: Ticket) =>
             cursorFollowUpForClaimer(input.authStore, ticket, {
               fetchImpl: input.cursorCloudFetch,
-              fallbackUserId: ownerUserId,
+              fallbackUserId: ownerUserId || undefined,
             });
 
     scheduleClaimedCloudNudges(
@@ -114,7 +123,7 @@ export async function claimAndNudgeDefaultAgentOnCreate(input: {
             DEFAULT_AGENT_CREATE_VERDICT,
             nudgeResult,
             input.now?.() ?? new Date(),
-            ownerUserId,
+            ownerUserId || null,
           );
         } catch (error) {
           log(

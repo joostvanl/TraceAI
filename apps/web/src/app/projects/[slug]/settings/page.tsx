@@ -5,6 +5,7 @@ import {
   relationSlug,
   type WorkflowDocument,
 } from "@traceai/core";
+import { ProjectDefaultAgentPanel } from "@/components/ProjectDefaultAgentPanel";
 import { ProjectMembersPanel } from "@/components/ProjectMembersPanel";
 import { WorkflowEditorPanel } from "@/components/WorkflowEditorPanel";
 import { WorkflowEditorToolbar } from "@/components/WorkflowEditorToolbar";
@@ -15,7 +16,7 @@ import { createTraceServerClient } from "@/lib/traceai-server";
 
 export const dynamic = "force-dynamic";
 
-type SettingsTab = "workflow" | "members";
+type SettingsTab = "workflow" | "members" | "default-agent";
 
 type PageProps = {
   params: Promise<{ slug: string }>;
@@ -34,7 +35,12 @@ export default async function ProjectSettingsPage({
 }: PageProps) {
   const { slug } = await params;
   const query = await searchParams;
-  const activeTab: SettingsTab = query.tab === "members" ? "members" : "workflow";
+  const activeTab: SettingsTab =
+    query.tab === "members"
+      ? "members"
+      : query.tab === "default-agent"
+        ? "default-agent"
+        : "workflow";
   const requestedWorkflow = firstQuery(query.workflow);
   const configured = await isLoginConfigured();
   if (!configured) redirect("/login");
@@ -177,6 +183,13 @@ export default async function ProjectSettingsPage({
         >
           Leden
         </Link>
+        <Link
+          href={`/projects/${slug}/settings?tab=default-agent`}
+          className={`settings-tab${activeTab === "default-agent" ? " settings-tab--active" : ""}`}
+          aria-current={activeTab === "default-agent" ? "page" : undefined}
+        >
+          Default agent
+        </Link>
       </nav>
 
       {loadError ? <p className="form-error">{loadError}</p> : null}
@@ -208,6 +221,21 @@ export default async function ProjectSettingsPage({
           ) : (
             <p className="muted">Geen default workflow geconfigureerd.</p>
           )}
+        </section>
+      ) : activeTab === "default-agent" ? (
+        <section className="settings-tab-panel">
+          <p className="muted">
+            Eén default Cursor Cloud-agent voor dit project. Nieuwe tickets op
+            de eerste workflow-stage wekken deze agent. Alleen project-admin of
+            platform-admin kan het id zetten of wissen.
+          </p>
+          <ProjectDefaultAgentPanel
+            projectSlug={slug}
+            legacy={identity.mode === "legacy"}
+            canWrite={
+              identity.is_platform_admin === true || membershipRole === "admin"
+            }
+          />
         </section>
       ) : (
         <section className="settings-tab-panel">
