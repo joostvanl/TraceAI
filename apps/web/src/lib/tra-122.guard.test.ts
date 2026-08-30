@@ -33,7 +33,11 @@ describe("TRA-128 default agent lives in Settings, not Agent APIs", () => {
     assert.match(panel, /placeholder="bc-…"/);
     assert.match(panel, /\/api\/projects\/\$\{encodeURIComponent\(projectSlug\)\}\/default-agent/);
     assert.match(panel, /Huidig: <code>\{agentId\}<\/code>/);
+    assert.match(panel, /canWrite/);
+    assert.match(panel, /Alleen lezen/);
+    assert.match(panel, /readOnly=\{!canWrite\}/);
     assert.doesNotMatch(panel, /slice\(0,\s*12\)/);
     assert.doesNotMatch(panel, /<select/);
+    assert.match(page, /canWrite=\{/);
   });
 });

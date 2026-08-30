@@ -186,6 +186,11 @@ export type ProjectFields = {
   project_key?: string;
   /** Next number to allocate for this project (1-based). */
   next_ticket_number?: number;
+  /**
+   * Project-owned default Cursor Cloud id (TRA-137). Plain text; empty = none.
+   * Absent until the first write (admin set/clear or first-empty-read copy).
+   */
+  default_cursor_agent_id?: string | null;
 };
 
 export type WorkflowFields = {
@@ -348,9 +353,9 @@ export type ProjectMembershipFields = {
   user: string;
   role: string;
   /**
-   * Per-membership default Cursor Cloud id (TRA-128). Plain text; empty = none.
-   * Only the membership owner may write this. Create-nudge reads the actor's
-   * row for the ticket's project.
+   * Unused after TRA-137 (was TRA-128 per-membership default). Left in Aurora
+   * so the first empty read of `project.default_cursor_agent_id` can copy a
+   * single distinct `bc-` value. Not written by Settings / MCP afterwards.
    */
   default_cursor_agent_id?: string | null;
 };

@@ -5,9 +5,11 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 export function ProjectDefaultAgentPanel({
   projectSlug,
   legacy,
+  canWrite,
 }: {
   projectSlug: string;
   legacy: boolean;
+  canWrite: boolean;
 }) {
   const [agentId, setAgentId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -45,6 +47,7 @@ export function ProjectDefaultAgentPanel({
 
   async function onSave(event: FormEvent) {
     event.preventDefault();
+    if (!canWrite) return;
     setBusy(true);
     setFormError(null);
     setNotice(null);
@@ -79,6 +82,7 @@ export function ProjectDefaultAgentPanel({
   }
 
   async function onClear() {
+    if (!canWrite) return;
     setBusy(true);
     setFormError(null);
     setNotice(null);
@@ -125,10 +129,15 @@ export function ProjectDefaultAgentPanel({
       ) : (
         <form onSubmit={(e) => void onSave(e)}>
           <p className="muted note">
-            Jouw Cursor Cloud-id (<code>bc-…</code>) voor <strong>dit</strong>{" "}
-            project. Nieuwe tickets op Backlog wekken deze agent. Los van de
-            API-key op Agent APIs.
+            Project-eigen Cursor Cloud-id (<code>bc-…</code>) voor{" "}
+            <strong>dit</strong> project. Nieuwe tickets op de eerste
+            workflow-stage wekken deze agent. Los van de API-key op Agent APIs.
           </p>
+          {canWrite ? null : (
+            <p className="muted note">
+              Alleen lezen: je ziet het id maar kunt het niet wijzigen.
+            </p>
+          )}
           {notice ? <p className="muted note">{notice}</p> : null}
           {agentId ? (
             <p className="muted">
@@ -146,25 +155,28 @@ export function ProjectDefaultAgentPanel({
               placeholder="bc-…"
               autoComplete="off"
               spellCheck={false}
-              disabled={busy}
+              disabled={busy || !canWrite}
+              readOnly={!canWrite}
             />
           </label>
           {formError ? <p className="create-ticket-error">{formError}</p> : null}
-          <div className="account-agent-api-actions">
-            <button type="submit" className="btn" disabled={busy}>
-              Opslaan
-            </button>
-            {agentId ? (
-              <button
-                type="button"
-                className="btn btn-small"
-                disabled={busy}
-                onClick={() => void onClear()}
-              >
-                Wissen
+          {canWrite ? (
+            <div className="account-agent-api-actions">
+              <button type="submit" className="btn" disabled={busy}>
+                Opslaan
               </button>
-            ) : null}
-          </div>
+              {agentId ? (
+                <button
+                  type="button"
+                  className="btn btn-small"
+                  disabled={busy}
+                  onClick={() => void onClear()}
+                >
+                  Wissen
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </form>
       )}
     </section>

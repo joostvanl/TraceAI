@@ -225,12 +225,16 @@ export default async function ProjectSettingsPage({
       ) : activeTab === "default-agent" ? (
         <section className="settings-tab-panel">
           <p className="muted">
-            Jouw default Cursor Cloud-agent voor dit project. Andere leden
-            hebben hun eigen default.
+            Eén default Cursor Cloud-agent voor dit project. Nieuwe tickets op
+            de eerste workflow-stage wekken deze agent. Alleen project-admin of
+            platform-admin kan het id zetten of wissen.
           </p>
           <ProjectDefaultAgentPanel
             projectSlug={slug}
             legacy={identity.mode === "legacy"}
+            canWrite={
+              identity.is_platform_admin === true || membershipRole === "admin"
+            }
           />
         </section>
       ) : (

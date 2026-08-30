@@ -168,7 +168,7 @@ describe("GET/PUT/DELETE /v1/me/agent-apis (TRA-114)", () => {
 
   it("rejects whitespace agent ids", async () => {
     await withApp(async ({ app, token }) => {
-      const res = await app.request("/v1/projects/traceai/me/default-agent", {
+      const res = await app.request("/v1/projects/traceai/default-agent", {
         method: "PUT",
         headers: personalHeaders(token, "alice"),
         body: JSON.stringify({ agent_id: "bc one" }),

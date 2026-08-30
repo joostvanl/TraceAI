@@ -1,5 +1,9 @@
 import type { ProjectRole } from "@traceai/core";
-import { NotFoundError } from "@traceai/core";
+import {
+  projectDefaultFieldState,
+  roleAtLeast,
+  uniqueMembershipBcDefault,
+} from "@traceai/core";
 
 /**
  * Service stubs that let a bearer token in a test resolve to a member of a
@@ -20,8 +24,17 @@ export function projectMemberStubs(input: {
   projects: string[];
   userSlug?: string;
   role?: ProjectRole;
-  /** Per-project membership default Cursor Cloud id (TRA-128). */
+  /**
+   * Project-owned default Cursor Cloud id (TRA-137). When set, the project
+   * field is already written (including `null` = cleared). When omitted, the
+   * field is absent so the first empty read may copy a membership `bc-`.
+   */
   defaultByProject?: Record<string, string | null>;
+  /** Leftover TRA-128 membership defaults, used only for first-empty-read copy. */
+  membershipDefaultByProject?: Record<string, string | null>;
+  isPlatformAdmin?: boolean;
+  /** When true, `assertProjectRole` checks `role` against `required`. */
+  enforceRoles?: boolean;
 }) {
   const userSlug = input.userSlug ?? "tester";
   const role = input.role ?? "admin";
@@ -33,9 +46,23 @@ export function projectMemberStubs(input: {
       user: userSlug,
       role,
       default_cursor_agent_id:
-        input.defaultByProject?.[project]?.trim() || null,
+        input.membershipDefaultByProject?.[project]?.trim() || null,
     },
   }));
+  const projectDefaults = new Map<
+    string,
+    { written: boolean; value: string | null }
+  >();
+  for (const project of input.projects) {
+    if (
+      input.defaultByProject &&
+      Object.prototype.hasOwnProperty.call(input.defaultByProject, project)
+    ) {
+      const raw = input.defaultByProject[project];
+      const state = projectDefaultFieldState(raw ?? "");
+      projectDefaults.set(project, { written: true, value: state.value });
+    }
+  }
   return {
     listTraceaiUsers: async () => [
       {
@@ -45,7 +72,7 @@ export function projectMemberStubs(input: {
           username: userSlug,
           email: input.email,
           status: "active",
-          is_platform_admin: false,
+          is_platform_admin: input.isPlatformAdmin === true,
         },
       },
     ],
@@ -57,32 +84,24 @@ export function projectMemberStubs(input: {
         ...m,
         fields: { ...m.fields },
       })),
-    getOwnMembershipDefaultAgent: async (
-      project: string,
-      user: string,
-    ): Promise<string | null> => {
-      const match = memberships.find(
-        (m) => m.fields.project === project && m.fields.user === user,
+    getProjectDefaultAgent: async (project: string): Promise<string | null> => {
+      const existing = projectDefaults.get(project);
+      if (existing?.written) return existing.value;
+      const copied = uniqueMembershipBcDefault(
+        memberships
+          .filter((m) => m.fields.project === project)
+          .map((m) => m.fields.default_cursor_agent_id),
       );
-      const value = match?.fields.default_cursor_agent_id?.trim() || "";
-      return value || null;
+      projectDefaults.set(project, { written: true, value: copied });
+      return copied;
     },
-    setOwnMembershipDefaultAgent: async (args: {
+    setProjectDefaultAgent: async (args: {
       project: string;
-      user: string;
       agentId: string;
     }): Promise<string | null> => {
-      const match = memberships.find(
-        (m) => m.fields.project === args.project && m.fields.user === args.user,
-      );
-      if (!match) {
-        throw new NotFoundError(
-          `Project membership not found for ${args.user} on ${args.project}`,
-        );
-      }
-      const value = args.agentId.trim();
-      match.fields.default_cursor_agent_id = value || null;
-      return value || null;
+      const value = args.agentId.trim() || null;
+      projectDefaults.set(args.project, { written: true, value });
+      return value;
     },
     setProjectMembership: async (args: {
       project: string;
@@ -110,6 +129,18 @@ export function projectMemberStubs(input: {
       return created;
     },
     listProjectAgents: async () => [],
-    assertProjectRole: async () => role,
+    assertProjectRole: async (args: {
+      projectSlug: string;
+      required: ProjectRole;
+      isPlatformAdmin?: boolean;
+    }) => {
+      if (args.isPlatformAdmin || input.isPlatformAdmin) return "platform_admin";
+      if (input.enforceRoles && !roleAtLeast(role, args.required)) {
+        throw new Error(
+          `Requires project role ${args.required} on ${args.projectSlug} (have ${role})`,
+        );
+      }
+      return role;
+    },
   };
 }

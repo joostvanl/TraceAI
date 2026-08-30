@@ -688,7 +688,7 @@ export class TraceApiClient {
 
   getProjectDefaultAgent(project: string) {
     return this.request<{ agent_id: string | null; project: string }>(
-      `/v1/projects/${encodeURIComponent(project)}/me/default-agent`,
+      `/v1/projects/${encodeURIComponent(project)}/default-agent`,
       {},
       { asHuman: Boolean(this.humanIdentityHeader) },
     );
@@ -696,7 +696,7 @@ export class TraceApiClient {
 
   putProjectDefaultAgent(project: string, agentId: string) {
     return this.request<{ agent_id: string | null; project: string }>(
-      `/v1/projects/${encodeURIComponent(project)}/me/default-agent`,
+      `/v1/projects/${encodeURIComponent(project)}/default-agent`,
       { method: "PUT", body: JSON.stringify({ agent_id: agentId }) },
       { asHuman: Boolean(this.humanIdentityHeader) },
     );

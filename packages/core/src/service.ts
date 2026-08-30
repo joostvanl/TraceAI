@@ -101,6 +101,10 @@ import {
   parseClaimedAgentId,
 } from "./claimed-agent.js";
 import {
+  projectDefaultFieldState,
+  uniqueMembershipBcDefault,
+} from "./project-default-agent.js";
+import {
   assertUniqueProjectAgentDisplayName,
   projectAgentSlug,
   trimDisplayName,
@@ -2743,59 +2747,62 @@ export class TraceService {
     return created;
   }
 
-  async getOwnMembershipDefaultAgent(
-    project: string,
-    userSlug: string,
-  ): Promise<string | null> {
-    const wantUser = userSlug.trim();
-    if (!project.trim() || !wantUser) return null;
+  /**
+   * Resolve the project-owned default Cursor Cloud id (TRA-137).
+   * When the project field has never been written, copy the single distinct
+   * membership `bc-` default (if any) and persist it. After that first write,
+   * membership defaults are never read again — including after an admin clear.
+   */
+  async getProjectDefaultAgent(projectSlug: string): Promise<string | null> {
+    await this.ensureReady();
+    const project = projectSlug.trim();
+    if (!project) throw new ValidationError("project is required");
+    const entry = await this.client.getEntryBySlug<Project>("project", project);
+    if (!entry) throw new NotFoundError(`Project not found: ${project}`);
+    const state = projectDefaultFieldState(entry.fields.default_cursor_agent_id);
+    if (state.written) return state.value;
+
     const memberships = await this.listProjectMemberships(project);
-    const match = memberships.find((m) => m.fields.user === wantUser);
-    const value = match?.fields.default_cursor_agent_id?.trim() || "";
-    return value || null;
+    const copied = uniqueMembershipBcDefault(
+      memberships.map((m) => m.fields.default_cursor_agent_id),
+    );
+    await this.persistProjectDefaultAgent(entry, copied ?? "");
+    if (!copied) {
+      console.warn(
+        `[traceai] no unique membership bc- default to copy for ${project}`,
+      );
+    }
+    return copied;
   }
 
   /**
-   * Write the actor's own membership default Cursor Cloud id (TRA-128).
-   * Empty `agentId` clears this membership only. Does not create a membership.
+   * Write the project-owned default Cursor Cloud id. Empty `agentId` clears
+   * this project only. After this write, membership defaults are ignored.
    */
-  async setOwnMembershipDefaultAgent(input: {
+  async setProjectDefaultAgent(input: {
     project: string;
-    user: string;
     agentId: string;
   }): Promise<string | null> {
     await this.ensureReady();
     const project = input.project.trim();
-    const user = input.user.trim();
-    if (!project || !user) {
-      throw new ValidationError("project and user are required");
-    }
-    const slug = membershipSlug(project, user);
-    const existing = await this.client.getEntryBySlug<ProjectMembership>(
-      PROJECT_MEMBERSHIP_CONTENT_TYPE,
-      slug,
-    );
-    if (!existing) {
-      throw new NotFoundError(
-        `Project membership not found for ${user} on ${project}`,
-      );
-    }
-    const current = this.normalizeMembershipRelations(existing);
+    if (!project) throw new ValidationError("project is required");
+    const entry = await this.client.getEntryBySlug<Project>("project", project);
+    if (!entry) throw new NotFoundError(`Project not found: ${project}`);
     const value = input.agentId.trim();
-    const updated = await this.client.updateEntry<ProjectMembership>(
-      PROJECT_MEMBERSHIP_CONTENT_TYPE,
-      existing.id,
-      {
-        fields: {
-          project: current.fields.project,
-          user: current.fields.user,
-          role: current.fields.role,
-          default_cursor_agent_id: value,
-        },
-      },
-    );
-    await this.ensurePublished(PROJECT_MEMBERSHIP_CONTENT_TYPE, updated);
+    await this.persistProjectDefaultAgent(entry, value);
     return value || null;
+  }
+
+  private async persistProjectDefaultAgent(
+    project: Project,
+    value: string,
+  ): Promise<void> {
+    const updated = await this.client.updateEntry<Project>(
+      "project",
+      project.id,
+      { fields: { default_cursor_agent_id: value } },
+    );
+    await this.ensurePublished("project", updated);
   }
 
   async removeProjectMembership(

@@ -1532,7 +1532,6 @@ export function createApp(deps: {
     const maybeClaimed = await claimAndNudgeDefaultAgentOnCreate({
       ticket,
       ownerUserId,
-      actorUserSlug: (await principalFor(c, deps.service)).userSlug,
       authStore: deps.authStore,
       service: deps.service,
       cursorCloud: deps.cursorCloud !== undefined ? cursorCloud : undefined,
@@ -2725,21 +2724,10 @@ export function createApp(deps: {
   });
 
   app.get(
-    "/v1/projects/:slug/me/default-agent",
+    "/v1/projects/:slug/default-agent",
     requireScope("projects:read"),
     async (c) => {
       const project = param(c, "slug");
-      const human = resolveHumanIdentity(c);
-      if (human && (human.mode !== "personal" || !human.slug)) {
-        return c.json(
-          {
-            message:
-              "API tokens require a personal TraceAI login (shared/legacy login cannot create tokens)",
-            code: "PERSONAL_LOGIN_REQUIRED",
-          },
-          403,
-        );
-      }
       const principal = await principalFor(c, deps.service);
       const denied = await enforceProjectRole(
         deps.service,
@@ -2750,31 +2738,18 @@ export function createApp(deps: {
       if (denied) {
         return c.json({ message: denied, code: "FORBIDDEN" }, 403);
       }
-      if (!principal.userSlug) {
-        return c.json(
-          {
-            message:
-              "API tokens require a personal TraceAI login (shared/legacy login cannot create tokens)",
-            code: "PERSONAL_LOGIN_REQUIRED",
-          },
-          403,
-        );
-      }
-      const agent_id = await deps.service.getOwnMembershipDefaultAgent(
-        project,
-        principal.userSlug,
-      );
+      const agent_id = await deps.service.getProjectDefaultAgent(project);
       return c.json({ agent_id, project });
     },
   );
 
   app.put(
-    "/v1/projects/:slug/me/default-agent",
+    "/v1/projects/:slug/default-agent",
     requireScope("projects:write"),
     async (c) => {
       const project = param(c, "slug");
       const human = resolveHumanIdentity(c);
-      if (human && (human.mode !== "personal" || !human.slug)) {
+      if (human && human.mode === "legacy") {
         return c.json(
           {
             message:
@@ -2789,20 +2764,10 @@ export function createApp(deps: {
         deps.service,
         principal,
         project,
-        requiredRoleForAction("read"),
+        requiredRoleForAction("manage_members"),
       );
       if (denied) {
         return c.json({ message: denied, code: "FORBIDDEN" }, 403);
-      }
-      if (!principal.userSlug) {
-        return c.json(
-          {
-            message:
-              "API tokens require a personal TraceAI login (shared/legacy login cannot create tokens)",
-            code: "PERSONAL_LOGIN_REQUIRED",
-          },
-          403,
-        );
       }
       const body = await c.req
         .json<{ agent_id?: string }>()
@@ -2820,16 +2785,15 @@ export function createApp(deps: {
       if (!parsed.ok) {
         return c.json({ message: parsed.message, code: "VALIDATION" }, 400);
       }
-      const saved = await deps.service.setOwnMembershipDefaultAgent({
+      const saved = await deps.service.setProjectDefaultAgent({
         project,
-        user: principal.userSlug,
         agentId: parsed.value,
       });
       audit(c, {
         action: "default_agent.save",
-        resourceType: "project_membership",
-        resourceId: membershipSlug(project, principal.userSlug),
-        meta: { project, agent_id: saved, user: principal.userSlug },
+        resourceType: "project",
+        resourceId: project,
+        meta: { project, agent_id: saved },
       });
       return c.json({ agent_id: saved, project });
     },

@@ -1,5 +1,6 @@
 export * from "./types.js";
 export * from "./claimed-agent.js";
+export * from "./project-default-agent.js";
 export * from "./project-agent.js";
 export * from "./cursor-cloud-agent.js";
 export * from "./trace-errors.js";
