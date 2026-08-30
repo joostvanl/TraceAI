@@ -96,7 +96,12 @@ function ticketEntry(input: {
 async function withApp(
   extra: Record<string, unknown>,
   fn: (app: ReturnType<typeof createApp>, token: string) => Promise<void>,
-  options: { email?: string; projects?: string[] } = {},
+  options: {
+    email?: string;
+    projects?: string[];
+    role?: "admin" | "editor" | "viewer";
+    enforceRoles?: boolean;
+  } = {},
 ) {
   const dir = mkdtempSync(join(tmpdir(), "traceai-project-agents-"));
   const store = new AuthStore(join(dir, "auth.sqlite"));
@@ -115,6 +120,8 @@ async function withApp(
           email,
           userSlug: "alice",
           projects: options.projects ?? ["traceai"],
+          role: options.role,
+          enforceRoles: options.enforceRoles,
         }),
         getProject: async (slug: string) =>
           slug === "traceai" || slug === "other"
@@ -333,6 +340,39 @@ describe("GET/PUT /v1/projects/:slug/agents (TRA-127)", () => {
         };
         assert.equal(body.claimed_agent_display_name, "Henk");
       },
+    );
+  });
+
+  it("viewer PUT is 403", async () => {
+    const agents = memoryAgents();
+    await withApp(
+      agents,
+      async (app, token) => {
+        const headers = {
+          ...authHeaders(token),
+          "x-traceai-human-proxy": PROXY_SECRET,
+          "x-traceai-human-identity": signHumanIdentity(
+            {
+              user: "alice",
+              slug: "alice",
+              display_name: "Alice",
+              is_platform_admin: false,
+              mode: "personal",
+            },
+            SESSION_SECRET,
+          ),
+        };
+        const res = await app.request("/v1/projects/traceai/agents", {
+          method: "PUT",
+          headers,
+          body: JSON.stringify({
+            cursor_agent_id: "bc-viewer-1",
+            display_name: "Henk",
+          }),
+        });
+        assert.equal(res.status, 403, await res.clone().text());
+      },
+      { role: "viewer", enforceRoles: true },
     );
   });
 
