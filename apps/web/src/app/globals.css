@@ -619,9 +619,34 @@ h2 {
   max-width: 100%;
 }
 
-.ticket-card:hover {
+.ticket-card:hover:not(.ticket-active) {
   border-color: #3d5266;
   color: inherit;
+}
+
+@keyframes ticket-active-border {
+  0%,
+  100% {
+    border-color: var(--border);
+  }
+  50% {
+    border-color: var(--accent);
+  }
+}
+
+.ticket-card.ticket-active {
+  animation: ticket-active-border 2.4s ease-in-out infinite;
+}
+
+.ticket-card.ticket-active:hover {
+  color: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ticket-card.ticket-active {
+    animation: none;
+    border-color: var(--accent);
+  }
 }
 
 .ticket-slot {

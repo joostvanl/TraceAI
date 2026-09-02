@@ -15,6 +15,7 @@ import {
   newestFirstCapped,
   remapStageForBoard,
 } from "@traceai/core";
+import { isActiveWorkStage } from "@/lib/active-work-stage";
 import { groupByStage, moveItem } from "@/lib/board-order";
 import {
   applyBoardTicketEvent,
@@ -411,6 +412,11 @@ export function LiveBoard({
             reorderEnabled &&
             stage.key === reorderableStageKey &&
             stage.key !== UNMAPPED_STAGE_KEY;
+          const activeColumn = isActiveWorkStage({
+            stageKey: stage.key,
+            requiresHumanApproval: stage.requiresHumanApproval === true,
+            lastStageKey,
+          });
           return (
             <section
               key={stage.key}
@@ -462,7 +468,7 @@ export function LiveBoard({
                       <Link
                         href={`/projects/${projectSlug}/tickets/${ticket.slug}`}
                         prefetch={false}
-                        className={`ticket-card${review ? ` ${review.cardClass}` : ""}${flashSlug === ticket.slug ? " ticket-flash" : ""}${cardReorderable ? " ticket-reorderable" : ""}${ticket.orphan ? " ticket-orphan" : ""}${isDragging ? " ticket-dragging" : ""}`}
+                        className={`ticket-card${review ? ` ${review.cardClass}` : ""}${activeColumn ? " ticket-active" : ""}${flashSlug === ticket.slug ? " ticket-flash" : ""}${cardReorderable ? " ticket-reorderable" : ""}${ticket.orphan ? " ticket-orphan" : ""}${isDragging ? " ticket-dragging" : ""}`}
                         draggable={cardReorderable}
                         onDragStart={
                           cardReorderable
