@@ -45,10 +45,10 @@ if [[ -f deploy/git-use-branch.sh ]]; then
   chmod +x deploy/git-use-branch.sh
   ./deploy/git-use-branch.sh "$ROOT" "$BRANCH"
 else
-  git -c protocol.version=1 config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
-  git -c protocol.version=1 fetch --prune origin "refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
-  git -c protocol.version=1 checkout -B "$BRANCH" "origin/${BRANCH}"
-  git -c protocol.version=1 pull --ff-only origin "$BRANCH"
+  git -c protocol.version=1 -c http.version=HTTP/1.1 config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
+  git -c protocol.version=1 -c http.version=HTTP/1.1 fetch --prune origin "refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
+  git -c protocol.version=1 -c http.version=HTTP/1.1 checkout -B "$BRANCH" "origin/${BRANCH}"
+  git -c protocol.version=1 -c http.version=HTTP/1.1 pull --ff-only origin "$BRANCH"
 fi
 chmod +x deploy/remote-update.sh deploy/deploy-traceai.sh
 [[ -f deploy/git-use-branch.sh ]] && chmod +x deploy/git-use-branch.sh
