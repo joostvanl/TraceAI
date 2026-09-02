@@ -350,6 +350,22 @@ export class TraceApiClient {
     );
   }
 
+  setTicketActivity(slug: string, text: string) {
+    return this.request<unknown>(
+      `/v1/tickets/${encodeURIComponent(slug)}/activity`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ text }),
+      },
+    );
+  }
+
+  listProjectActivity(project: string) {
+    return this.request<{
+      items: Array<{ slug: string; text: string; expires_at: string }>;
+    }>(`/v1/projects/${encodeURIComponent(project)}/activity`);
+  }
+
   listWorkflows(project?: string) {
     const params = new URLSearchParams();
     if (project) params.set("project", project);

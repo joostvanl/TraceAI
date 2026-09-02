@@ -17,6 +17,7 @@ services:
       TRACEAI_EVENTS_DB: /data/traceai-events.sqlite
       TRACEAI_NOTIFICATIONS_DB: /data/traceai-notifications.sqlite
       TRACEAI_NUDGE_QUEUE_DB: /data/traceai-nudge-queue.sqlite
+      TRACEAI_ACTIVITY_DB: /data/traceai-activity.sqlite
       # Same as web — verifies signed X-TraceAI-Human-Identity headers.
       TRACEAI_SESSION_SECRET: ${TRACEAI_SESSION_SECRET:-}
       TRACEAI_HUMAN_PROXY_SECRET: ${TRACEAI_HUMAN_PROXY_SECRET:-}

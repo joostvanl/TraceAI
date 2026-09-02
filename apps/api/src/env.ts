@@ -30,6 +30,7 @@ export type ApiEnv = {
   eventsPollMs: number;
   notificationsDbPath: string;
   nudgeQueueDbPath: string;
+  activityDbPath: string;
   auroraApiUrl: string;
   auroraToken: string;
   auroraWebsiteId?: string;
@@ -65,6 +66,9 @@ export function loadEnv(): ApiEnv {
     nudgeQueueDbPath:
       process.env.TRACEAI_NUDGE_QUEUE_DB ??
       resolve(root, "data", "traceai-nudge-queue.sqlite"),
+    activityDbPath:
+      process.env.TRACEAI_ACTIVITY_DB ??
+      resolve(root, "data", "traceai-activity.sqlite"),
     auroraApiUrl:
       process.env.AURORA_API_URL ??
       "https://aurora-api.joostvanleeuwaarden.com",

@@ -385,6 +385,8 @@ export type BoardTicketSnapshot = {
   orphan: boolean;
   claimedAgentId: string | null;
   claimedAgentDisplayName: string | null;
+  activity?: string | null;
+  activityExpiresAt?: string | null;
 };
 
 function ticketOrphan(pin: string, selectedWorkflow: string): boolean {
@@ -407,6 +409,8 @@ export function snapshotFromRow(
     workflow?: string | null;
     claimed_agent_id?: string | null;
     claimed_agent_display_name?: string | null;
+    activity?: string | null;
+    activity_expires_at?: string | null;
   },
   selectedWorkflow: string,
 ): BoardTicketSnapshot {
@@ -427,6 +431,8 @@ export function snapshotFromRow(
     orphan: ticketOrphan(workflow, selectedWorkflow),
     claimedAgentId: t.claimed_agent_id?.trim() || null,
     claimedAgentDisplayName: t.claimed_agent_display_name?.trim() || null,
+    activity: t.activity?.trim() || null,
+    activityExpiresAt: t.activity_expires_at?.trim() || null,
   };
 }
 
@@ -479,6 +485,18 @@ export async function listBoardTicketsViaTraceAI(
       claimed_agent_id?: string | null;
       claimed_agent_display_name?: string | null;
     }>;
+    let activityBySlug = new Map<
+      string,
+      { text: string; expires_at: string }
+    >();
+    try {
+      const activity = await client.listProjectActivity(projectSlug);
+      activityBySlug = new Map(
+        activity.items.map((row) => [row.slug, row]),
+      );
+    } catch {
+      activityBySlug = new Map();
+    }
     return rows
       .filter((t) =>
         ticketBelongsOnBoard({
@@ -488,7 +506,17 @@ export async function listBoardTicketsViaTraceAI(
           projectWorkflowSlugs: options.projectWorkflowSlugs,
         }),
       )
-      .map((t) => snapshotFromRow(t, options.selectedWorkflow));
+      .map((t) => {
+        const activity = activityBySlug.get(t.slug);
+        return snapshotFromRow(
+          {
+            ...t,
+            activity: activity?.text ?? null,
+            activity_expires_at: activity?.expires_at ?? null,
+          },
+          options.selectedWorkflow,
+        );
+      });
   } catch {
     return null;
   }

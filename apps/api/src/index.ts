@@ -4,6 +4,7 @@ import { cursorFollowUpForClaimer } from "./agent-api-keys.js";
 import { createAuthStore, createTraceService, loadEnv } from "./env.js";
 import { configureEventBus } from "./events.js";
 import { configureNotificationStore } from "./notifications.js";
+import { configureTicketActivityStore } from "./ticket-activity.js";
 import {
   configureNudgeQueueStore,
   startNudgeQueuePoller,
@@ -14,6 +15,7 @@ const authStore = createAuthStore(env);
 const service = createTraceService(env);
 configureEventBus({ dbPath: env.eventsDbPath, pollMs: env.eventsPollMs });
 configureNotificationStore(env.notificationsDbPath);
+configureTicketActivityStore(env.activityDbPath);
 const nudgeQueue = configureNudgeQueueStore(env.nudgeQueueDbPath);
 const app = createApp({ authStore, service, nudgeQueue });
 startNudgeQueuePoller({
@@ -35,4 +37,5 @@ serve({ fetch: app.fetch, port: env.port }, (info) => {
   console.log(`Events DB: ${env.eventsDbPath}`);
   console.log(`Notifications DB: ${env.notificationsDbPath}`);
   console.log(`Nudge queue DB: ${env.nudgeQueueDbPath}`);
+  console.log(`Activity DB: ${env.activityDbPath}`);
 });

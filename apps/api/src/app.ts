@@ -74,6 +74,10 @@ import {
 } from "./project-guard.js";
 import { getNotificationStore } from "./notifications.js";
 import {
+  ACTIVITY_MAX_CHARS,
+  getTicketActivityStore,
+} from "./ticket-activity.js";
+import {
   enqueueBusyCloudNudgeForVerdict,
   getNudgeQueueStore,
   type NudgeQueueStore,
@@ -1327,6 +1331,20 @@ export function createApp(deps: {
     },
   );
 
+  app.get(
+    "/v1/projects/:slug/activity",
+    requireScope("tickets:read"),
+    async (c) => {
+      const slug = param(c, "slug");
+      const items = getTicketActivityStore().getMany(slug).map((row) => ({
+        slug: row.ticket_slug,
+        text: row.text,
+        expires_at: row.expires_at,
+      }));
+      return c.json({ items });
+    },
+  );
+
   app.put(
     "/v1/projects/:slug/agents",
     requireScope("tickets:write"),
@@ -1652,6 +1670,74 @@ export function createApp(deps: {
       },
     });
     return c.json(mapped);
+  });
+
+  app.put("/v1/tickets/:slug/activity", requireScope("tickets:write"), async (c) => {
+    const existing = await deps.service.getTicket(param(c, "slug"));
+    if (!existing) {
+      return c.json({ message: "Ticket not found", code: "NOT_FOUND" }, 404);
+    }
+    const project = existing.ticket.fields.project;
+    const hidden = await denyUnlessProjectVisible(c, project, "Ticket not found");
+    if (hidden) return hidden;
+    const denied = await enforceProjectRole(
+      deps.service,
+      await principalFor(c, deps.service),
+      project,
+      requiredRoleForAction("write_tickets"),
+    );
+    if (denied) {
+      return c.json({ message: denied, code: "FORBIDDEN" }, 403);
+    }
+    if (!existing.ticket.fields.claimed_agent_id?.trim()) {
+      return c.json(
+        {
+          message: "Ticket must be claimed before setting activity",
+          code: "VALIDATION",
+        },
+        400,
+      );
+    }
+    const body = (await c.req.json().catch(() => ({}))) as {
+      text?: unknown;
+    };
+    if (typeof body.text !== "string") {
+      return c.json({ message: "text is required", code: "VALIDATION" }, 400);
+    }
+    const trimmed = body.text.trim();
+    if (trimmed.length > ACTIVITY_MAX_CHARS) {
+      return c.json(
+        {
+          message: `text must be at most ${ACTIVITY_MAX_CHARS} characters`,
+          code: "VALIDATION",
+        },
+        400,
+      );
+    }
+    const names = await loadProjectAgentNameMap(deps.service, project);
+    const claimId = existing.ticket.fields.claimed_agent_id.trim();
+    const mapped = mapTicket(existing.ticket, names.get(claimId) ?? null);
+    const row = getTicketActivityStore().set(
+      existing.ticket.slug,
+      project,
+      body.text,
+    );
+    publishTicketEvent(
+      ticketEventFromMapped("ticket.activity", mapped, {
+        activity: row?.text ?? null,
+        activity_expires_at: row?.expires_at ?? null,
+      }),
+    );
+    audit(c, {
+      action: "ticket.activity",
+      resourceType: "ticket",
+      resourceId: existing.ticket.slug,
+    });
+    return c.json({
+      slug: existing.ticket.slug,
+      activity: row?.text ?? null,
+      activity_expires_at: row?.expires_at ?? null,
+    });
   });
 
   app.post("/v1/tickets/reorder", requireScope("tickets:write"), async (c) => {

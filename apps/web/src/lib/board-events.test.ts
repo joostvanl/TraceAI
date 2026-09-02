@@ -139,5 +139,91 @@ describe("applyBoardTicketEvent", () => {
     assert.equal(next[0]?.claimedAgentId, "bc-abcdefghijklmno");
     assert.equal(next[0]?.claimedAgentDisplayName, "Henk");
     assert.equal(next[0]?.title, "Claimed (renamed)");
+    assert.equal(next[0]?.activity ?? null, null);
+  });
+
+  it("TRA-141: activity event updates an existing card only", () => {
+    const prev: BoardTicket[] = [
+      {
+        slug: "claimed",
+        title: "Claimed",
+        stage: "in_progress",
+        priority: "medium",
+        workflow: "standard-worker",
+        claimedAgentId: "bc-1",
+      },
+    ];
+    const next = applyBoardTicketEvent(
+      prev,
+      {
+        type: "ticket.activity",
+        project: "traceai",
+        ticket: {
+          slug: "claimed",
+          title: "Claimed",
+          stage: "in_progress",
+          project: "traceai",
+          workflow: "standard-worker",
+        },
+        activity: "nadenken",
+        activity_expires_at: "2099-01-01T00:00:00.000Z",
+      },
+      namedBoard,
+    );
+    assert.equal(next.length, 1);
+    assert.equal(next[0]?.activity, "nadenken");
+    assert.equal(next[0]?.claimedAgentId, "bc-1");
+  });
+
+  it("TRA-141: activity event does not invent a missing card", () => {
+    const next = applyBoardTicketEvent(
+      [],
+      {
+        type: "ticket.activity",
+        project: "traceai",
+        ticket: {
+          slug: "ghost",
+          title: "Ghost",
+          stage: "in_progress",
+          project: "traceai",
+          workflow: "standard-worker",
+        },
+        activity: "nadenken",
+        activity_expires_at: "2099-01-01T00:00:00.000Z",
+      },
+      namedBoard,
+    );
+    assert.equal(next.length, 0);
+  });
+
+  it("TRA-141: other events preserve previous activity", () => {
+    const prev: BoardTicket[] = [
+      {
+        slug: "claimed",
+        title: "Claimed",
+        stage: "in_progress",
+        priority: "medium",
+        workflow: "standard-worker",
+        activity: "wiki doorlezen",
+        activityExpiresAt: "2099-01-01T00:00:00.000Z",
+      },
+    ];
+    const next = applyBoardTicketEvent(
+      prev,
+      {
+        type: "ticket.updated",
+        project: "traceai",
+        ticket: {
+          slug: "claimed",
+          title: "Claimed (renamed)",
+          stage: "in_progress",
+          project: "traceai",
+          workflow: "standard-worker",
+        },
+      },
+      namedBoard,
+    );
+    assert.equal(next[0]?.activity, "wiki doorlezen");
+    assert.equal(next[0]?.title, "Claimed (renamed)");
   });
 });

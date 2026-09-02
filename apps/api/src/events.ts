@@ -8,7 +8,8 @@ export type TicketEventType =
   | "ticket.updated"
   | "ticket.transitioned"
   | "ticket.commented"
-  | "ticket.reviewed";
+  | "ticket.reviewed"
+  | "ticket.activity";
 
 export type TicketEventTicket = {
   slug: string;
@@ -35,6 +36,8 @@ export type TicketEvent = {
   ticket: TicketEventTicket;
   from_stage?: string;
   to_stage?: string;
+  activity?: string | null;
+  activity_expires_at?: string | null;
   at: string;
 };
 
@@ -282,7 +285,12 @@ export function ticketEventFromMapped(
     parent?: string | null;
     sort_order?: number | null;
   },
-  extra: Partial<Pick<TicketEvent, "from_stage" | "to_stage">> = {},
+  extra: Partial<
+    Pick<
+      TicketEvent,
+      "from_stage" | "to_stage" | "activity" | "activity_expires_at"
+    >
+  > = {},
 ): TicketEvent {
   return {
     type,

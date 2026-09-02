@@ -19,6 +19,7 @@ import { isActiveWorkStage } from "@/lib/active-work-stage";
 import { groupByStage, moveItem } from "@/lib/board-order";
 import {
   applyBoardTicketEvent,
+  visibleBoardActivity,
   type BoardTicket,
   type BoardTicketEvent,
 } from "@/lib/board-events";
@@ -106,6 +107,7 @@ export function LiveBoard({
   canReorder = false,
 }: Props) {
   const [tickets, setTickets] = useState<BoardTicket[]>(initialTickets);
+  const [activityClock, setActivityClock] = useState(() => Date.now());
   const [flashSlug, setFlashSlug] = useState<string | null>(null);
   const [liveState, setLiveState] = useState<"connecting" | "live" | "offline">(
     "connecting",
@@ -173,6 +175,18 @@ export function LiveBoard({
   }, [initialTickets]);
 
   useEffect(() => {
+    const expiries = tickets
+      .map((t) => t.activityExpiresAt)
+      .filter((iso): iso is string => Boolean(iso))
+      .map((iso) => Date.parse(iso))
+      .filter((ms) => ms > activityClock);
+    if (expiries.length === 0) return;
+    const delay = Math.max(0, Math.min(...expiries) - Date.now());
+    const id = setTimeout(() => setActivityClock(Date.now()), delay);
+    return () => clearTimeout(id);
+  }, [tickets, activityClock]);
+
+  useEffect(() => {
     if (!eventsUrl) {
       setLiveState("offline");
       return;
@@ -219,6 +233,7 @@ export function LiveBoard({
     source.addEventListener("ticket.transitioned", applyEvent);
     source.addEventListener("ticket.commented", applyEvent);
     source.addEventListener("ticket.reviewed", applyEvent);
+    source.addEventListener("ticket.activity", applyEvent);
 
     source.onopen = () => setLiveState("live");
     source.onerror = () => setLiveState("offline");
@@ -452,6 +467,10 @@ export function LiveBoard({
                     ticket.claimedAgentId,
                     ticket.claimedAgentDisplayName,
                   );
+                  const activityText = visibleBoardActivity(
+                    ticket,
+                    new Date(activityClock),
+                  );
                   const isDragging = draggingSlug === ticket.slug;
                   const cardReorderable =
                     isReorderColumn && !ticket.orphan && !persisting;
@@ -522,6 +541,9 @@ export function LiveBoard({
                             </span>
                           ) : null}
                         </div>
+                        {activityText ? (
+                          <p className="ticket-activity">{activityText}</p>
+                        ) : null}
                       </Link>
                     </div>
                   );
