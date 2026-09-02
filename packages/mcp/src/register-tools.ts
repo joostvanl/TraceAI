@@ -423,6 +423,26 @@ export function registerTraceAiTools(
   );
 
   server.tool(
+    "set_ticket_activity",
+    "Set a short temporary activity line on a live-board card (not a comment; empty text clears; max 80 characters; TTL 120s). The ticket must already be claimed. Any agent with ticket write access may set it (subagents while the orchestrator holds the claim).",
+    {
+      ticket: z.string().describe("Ticket slug or TRA-n"),
+      text: z
+        .string()
+        .describe(
+          "Short free-text line (trimmed, max 80). Empty or whitespace clears the line.",
+        ),
+    },
+    async ({ ticket, text }) => {
+      try {
+        return okWrite(await client.setTicketActivity(ticket, text), apiBase);
+      } catch (error) {
+        return fail(error);
+      }
+    },
+  );
+
+  server.tool(
     "add_comment",
     "Add a Markdown comment to a ticket (author comes from TraceAI token)",
     {

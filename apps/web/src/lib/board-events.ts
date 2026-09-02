@@ -24,6 +24,9 @@ export type BoardTicket = {
   claimedAgentId?: string | null;
   /** Project-level weergavenaam when mapped (TRA-127). Not live-updated via SSE. */
   claimedAgentDisplayName?: string | null;
+  /** Temporary board-only activity line (TRA-141). */
+  activity?: string | null;
+  activityExpiresAt?: string | null;
 };
 
 export type BoardTicketEvent = {
@@ -43,8 +46,25 @@ export type BoardTicketEvent = {
     review_state?: string | null;
     sort_order?: number | null;
   };
+  activity?: string | null;
+  activity_expires_at?: string | null;
   at?: string;
 };
+
+export function visibleBoardActivity(
+  ticket: Pick<BoardTicket, "activity" | "activityExpiresAt">,
+  now: Date = new Date(),
+): string | null {
+  const text = ticket.activity?.trim() || "";
+  if (!text) return null;
+  if (
+    ticket.activityExpiresAt &&
+    Date.parse(ticket.activityExpiresAt) <= now.getTime()
+  ) {
+    return null;
+  }
+  return text;
+}
 
 export function applyBoardTicketEvent(
   prev: BoardTicket[],
@@ -60,8 +80,26 @@ export function applyBoardTicketEvent(
   if (!event.ticket?.slug) return prev;
   if (event.type === "ticket.commented") return prev;
 
-  const without = prev.filter((t) => t.slug !== event.ticket.slug);
   const previous = prev.find((t) => t.slug === event.ticket.slug);
+  if (event.type === "ticket.activity") {
+    if (!previous) return prev;
+    const expired =
+      Boolean(event.activity_expires_at) &&
+      Date.parse(event.activity_expires_at ?? "") <= Date.now();
+    const text =
+      expired || !event.activity?.trim() ? null : event.activity.trim();
+    return prev.map((t) =>
+      t.slug === event.ticket.slug
+        ? {
+            ...t,
+            activity: text,
+            activityExpiresAt: text ? event.activity_expires_at ?? null : null,
+          }
+        : t,
+    );
+  }
+
+  const without = prev.filter((t) => t.slug !== event.ticket.slug);
   const workflow = event.ticket.workflow ?? previous?.workflow ?? "";
   const belongs = ticketBelongsOnBoard({
     ticketWorkflow: workflow,
@@ -98,6 +136,8 @@ export function applyBoardTicketEvent(
     orphan: workflow !== options.selectedWorkflow,
     claimedAgentId: previous?.claimedAgentId ?? null,
     claimedAgentDisplayName: previous?.claimedAgentDisplayName ?? null,
+    activity: previous?.activity ?? null,
+    activityExpiresAt: previous?.activityExpiresAt ?? null,
   };
   return [...without, next];
 }
