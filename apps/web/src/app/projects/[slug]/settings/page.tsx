@@ -5,6 +5,7 @@ import {
   relationSlug,
   type WorkflowDocument,
 } from "@traceai/core";
+import { ProjectAgentsPanel } from "@/components/ProjectAgentsPanel";
 import { ProjectDefaultAgentPanel } from "@/components/ProjectDefaultAgentPanel";
 import { ProjectMembersPanel } from "@/components/ProjectMembersPanel";
 import { WorkflowEditorPanel } from "@/components/WorkflowEditorPanel";
@@ -16,7 +17,7 @@ import { createTraceServerClient } from "@/lib/traceai-server";
 
 export const dynamic = "force-dynamic";
 
-type SettingsTab = "workflow" | "members" | "default-agent";
+type SettingsTab = "workflow" | "members" | "default-agent" | "agents";
 
 type PageProps = {
   params: Promise<{ slug: string }>;
@@ -40,7 +41,9 @@ export default async function ProjectSettingsPage({
       ? "members"
       : query.tab === "default-agent"
         ? "default-agent"
-        : "workflow";
+        : query.tab === "agents"
+          ? "agents"
+          : "workflow";
   const requestedWorkflow = firstQuery(query.workflow);
   const configured = await isLoginConfigured();
   if (!configured) redirect("/login");
@@ -190,6 +193,13 @@ export default async function ProjectSettingsPage({
         >
           Default agent
         </Link>
+        <Link
+          href={`/projects/${slug}/settings?tab=agents`}
+          className={`settings-tab${activeTab === "agents" ? " settings-tab--active" : ""}`}
+          aria-current={activeTab === "agents" ? "page" : undefined}
+        >
+          Agents
+        </Link>
       </nav>
 
       {loadError ? <p className="form-error">{loadError}</p> : null}
@@ -234,6 +244,22 @@ export default async function ProjectSettingsPage({
             legacy={identity.mode === "legacy"}
             canWrite={
               identity.is_platform_admin === true || membershipRole === "admin"
+            }
+          />
+        </section>
+      ) : activeTab === "agents" ? (
+        <section className="settings-tab-panel">
+          <p className="muted">
+            Weergavenaam per Cursor Cloud-id voor dit project. Editor of
+            project-admin kan opslaan; viewers zien de lijst alleen-lezen.
+          </p>
+          <ProjectAgentsPanel
+            projectSlug={slug}
+            legacy={identity.mode === "legacy"}
+            canWrite={
+              identity.is_platform_admin === true ||
+              membershipRole === "admin" ||
+              membershipRole === "editor"
             }
           />
         </section>
