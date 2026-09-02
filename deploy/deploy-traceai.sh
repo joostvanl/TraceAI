@@ -95,17 +95,17 @@ if [[ -d "$APP_DIR/.git" ]]; then
     chmod +x "$APP_DIR/deploy/git-use-branch.sh"
     "$APP_DIR/deploy/git-use-branch.sh" "$APP_DIR" "$BRANCH"
   else
-    git -C "$APP_DIR" config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
-    git -C "$APP_DIR" fetch --prune origin "refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
-    git -C "$APP_DIR" checkout -B "$BRANCH" "origin/${BRANCH}"
-    git -C "$APP_DIR" pull --ff-only origin "$BRANCH"
+    git -C "$APP_DIR" -c protocol.version=1 -c http.version=HTTP/1.1 config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
+    git -C "$APP_DIR" -c protocol.version=1 -c http.version=HTTP/1.1 fetch --prune origin "refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
+    git -C "$APP_DIR" -c protocol.version=1 -c http.version=HTTP/1.1 checkout -B "$BRANCH" "origin/${BRANCH}"
+    git -C "$APP_DIR" -c protocol.version=1 -c http.version=HTTP/1.1 pull --ff-only origin "$BRANCH"
   fi
 elif [[ -e "$APP_DIR" ]] && [[ -n "$(ls -A "$APP_DIR" 2>/dev/null)" ]]; then
   fail "$APP_DIR exists but is not a git checkout. Move/remove it once, then retry."
 else
   log "Cloning $REPO_URL (all branches — testhost must be able to switch to test)"
   rm -rf "$APP_DIR"
-  git clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
+  git -c protocol.version=1 -c http.version=HTTP/1.1 clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
 fi
 
 install -m 600 "$ENV_FILE" "$APP_DIR/deploy/.env"
