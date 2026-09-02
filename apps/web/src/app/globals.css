@@ -619,6 +619,17 @@ h2 {
   max-width: 100%;
 }
 
+.ticket-card .ticket-activity {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ticket-card:hover:not(.ticket-active) {
   border-color: #3d5266;
   color: inherit;
