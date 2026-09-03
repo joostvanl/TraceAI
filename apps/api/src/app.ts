@@ -25,6 +25,8 @@ import {
   ValidationError,
   WorkflowValidationError,
   wikiLogicalSlug,
+  isLiveBoardActivityEnabled,
+  withLiveBoardActivityPolicy,
   type CursorCloudFollowUp,
   type FieldEdit,
   type ProjectRole,
@@ -1078,12 +1080,21 @@ export function createApp(deps: {
     if (!result) {
       return c.json({ message: "Project not found", code: "NOT_FOUND" }, 404);
     }
+    const enabled = isLiveBoardActivityEnabled(
+      result.project.fields.require_live_board_activity,
+    );
+    const agent_policy = result.workflow_document
+      ? withLiveBoardActivityPolicy(
+          result.workflow_document.agent_policy,
+          enabled,
+        )
+      : null;
     return c.json({
       ...mapProject(result.project),
-      agent_playbook: result.workflow_document
+      agent_playbook: result.workflow_document && agent_policy
         ? {
-            summary: result.workflow_document.agent_policy.summary,
-            agent_policy: result.workflow_document.agent_policy,
+            summary: agent_policy.summary,
+            agent_policy,
             stages: result.workflow_document.stages,
           }
         : null,
@@ -1092,7 +1103,7 @@ export function createApp(deps: {
             slug: result.workflow.slug,
             name: result.workflow.fields.name,
             stages: result.stages,
-            agent_policy: result.workflow_document?.agent_policy ?? null,
+            agent_policy,
           }
         : null,
     });
@@ -2348,10 +2359,17 @@ export function createApp(deps: {
       "Workflow not found",
     );
     if (hidden) return hidden;
+    const projectSlug = relationSlug(result.workflow.fields.project);
+    const enabled = projectSlug
+      ? await deps.service.getProjectLiveBoardActivity(projectSlug)
+      : false;
     return c.json({
       ...mapWorkflow(result.workflow),
       stages: result.stages,
-      agent_policy: result.workflow_document.agent_policy,
+      agent_policy: withLiveBoardActivityPolicy(
+        result.workflow_document.agent_policy,
+        enabled,
+      ),
       workflow_document: result.workflow_document,
     });
   });
@@ -2882,6 +2900,78 @@ export function createApp(deps: {
         meta: { project, agent_id: saved },
       });
       return c.json({ agent_id: saved, project });
+    },
+  );
+
+  app.get(
+    "/v1/projects/:slug/live-board-activity",
+    requireScope("projects:read"),
+    async (c) => {
+      const project = param(c, "slug");
+      const principal = await principalFor(c, deps.service);
+      const denied = await enforceProjectRole(
+        deps.service,
+        principal,
+        project,
+        requiredRoleForAction("read"),
+      );
+      if (denied) {
+        return c.json({ message: denied, code: "FORBIDDEN" }, 403);
+      }
+      const enabled = await deps.service.getProjectLiveBoardActivity(project);
+      return c.json({ enabled, project });
+    },
+  );
+
+  app.put(
+    "/v1/projects/:slug/live-board-activity",
+    requireScope("projects:write"),
+    async (c) => {
+      const project = param(c, "slug");
+      const human = resolveHumanIdentity(c);
+      if (human && human.mode === "legacy") {
+        return c.json(
+          {
+            message:
+              "API tokens require a personal TraceAI login (shared/legacy login cannot create tokens)",
+            code: "PERSONAL_LOGIN_REQUIRED",
+          },
+          403,
+        );
+      }
+      const principal = await principalFor(c, deps.service);
+      const denied = await enforceProjectRole(
+        deps.service,
+        principal,
+        project,
+        requiredRoleForAction("manage_members"),
+      );
+      if (denied) {
+        return c.json({ message: denied, code: "FORBIDDEN" }, 403);
+      }
+      const body = await c.req
+        .json<{ enabled?: unknown }>()
+        .catch(() => ({} as { enabled?: unknown }));
+      if (typeof body.enabled !== "boolean") {
+        return c.json(
+          {
+            message: "enabled must be a boolean",
+            code: "VALIDATION",
+          },
+          400,
+        );
+      }
+      const enabled = await deps.service.setProjectLiveBoardActivity({
+        project,
+        enabled: body.enabled,
+      });
+      audit(c, {
+        action: "live_board_activity.save",
+        resourceType: "project",
+        resourceId: project,
+        meta: { project, enabled },
+      });
+      return c.json({ enabled, project });
     },
   );
 

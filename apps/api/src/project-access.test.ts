@@ -385,6 +385,7 @@ function contentService(options: { memberships?: Array<[string, string]> } = {})
         workflow_document: { version: 1, agent_policy: {}, stages: [] },
       };
     },
+    getProjectLiveBoardActivity: async () => false,
   } as never;
 }
 

@@ -718,6 +718,22 @@ export class TraceApiClient {
     );
   }
 
+  getProjectLiveBoardActivity(project: string) {
+    return this.request<{ enabled: boolean; project: string }>(
+      `/v1/projects/${encodeURIComponent(project)}/live-board-activity`,
+      {},
+      { asHuman: Boolean(this.humanIdentityHeader) },
+    );
+  }
+
+  putProjectLiveBoardActivity(project: string, enabled: boolean) {
+    return this.request<{ enabled: boolean; project: string }>(
+      `/v1/projects/${encodeURIComponent(project)}/live-board-activity`,
+      { method: "PUT", body: JSON.stringify({ enabled }) },
+      { asHuman: Boolean(this.humanIdentityHeader) },
+    );
+  }
+
   putMyAgentApi(provider: string, apiKey: string) {
     return this.request<{
       provider: string;
