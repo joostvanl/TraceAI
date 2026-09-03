@@ -104,6 +104,7 @@ import {
   projectDefaultFieldState,
   uniqueMembershipBcDefault,
 } from "./project-default-agent.js";
+import { isLiveBoardActivityEnabled } from "./live-board-activity.js";
 import {
   assertUniqueProjectAgentDisplayName,
   projectAgentSlug,
@@ -2803,6 +2804,38 @@ export class TraceService {
       { fields: { default_cursor_agent_id: value } },
     );
     await this.ensurePublished("project", updated);
+  }
+
+  /**
+   * Project Settings toggle (TRA-142). Missing field = off.
+   * Only the stored string `true` is on.
+   */
+  async getProjectLiveBoardActivity(projectSlug: string): Promise<boolean> {
+    await this.ensureReady();
+    const project = projectSlug.trim();
+    if (!project) throw new ValidationError("project is required");
+    const entry = await this.client.getEntryBySlug<Project>("project", project);
+    if (!entry) throw new NotFoundError(`Project not found: ${project}`);
+    return isLiveBoardActivityEnabled(entry.fields.require_live_board_activity);
+  }
+
+  async setProjectLiveBoardActivity(input: {
+    project: string;
+    enabled: boolean;
+  }): Promise<boolean> {
+    await this.ensureReady();
+    const project = input.project.trim();
+    if (!project) throw new ValidationError("project is required");
+    if (typeof input.enabled !== "boolean") {
+      throw new ValidationError("enabled must be a boolean");
+    }
+    const entry = await this.client.getEntryBySlug<Project>("project", project);
+    if (!entry) throw new NotFoundError(`Project not found: ${project}`);
+    const updated = await this.client.updateEntry<Project>("project", entry.id, {
+      fields: { require_live_board_activity: input.enabled ? "true" : "" },
+    });
+    await this.ensurePublished("project", updated);
+    return input.enabled;
   }
 
   async removeProjectMembership(

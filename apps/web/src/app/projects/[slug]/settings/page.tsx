@@ -7,6 +7,7 @@ import {
 } from "@traceai/core";
 import { ProjectAgentsPanel } from "@/components/ProjectAgentsPanel";
 import { ProjectDefaultAgentPanel } from "@/components/ProjectDefaultAgentPanel";
+import { ProjectFeaturesPanel } from "@/components/ProjectFeaturesPanel";
 import { ProjectMembersPanel } from "@/components/ProjectMembersPanel";
 import { WorkflowEditorPanel } from "@/components/WorkflowEditorPanel";
 import { WorkflowEditorToolbar } from "@/components/WorkflowEditorToolbar";
@@ -17,7 +18,12 @@ import { createTraceServerClient } from "@/lib/traceai-server";
 
 export const dynamic = "force-dynamic";
 
-type SettingsTab = "workflow" | "members" | "default-agent" | "agents";
+type SettingsTab =
+  | "workflow"
+  | "members"
+  | "default-agent"
+  | "agents"
+  | "features";
 
 type PageProps = {
   params: Promise<{ slug: string }>;
@@ -43,7 +49,9 @@ export default async function ProjectSettingsPage({
         ? "default-agent"
         : query.tab === "agents"
           ? "agents"
-          : "workflow";
+          : query.tab === "features"
+            ? "features"
+            : "workflow";
   const requestedWorkflow = firstQuery(query.workflow);
   const configured = await isLoginConfigured();
   if (!configured) redirect("/login");
@@ -200,6 +208,13 @@ export default async function ProjectSettingsPage({
         >
           Agents
         </Link>
+        <Link
+          href={`/projects/${slug}/settings?tab=features`}
+          className={`settings-tab${activeTab === "features" ? " settings-tab--active" : ""}`}
+          aria-current={activeTab === "features" ? "page" : undefined}
+        >
+          Functies
+        </Link>
       </nav>
 
       {loadError ? <p className="form-error">{loadError}</p> : null}
@@ -260,6 +275,20 @@ export default async function ProjectSettingsPage({
               identity.is_platform_admin === true ||
               membershipRole === "admin" ||
               membershipRole === "editor"
+            }
+          />
+        </section>
+      ) : activeTab === "features" ? (
+        <section className="settings-tab-panel">
+          <p className="muted">
+            Productfuncties voor dit project. Alleen project-admin of
+            platform-admin kan opslaan; anderen zien de stand alleen-lezen.
+          </p>
+          <ProjectFeaturesPanel
+            projectSlug={slug}
+            legacy={identity.mode === "legacy"}
+            canWrite={
+              identity.is_platform_admin === true || membershipRole === "admin"
             }
           />
         </section>

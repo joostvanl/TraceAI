@@ -103,6 +103,11 @@ export function projectMemberStubs(input: {
       projectDefaults.set(args.project, { written: true, value });
       return value;
     },
+    getProjectLiveBoardActivity: async () => false,
+    setProjectLiveBoardActivity: async (args: {
+      project: string;
+      enabled: boolean;
+    }) => args.enabled,
     setProjectMembership: async (args: {
       project: string;
       user: string;
