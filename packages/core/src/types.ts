@@ -191,6 +191,11 @@ export type ProjectFields = {
    * Absent until the first write (admin set/clear or first-empty-read copy).
    */
   default_cursor_agent_id?: string | null;
+  /**
+   * Project Settings toggle (TRA-142). Only the string `true` is on.
+   * Missing / empty / anything else is off. Not a workflow-document field.
+   */
+  require_live_board_activity?: string | null;
 };
 
 export type WorkflowFields = {
