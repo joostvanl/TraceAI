@@ -104,3 +104,18 @@ export function cloudCreateWakeupPrompt(input: {
     `then follow the workflow playbook for that stage. Do not wait for chat.`
   );
 }
+
+/** First-run prompt for a newly created per-ticket Cloud agent (TRA-149). */
+export function cloudPerTicketCreatePrompt(input: {
+  ticketKey: string | null | undefined;
+  slug: string;
+  stage: string;
+}): string {
+  const key = input.ticketKey?.trim() || input.slug;
+  return (
+    `New ticket ${key} (${input.slug}) was created and landed on ${input.stage}. ` +
+    `You are already claimed for this ticket. Call TraceAI get_ticket immediately, then follow ` +
+    `the workflow playbook for ${input.stage}. Do not wait for chat. Never call claim_ticket, ` +
+    `and do not allow subagents to call claim_ticket.`
+  );
+}
