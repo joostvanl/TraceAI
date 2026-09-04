@@ -542,7 +542,17 @@ export function LiveBoard({
                           ) : null}
                         </div>
                         {activityText ? (
-                          <p className="ticket-activity">{activityText}</p>
+                          <div className="ticket-activity-wrap">
+                            <p className="ticket-activity">{activityText}</p>
+                            <div
+                              id={`${ticket.slug}-activity-tooltip`}
+                              className="ticket-activity-tooltip"
+                              role="tooltip"
+                              aria-hidden="true"
+                            >
+                              {activityText}
+                            </div>
+                          </div>
                         ) : null}
                       </Link>
                     </div>

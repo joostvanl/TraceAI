@@ -24,6 +24,29 @@ describe("TRA-141 board-only activity", () => {
     assert.doesNotMatch(css, /\.board-scroller\s*\{[^}]*overflow-x:\s*hidden/);
   });
 
+  it("shows the complete activity in a hover and focus tooltip", () => {
+    const board = read(join("../components/LiveBoard.tsx"));
+    const css = read(join("../app/globals.css"));
+    assert.match(board, /className="ticket-activity-wrap"/);
+    assert.match(board, /className="ticket-activity-tooltip"/);
+    assert.match(board, /role="tooltip"/);
+    assert.doesNotMatch(board, /ticket-activity-wrap"[^>]*tabIndex/);
+    assert.match(css, /\.ticket-card \.ticket-activity-tooltip/);
+    assert.match(css, /\.ticket-activity-wrap:hover \.ticket-activity-tooltip/);
+    assert.match(
+      css,
+      /\.ticket-card:focus-visible \.ticket-activity-tooltip/,
+    );
+    assert.match(
+      css,
+      /\.ticket-card \.ticket-activity\s*\{[^}]*text-overflow:\s*ellipsis/s,
+    );
+    assert.match(
+      css,
+      /\.ticket-card \.ticket-activity\s*\{[^}]*white-space:\s*nowrap/s,
+    );
+  });
+
   it("ticket detail, list, and inbox do not render ticket-activity", () => {
     const detail = read(
       join("../app/projects/[slug]/tickets/[ticketSlug]/page.tsx"),
