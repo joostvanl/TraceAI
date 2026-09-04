@@ -28,14 +28,14 @@ describe("TRA-141 board-only activity", () => {
     const board = read(join("../components/LiveBoard.tsx"));
     const css = read(join("../app/globals.css"));
     assert.match(board, /className="ticket-activity-wrap"/);
-    assert.match(board, /tabIndex=\{0\}/);
     assert.match(board, /className="ticket-activity-tooltip"/);
     assert.match(board, /role="tooltip"/);
+    assert.doesNotMatch(board, /ticket-activity-wrap"[^>]*tabIndex/);
     assert.match(css, /\.ticket-card \.ticket-activity-tooltip/);
     assert.match(css, /\.ticket-activity-wrap:hover \.ticket-activity-tooltip/);
     assert.match(
       css,
-      /\.ticket-activity-wrap:focus-within \.ticket-activity-tooltip/,
+      /\.ticket-card:focus-visible \.ticket-activity-tooltip/,
     );
     assert.match(
       css,
