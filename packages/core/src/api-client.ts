@@ -237,7 +237,9 @@ export class TraceApiClient {
     return this.request<unknown>(`/v1/tickets/${encodeURIComponent(slug)}`);
   }
 
-  createTicket(body: Record<string, unknown>) {
+  createTicket(
+    body: Record<string, unknown> & { assign_cloud_agent?: boolean },
+  ) {
     return this.request<unknown>(
       "/v1/tickets",
       {
@@ -694,6 +696,7 @@ export class TraceApiClient {
 
   listMyAgentApis() {
     return this.request<{
+      cursor_cloud_available: boolean;
       items: Array<{
         provider: string;
         configured: boolean;

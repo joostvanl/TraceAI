@@ -1221,6 +1221,17 @@ h2 {
   min-height: 6rem;
 }
 
+.create-ticket-form .create-ticket-cloud-assignment {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.create-ticket-form .create-ticket-cloud-assignment input {
+  width: auto;
+  padding: 0;
+}
+
 .create-ticket-row {
   display: grid;
   grid-template-columns: minmax(0, 12rem);

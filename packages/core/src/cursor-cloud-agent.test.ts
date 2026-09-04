@@ -4,6 +4,7 @@ import {
   AGENT_BUSY_RETRY_CAP_MS,
   AGENT_BUSY_RETRY_MS,
   AGENT_BUSY_RETRY_WINDOW_MS,
+  CURSOR_CLOUD_AGENTS_API,
   CursorCloudAgentClient,
   agentBusyRetryDelayMs,
   cloudNudgeSkipComment,
@@ -282,5 +283,73 @@ describe("CursorCloudAgentClient", () => {
     assert.match(seen[0]?.url ?? "", /\/bc-1\/runs$/);
     assert.match(seen[0]?.auth ?? "", /^Basic /);
     assert.match(seen[0]?.body ?? "", /"text":"hello"/);
+  });
+
+  it("creates an agent at the base URL and parses agent.id", async () => {
+    const seen: Array<{ url: string; auth: string; body: Record<string, unknown> }> = [];
+    const fetchImpl: typeof fetch = (async (input, init) => {
+      seen.push({
+        url: String(input),
+        auth: String((init?.headers as Record<string, string>)?.Authorization),
+        body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+      });
+      return Response.json({ agent: { id: "bc-created-1" } }, { status: 201 });
+    }) as typeof fetch;
+    const client = new CursorCloudAgentClient("personal-key", fetchImpl);
+    const result = await client.create({
+      prompt: "Start TRA-149",
+      name: "TRA-149",
+      repos: [{ url: "https://github.com/joostvanl/TraceAI", startingRef: "main" }],
+      mcpServers: [{
+        name: "traceai",
+        type: "http",
+        url: "https://trace.example/mcp",
+        headers: { Authorization: "Bearer trc_test" },
+      }],
+      autoCreatePR: false,
+    });
+    assert.deepEqual(result, { ok: true, status: 201, agentId: "bc-created-1" });
+    assert.equal(seen[0]?.url, CURSOR_CLOUD_AGENTS_API);
+    assert.doesNotMatch(seen[0]?.url ?? "", /\/runs$/);
+    assert.match(seen[0]?.auth ?? "", /^Basic /);
+    assert.deepEqual(seen[0]?.body.prompt, { text: "Start TRA-149" });
+    assert.equal(seen[0]?.body.autoCreatePR, false);
+  });
+
+  it("create is fail-soft for HTTP, malformed, missing id, and network errors", async () => {
+    const input = {
+      prompt: "start",
+      name: "TRA-149",
+      repos: [{ url: "https://example.test/repo", startingRef: "main" }],
+      autoCreatePR: false as const,
+    };
+    const http = new CursorCloudAgentClient(
+      "key",
+      (async () => new Response("secret upstream text", { status: 500 })) as typeof fetch,
+    );
+    assert.deepEqual(await http.create(input), {
+      ok: false,
+      status: 500,
+      message: "Cursor create failed (500)",
+    });
+    const malformed = new CursorCloudAgentClient(
+      "key",
+      (async () => new Response("{", { status: 201 })) as typeof fetch,
+    );
+    assert.equal((await malformed.create(input)).ok, false);
+    const missing = new CursorCloudAgentClient(
+      "key",
+      (async () => Response.json({ agent: {} }, { status: 201 })) as typeof fetch,
+    );
+    assert.equal((await missing.create(input)).ok, false);
+    const network = new CursorCloudAgentClient(
+      "key",
+      (async () => {
+        throw new Error("secret network detail");
+      }) as typeof fetch,
+    );
+    const failed = await network.create(input);
+    assert.equal(failed.ok, false);
+    if (!failed.ok) assert.doesNotMatch(failed.message, /secret network detail/);
   });
 });

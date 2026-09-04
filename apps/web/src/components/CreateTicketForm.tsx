@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -27,8 +27,36 @@ export function CreateTicketForm({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [cursorCloudAvailable, setCursorCloudAvailable] = useState(false);
+  const [assignCloudAgent, setAssignCloudAgent] = useState(false);
 
   const loginHref = `/login?next=${encodeURIComponent(boardHref)}`;
+
+  useEffect(() => {
+    if (!authenticated) {
+      setCursorCloudAvailable(false);
+      setAssignCloudAgent(false);
+      return;
+    }
+    let active = true;
+    void fetch("/api/account/agent-apis")
+      .then(async (res) => {
+        if (!res.ok) return false;
+        const body = (await res.json().catch(() => null)) as {
+          cursor_cloud_available?: unknown;
+        } | null;
+        return body?.cursor_cloud_available === true;
+      })
+      .catch(() => false)
+      .then((available) => {
+        if (!active) return;
+        setCursorCloudAvailable(available);
+        if (!available) setAssignCloudAgent(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [authenticated]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -45,6 +73,7 @@ export function CreateTicketForm({
           description,
           priority,
           workflow,
+          assign_cloud_agent: assignCloudAgent,
         }),
       });
       const body = (await res.json().catch(() => ({}))) as {
@@ -71,6 +100,7 @@ export function CreateTicketForm({
       setTitle("");
       setDescription("");
       setPriority("medium");
+      setAssignCloudAgent(false);
       setOpen(false);
       router.refresh();
     } catch (err) {
@@ -157,6 +187,18 @@ export function CreateTicketForm({
               </select>
             </label>
           </div>
+
+          {cursorCloudAvailable ? (
+            <label className="create-ticket-cloud-assignment">
+              <input
+                type="checkbox"
+                checked={assignCloudAgent}
+                onChange={(e) => setAssignCloudAgent(e.target.checked)}
+                disabled={submitting}
+              />
+              <span>Assign aan Cloud agent</span>
+            </label>
+          ) : null}
 
           {error ? <p className="create-ticket-error">{error}</p> : null}
 

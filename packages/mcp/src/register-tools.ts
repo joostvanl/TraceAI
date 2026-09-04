@@ -315,7 +315,7 @@ export function registerTraceAiTools(
 
   server.tool(
     "create_ticket",
-    "Create and publish a ticket. Description MUST be self-contained for junior agents (Context/Goal/What to implement/Acceptance criteria). Optional parent (slug or TRA-n) links it as a subticket. Actor comes from TraceAI token.",
+    "Create and publish a ticket. Description MUST be self-contained for junior agents (Context/Goal/What to implement/Acceptance criteria). Optional parent (slug or TRA-n) links it as a subticket. Set assign_cloud_agent=true only for explicit Cloud assignment; omitted/false never auto-assigns. Actor comes from TraceAI token.",
     {
       project: z.string(),
       title: z.string().min(1),
@@ -329,6 +329,7 @@ export function registerTraceAiTools(
       workflow: z.string().optional(),
       stage: z.string().optional(),
       slug: z.string().optional(),
+      assign_cloud_agent: z.boolean().optional(),
       parent: z
         .string()
         .nullable()
@@ -399,7 +400,7 @@ export function registerTraceAiTools(
 
   server.tool(
     "set_default_agent",
-    "Set this project's default Cursor Cloud agent (one bc- id on the project; project-admin or platform-admin only). That agent is claimed (and nudged when a Cursor key exists) when a new ticket in that project lands on the first workflow stage. Pass the project slug and the Cursor agent id. On Cursor-managed Cloud Agent VMs read the id from the metadata socket, not the dashboard URL: curl -fsS --unix-socket \"${CURSOR_AGENT_SOCKET:-/run/cursor/api.sock}\" http://cursor-agent/v1/meta-data/agent/id . Fallback: Cloud MCP run-info → bcId. Empty agent_id clears that project's default only. Non-admin callers get 403. Non-bc- ids may be stored but are never nudged.",
+    "Set this project's default Cursor Cloud agent (one bc- id on the project; project-admin or platform-admin only). With explicit assign_cloud_agent=true, that agent is claimed and nudged when a new ticket lands on the first workflow stage and the actor has a usable Cursor key. Pass the project slug and the Cursor agent id. On Cursor-managed Cloud Agent VMs read the id from the metadata socket, not the dashboard URL: curl -fsS --unix-socket \"${CURSOR_AGENT_SOCKET:-/run/cursor/api.sock}\" http://cursor-agent/v1/meta-data/agent/id . Fallback: Cloud MCP run-info → bcId. Empty agent_id clears that project's default only. Non-admin callers get 403. Non-bc- ids may be stored but are never nudged.",
     {
       project: z
         .string()

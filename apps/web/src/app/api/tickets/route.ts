@@ -12,6 +12,7 @@ type CreateBody = {
   description?: string;
   priority?: string;
   workflow?: string;
+  assign_cloud_agent?: unknown;
 };
 
 export async function POST(request: Request) {
@@ -49,6 +50,16 @@ export async function POST(request: Request) {
   const description = body.description?.trim() ?? "";
   const priority = body.priority?.trim() || "medium";
   const workflow = body.workflow?.trim() || "";
+  if (
+    Object.prototype.hasOwnProperty.call(body, "assign_cloud_agent") &&
+    typeof body.assign_cloud_agent !== "boolean"
+  ) {
+    return NextResponse.json(
+      { message: "assign_cloud_agent must be a boolean", code: "VALIDATION" },
+      { status: 400 },
+    );
+  }
+  const assignCloudAgent = body.assign_cloud_agent === true;
 
   if (!project || !title || !description) {
     return NextResponse.json(
@@ -77,6 +88,7 @@ export async function POST(request: Request) {
       title,
       description,
       priority,
+      assign_cloud_agent: assignCloudAgent,
       ...(workflow ? { workflow } : {}),
     })) as {
       slug: string;

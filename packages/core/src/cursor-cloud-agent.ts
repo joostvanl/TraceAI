@@ -21,6 +21,23 @@ export type CursorCloudFollowUp = {
   followUp(agentId: string, prompt: string): Promise<CursorFollowUpResult>;
 };
 
+export type CursorCreateInput = {
+  prompt: string;
+  name: string;
+  repos: Array<{ url: string; startingRef: string }>;
+  mcpServers?: Array<{
+    name: string;
+    type: "http";
+    url: string;
+    headers: { Authorization: string };
+  }>;
+  autoCreatePR: false;
+};
+
+export type CursorCreateResult =
+  | { ok: true; status: number; agentId: string }
+  | { ok: false; status: number; message: string };
+
 export type NudgeClaimResult = {
   attempted: boolean;
   calls: number;
@@ -83,6 +100,54 @@ export class CursorCloudAgentClient implements CursorCloudFollowUp {
         status: 0,
         busy: false,
         message: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  async create(input: CursorCreateInput): Promise<CursorCreateResult> {
+    const url = this.baseUrl.replace(/\/$/, "");
+    const auth = Buffer.from(`${this.apiKey}:`, "utf8").toString("base64");
+    try {
+      const res = await this.fetchImpl(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${auth}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          prompt: { text: input.prompt },
+          name: input.name.slice(0, 100),
+          repos: input.repos,
+          ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
+          autoCreatePR: input.autoCreatePR,
+        }),
+      });
+      if (!res.ok) {
+        return {
+          ok: false,
+          status: res.status,
+          message: `Cursor create failed (${res.status})`,
+        };
+      }
+      const body = (await res.json().catch(() => null)) as
+        | { agent?: { id?: unknown } }
+        | null;
+      const agentId =
+        typeof body?.agent?.id === "string" ? body.agent.id.trim() : "";
+      if (!agentId) {
+        return {
+          ok: false,
+          status: res.status,
+          message: "Cursor create response missing agent id",
+        };
+      }
+      return { ok: true, status: res.status, agentId };
+    } catch (error) {
+      const raw = error instanceof Error ? error.name : "unknown";
+      return {
+        ok: false,
+        status: 0,
+        message: `Cursor create request failed (${raw.slice(0, 80)})`,
       };
     }
   }

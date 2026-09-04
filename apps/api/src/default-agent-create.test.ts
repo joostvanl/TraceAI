@@ -58,6 +58,7 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
       saveCursorKey?: boolean;
       stage?: string;
       cursorStatus?: number;
+      cursorCreate?: "throw" | "missing";
       cursorBusy?: boolean;
       omitClaimedByUserId?: boolean;
     },
@@ -65,6 +66,7 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
       app: ReturnType<typeof createApp>;
       token: string;
       followUps: Array<{ id: string; prompt: string }>;
+      creates: Array<Record<string, unknown>>;
       claimed: Array<{ slug: string; agentId: string; actorUserId: string }>;
       flush: () => Promise<void>;
     }) => Promise<void>,
@@ -73,6 +75,7 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
     const store = new AuthStore(join(dir, "auth.sqlite"));
     const jobs: Array<() => void> = [];
     const followUps: Array<{ id: string; prompt: string }> = [];
+    const creates: Array<Record<string, unknown>> = [];
     const claimed: Array<{
       slug: string;
       agentId: string;
@@ -113,6 +116,17 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
         authStore: store,
         nudgeQueue: null,
         scheduleWakeup: (fn) => jobs.push(fn),
+        cursorCloudFetch: (async (_url, init) => {
+          creates.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+          if (extras.cursorCreate === "throw") throw new Error("network");
+          if (extras.cursorCreate === "missing") {
+            return Response.json({}, { status: 201 });
+          }
+          return Response.json(
+            { agent: { id: "bc-created-149" } },
+            { status: extras.cursorStatus ?? 201 },
+          );
+        }) as typeof fetch,
         cursorCloud: {
           followUp: async (id, prompt) => {
             followUps.push({ id, prompt });
@@ -162,12 +176,14 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
               },
             };
           },
+          upsertProjectAgent: async () => ({}) as never,
         } as never,
       });
       await fn({
         app,
         token: token.token,
         followUps,
+        creates,
         claimed,
         flush: async () => {
           for (const job of jobs) job();
@@ -194,6 +210,7 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
             project: "traceai",
             title: "Wish",
             description: "A short wish for the backlog",
+            assign_cloud_agent: true,
           }),
         });
         assert.equal(res.status, 201, await res.clone().text());
@@ -214,10 +231,64 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
     );
   });
 
-  it("does not claim or call Cursor without a default id", async () => {
+  it("omitted and false opt-in create normally without assignment", async () => {
+    for (const value of [undefined, false] as const) {
+      await withCreateApp(
+        { defaultAgentId: "bc-default-9", saveCursorKey: true },
+        async ({ app, token, followUps, creates, claimed, flush }) => {
+          const res = await app.request("/v1/tickets", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              project: "traceai",
+              title: "Wish",
+              description: "A short wish for the backlog",
+              ...(value === undefined ? {} : { assign_cloud_agent: value }),
+            }),
+          });
+          assert.equal(res.status, 201, await res.clone().text());
+          assert.equal(((await res.json()) as { claimed_agent_id?: unknown }).claimed_agent_id, null);
+          await flush();
+          assert.deepEqual(claimed, []);
+          assert.deepEqual(creates, []);
+          assert.deepEqual(followUps, []);
+        },
+      );
+    }
+  });
+
+  it("rejects a non-boolean opt-in before ticket creation", async () => {
     await withCreateApp(
-      { saveCursorKey: true },
-      async ({ app, token, followUps, claimed, flush }) => {
+      { defaultAgentId: "bc-default-9", saveCursorKey: true },
+      async ({ app, token, claimed, creates, followUps }) => {
+        const res = await app.request("/v1/tickets", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            project: "traceai",
+            title: "Wish",
+            assign_cloud_agent: "true",
+          }),
+        });
+        assert.equal(res.status, 400);
+        assert.equal(((await res.json()) as { code?: string }).code, "VALIDATION");
+        assert.deepEqual(claimed, []);
+        assert.deepEqual(creates, []);
+        assert.deepEqual(followUps, []);
+      },
+    );
+  });
+
+  it("stays unclaimed when per-ticket Cursor create fails", async () => {
+    await withCreateApp(
+      { saveCursorKey: true, cursorStatus: 500 },
+      async ({ app, token, followUps, creates, claimed, flush }) => {
         const res = await app.request("/v1/tickets", {
           method: "POST",
           headers: {
@@ -228,6 +299,7 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
             project: "traceai",
             title: "Wish",
             description: "A short wish for the backlog",
+            assign_cloud_agent: true,
           }),
         });
         assert.equal(res.status, 201);
@@ -236,13 +308,40 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
         };
         assert.equal(body.claimed_agent_id, null);
         assert.deepEqual(claimed, []);
+        assert.equal(creates.length, 1);
         await flush();
         assert.deepEqual(followUps, []);
       },
     );
   });
 
-  it("claims without a Cursor key and does not nudge", async () => {
+  it("stays 201 and unclaimed for thrown and missing-id create responses", async () => {
+    for (const cursorCreate of ["throw", "missing"] as const) {
+      await withCreateApp(
+        { saveCursorKey: true, cursorCreate },
+        async ({ app, token, claimed, creates }) => {
+          const res = await app.request("/v1/tickets", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              project: "traceai",
+              title: "Wish",
+              assign_cloud_agent: true,
+            }),
+          });
+          assert.equal(res.status, 201, await res.clone().text());
+          assert.equal(((await res.json()) as { claimed_agent_id?: unknown }).claimed_agent_id, null);
+          assert.deepEqual(claimed, []);
+          assert.equal(creates.length, 1);
+        },
+      );
+    }
+  });
+
+  it("does not claim or call Cursor without a Cursor key", async () => {
     await withCreateApp(
       { defaultAgentId: "bc-default-9", saveCursorKey: false },
       async ({ app, token, followUps, claimed, flush }) => {
@@ -256,15 +355,15 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
             project: "traceai",
             title: "Wish",
             description: "A short wish for the backlog",
+            assign_cloud_agent: true,
           }),
         });
         assert.equal(res.status, 201);
         const body = (await res.json()) as {
           claimed_agent_id?: string | null;
         };
-        assert.equal(body.claimed_agent_id, "bc-default-9");
-        assert.equal(claimed.length, 1);
-        assert.equal(claimed[0]?.agentId, "bc-default-9");
+        assert.equal(body.claimed_agent_id, null);
+        assert.equal(claimed.length, 0);
         await flush();
         assert.deepEqual(followUps, []);
       },
@@ -290,6 +389,7 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
             title: "Wish",
             description: "A short wish for the backlog",
             stage: "todo",
+            assign_cloud_agent: true,
           }),
         });
         assert.equal(res.status, 201);
@@ -314,6 +414,7 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
             project: "traceai",
             title: "Wish",
             description: "A short wish for the backlog",
+            assign_cloud_agent: true,
           }),
         });
         assert.equal(res.status, 201);
@@ -342,6 +443,7 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
             project: "traceai",
             title: "Wish",
             description: "A short wish for the backlog",
+            assign_cloud_agent: true,
           }),
         });
         assert.equal(res.status, 201, await res.clone().text());
@@ -373,6 +475,7 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
             project: "traceai",
             title: "Wish",
             description: "A short wish for the backlog",
+            assign_cloud_agent: true,
           }),
         });
         assert.equal(res.status, 201);
@@ -402,6 +505,7 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
             project: "alpha",
             title: "Wish",
             description: "A short wish for the backlog",
+            assign_cloud_agent: true,
           }),
         });
         assert.equal(res.status, 201, await res.clone().text());
@@ -433,6 +537,7 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
             project: "beta",
             title: "Wish",
             description: "A short wish for the backlog",
+            assign_cloud_agent: true,
           }),
         });
         assert.equal(res.status, 201, await res.clone().text());
@@ -461,6 +566,7 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
             project: "traceai",
             title: "Wish",
             description: "A short wish for the backlog",
+            assign_cloud_agent: true,
           }),
         });
         assert.equal(res.status, 201, await res.clone().text());
@@ -472,10 +578,10 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
     );
   });
 
-  it("empty project default and no unique membership bc- stays unclaimed", async () => {
+  it("empty project default creates and claims one Cloud agent without follow-up", async () => {
     await withCreateApp(
       { saveCursorKey: true },
-      async ({ app, token, claimed, flush }) => {
+      async ({ app, token, claimed, creates, followUps, flush }) => {
         const res = await app.request("/v1/tickets", {
           method: "POST",
           headers: {
@@ -486,25 +592,47 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
             project: "traceai",
             title: "Wish",
             description: "A short wish for the backlog",
+            assign_cloud_agent: true,
           }),
         });
         assert.equal(res.status, 201);
         const body = (await res.json()) as { claimed_agent_id?: string | null };
-        assert.equal(body.claimed_agent_id, null);
-        assert.deepEqual(claimed, []);
+        assert.equal(body.claimed_agent_id, "bc-created-149");
+        assert.equal(claimed.length, 1);
+        assert.equal(creates.length, 1);
+        assert.deepEqual(followUps, []);
+        const payload = creates[0] as {
+          prompt?: { text?: string };
+          repos?: Array<{ url?: string; startingRef?: string }>;
+          mcpServers?: Array<{ url?: string; headers?: { Authorization?: string } }>;
+          autoCreatePR?: boolean;
+        };
+        assert.match(payload.prompt?.text ?? "", /get_ticket/);
+        assert.match(payload.prompt?.text ?? "", /Never call claim_ticket/);
+        assert.match(payload.prompt?.text ?? "", /subagents/);
+        assert.deepEqual(payload.repos, [{
+          url: "https://github.com/joostvanl/TraceAI",
+          startingRef: "main",
+        }]);
+        assert.match(payload.mcpServers?.[0]?.url ?? "", /\/mcp$/);
+        assert.match(
+          payload.mcpServers?.[0]?.headers?.Authorization ?? "",
+          /^Bearer trc_/,
+        );
+        assert.equal(payload.autoCreatePR, false);
         await flush();
       },
     );
   });
 
-  it("cleared project field ignores leftover membership defaults", async () => {
+  it("cleared project field spawns instead of using leftover membership defaults", async () => {
     await withCreateApp(
       {
         saveCursorKey: true,
         defaultByProject: { traceai: null },
         membershipDefaultByProject: { traceai: "bc-old-membership" },
       },
-      async ({ app, token, claimed, flush }) => {
+      async ({ app, token, claimed, creates, flush }) => {
         const res = await app.request("/v1/tickets", {
           method: "POST",
           headers: {
@@ -515,12 +643,14 @@ describe("POST /v1/tickets default-agent nudge (TRA-122)", () => {
             project: "traceai",
             title: "Wish",
             description: "A short wish for the backlog",
+            assign_cloud_agent: true,
           }),
         });
         assert.equal(res.status, 201);
         const body = (await res.json()) as { claimed_agent_id?: string | null };
-        assert.equal(body.claimed_agent_id, null);
-        assert.deepEqual(claimed, []);
+        assert.equal(body.claimed_agent_id, "bc-created-149");
+        assert.equal(claimed.length, 1);
+        assert.equal(creates.length, 1);
         await flush();
       },
     );
@@ -622,6 +752,7 @@ describe("POST /v1/tickets default-agent live resolver (TRA-124)", () => {
           project: "traceai",
           title: "Wish",
           description: "A short wish for the backlog",
+          assign_cloud_agent: true,
         }),
       });
       assert.equal(res.status, 201, await res.clone().text());
@@ -772,6 +903,7 @@ describe("POST /v1/tickets default-agent live resolver (TRA-124)", () => {
           project: "traceai",
           title: "Wish",
           description: "A short wish for the backlog",
+          assign_cloud_agent: true,
         }),
       });
       assert.equal(res.status, 201, await res.clone().text());
@@ -806,6 +938,12 @@ describe("POST /v1/tickets default-agent live resolver (TRA-124)", () => {
         userId: user.id,
         name: "Joost",
         scopes: [...DEFAULT_AGENT_SCOPES, "admin"],
+      });
+      store.putAgentApiKey({
+        userId: user.id,
+        provider: "cursor",
+        apiKey: "key_mcp_149",
+        secret: SESSION_SECRET,
       });
       const created = {
         id: "id-mcp",
@@ -854,6 +992,7 @@ describe("POST /v1/tickets default-agent live resolver (TRA-124)", () => {
           project: "traceai",
           title: "Wish",
           description: "A short wish for the backlog",
+          assign_cloud_agent: true,
         }),
       });
       assert.equal(res.status, 201, await res.clone().text());

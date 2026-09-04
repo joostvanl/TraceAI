@@ -113,9 +113,11 @@ describe("GET/PUT/DELETE /v1/me/agent-apis (TRA-114)", () => {
       const empty = await app.request("/v1/me/agent-apis", { headers });
       assert.equal(empty.status, 200, await empty.clone().text());
       const listed = (await empty.json()) as {
+        cursor_cloud_available: boolean;
         items: Array<{ provider: string; configured: boolean; last4: string | null }>;
         default_cursor_agent_id?: unknown;
       };
+      assert.equal(listed.cursor_cloud_available, false);
       assert.equal("default_cursor_agent_id" in listed, false);
       assert.deepEqual(
         listed.items.map((i) => i.provider),
@@ -123,6 +125,7 @@ describe("GET/PUT/DELETE /v1/me/agent-apis (TRA-114)", () => {
       );
       assert.equal(listed.items.find((i) => i.provider === "cursor")?.configured, false);
 
+      process.env.TRACEAI_AGENT_API_SECRET = "agent-api-good";
       const put = await app.request("/v1/me/agent-apis/cursor", {
         method: "PUT",
         headers,
@@ -140,7 +143,20 @@ describe("GET/PUT/DELETE /v1/me/agent-apis (TRA-114)", () => {
       const cursor = afterSave.items.find((i) => i.provider === "cursor");
       assert.equal(cursor?.configured, true);
       assert.equal(cursor?.last4, "ABCD");
+      assert.equal(afterSave.cursor_cloud_available, true);
       assert.equal(JSON.stringify(afterSave).includes("key_first_save_ABCD"), false);
+      assert.doesNotMatch(JSON.stringify(afterSave), /ciphertext|nonce/i);
+
+      process.env.TRACEAI_AGENT_API_SECRET = "agent-api-wrong";
+      const wrongSecret = await app.request("/v1/me/agent-apis", { headers });
+      const unavailable = (await wrongSecret.json()) as typeof listed;
+      assert.equal(unavailable.cursor_cloud_available, false);
+      assert.equal(
+        unavailable.items.find((i) => i.provider === "cursor")?.configured,
+        true,
+      );
+      assert.doesNotMatch(JSON.stringify(unavailable), /key_first_save|ciphertext|nonce/i);
+      process.env.TRACEAI_AGENT_API_SECRET = "agent-api-good";
 
       const replace = await app.request("/v1/me/agent-apis/cursor", {
         method: "PUT",
@@ -163,6 +179,8 @@ describe("GET/PUT/DELETE /v1/me/agent-apis (TRA-114)", () => {
         false,
       );
       assert.equal(afterDel.items.find((i) => i.provider === "cursor")?.last4, null);
+      assert.equal(afterDel.cursor_cloud_available, false);
+      delete process.env.TRACEAI_AGENT_API_SECRET;
     });
   });
 
