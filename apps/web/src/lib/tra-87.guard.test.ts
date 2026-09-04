@@ -33,6 +33,17 @@ describe("TRA-87 web create / insights guards", () => {
     assert.match(route, /workflow/);
   });
 
+  it("TRA-149 gates Cloud assignment fail-closed and forwards the boolean", () => {
+    assert.match(form, />Assign aan Cloud agent</);
+    assert.match(form, /useState\(false\)/);
+    assert.match(form, /cursor_cloud_available === true/);
+    assert.match(form, /\.catch\(\(\) => false\)/);
+    assert.match(form, /cursorCloudAvailable \? \(/);
+    assert.match(form, /assign_cloud_agent: assignCloudAgent/);
+    assert.match(route, /typeof body\.assign_cloud_agent !== "boolean"/);
+    assert.match(route, /assign_cloud_agent: assignCloudAgent/);
+  });
+
   it("G8: insights still loads the default board for the Done-key", () => {
     const fn = insights.slice(insights.indexOf("export async function getProjectInsightsPublic"));
     assert.match(fn, /getProjectBoard\(projectSlug\)/);

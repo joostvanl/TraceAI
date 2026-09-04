@@ -30,10 +30,10 @@ export type ClaimerCursorKeyResult =
   | { ok: true; apiKey: string }
   | { ok: false; reason: ClaimerCursorKeySkip };
 
-function decryptCursorKeyForUser(
+export function resolveUserCursorApiKey(
   store: AuthStore,
   userId: string,
-  env: NodeJS.Dict<string>,
+  env: NodeJS.Dict<string> = process.env,
 ): ClaimerCursorKeyResult {
   const record = store.getAgentApiKeyRecord(userId, "cursor");
   if (!record) return { ok: false, reason: "no_key" };
@@ -63,16 +63,16 @@ export function resolveClaimerCursorApiKey(
   const claimer = ticket.fields.claimed_by_user_id?.trim();
   const fallback = fallbackUserId?.trim() || "";
   if (claimer) {
-    const fromClaimer = decryptCursorKeyForUser(store, claimer, env);
+    const fromClaimer = resolveUserCursorApiKey(store, claimer, env);
     if (fromClaimer.ok) return fromClaimer;
     if (fallback && fallback !== claimer) {
-      const fromFallback = decryptCursorKeyForUser(store, fallback, env);
+      const fromFallback = resolveUserCursorApiKey(store, fallback, env);
       if (fromFallback.ok) return fromFallback;
     }
     return fromClaimer;
   }
   if (fallback) {
-    return decryptCursorKeyForUser(store, fallback, env);
+    return resolveUserCursorApiKey(store, fallback, env);
   }
   return { ok: false, reason: "no_claimer" };
 }

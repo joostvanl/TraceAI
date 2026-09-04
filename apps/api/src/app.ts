@@ -92,6 +92,7 @@ import {
   agentApiEncryptionSecret,
   cursorFollowUpForClaimer,
   listedAgentApiProviders,
+  resolveUserCursorApiKey,
 } from "./agent-api-keys.js";
 import { claimAndNudgeDefaultAgentOnCreate } from "./default-agent.js";
 
@@ -867,6 +868,10 @@ export function createApp(deps: {
       );
     }
     return c.json({
+      cursor_cloud_available: resolveUserCursorApiKey(
+        deps.authStore,
+        resolved.user.id,
+      ).ok,
       items: listedAgentApiProviders(deps.authStore, resolved.user.id),
     });
   });
@@ -1514,6 +1519,7 @@ export function createApp(deps: {
       slug?: string;
       parent?: string | null;
       created_by?: string;
+      assign_cloud_agent?: unknown;
     }>();
     if (!body?.project || !body?.title?.trim()) {
       return c.json(
@@ -1532,6 +1538,15 @@ export function createApp(deps: {
     if (denied) {
       return c.json({ message: denied, code: "FORBIDDEN" }, 403);
     }
+    if (
+      Object.prototype.hasOwnProperty.call(body, "assign_cloud_agent") &&
+      typeof body.assign_cloud_agent !== "boolean"
+    ) {
+      return c.json(
+        { message: "assign_cloud_agent must be a boolean", code: "VALIDATION" },
+        400,
+      );
+    }
     const ticket = await deps.service.createTicket({
       project: body.project,
       title: body.title,
@@ -1543,32 +1558,36 @@ export function createApp(deps: {
       parent: body.parent,
       created_by: attributionName(human, body.created_by?.trim() || actor.name),
     });
-    let ownerUserId: string | null = null;
-    if (human?.mode === "personal") {
-      try {
-        const resolved = await resolveSelfServiceAuthUser(
-          deps.service,
-          deps.authStore,
-          human,
-        );
-        if (resolved.ok) ownerUserId = resolved.user.id;
-      } catch (error) {
-        console.warn("[traceai] default-agent owner join failed", error);
+    let maybeClaimed = ticket;
+    if (body.assign_cloud_agent === true) {
+      let ownerUserId: string | null = null;
+      if (human?.mode === "personal") {
+        try {
+          const resolved = await resolveSelfServiceAuthUser(
+            deps.service,
+            deps.authStore,
+            human,
+          );
+          if (resolved.ok) ownerUserId = resolved.user.id;
+        } catch (error) {
+          console.warn("[traceai] default-agent owner join failed", error);
+        }
+      } else if (!human) {
+        ownerUserId = actor.userId;
       }
-    } else if (!human) {
-      ownerUserId = actor.userId;
+      maybeClaimed = await claimAndNudgeDefaultAgentOnCreate({
+        assignCloudAgent: true,
+        ticket,
+        ownerUserId,
+        authStore: deps.authStore,
+        service: deps.service,
+        cursorCloud: deps.cursorCloud !== undefined ? cursorCloud : undefined,
+        cursorCloudFetch: deps.cursorCloudFetch,
+        scheduleWakeup: deps.scheduleWakeup,
+        nudgeQueue,
+        now,
+      });
     }
-    const maybeClaimed = await claimAndNudgeDefaultAgentOnCreate({
-      ticket,
-      ownerUserId,
-      authStore: deps.authStore,
-      service: deps.service,
-      cursorCloud: deps.cursorCloud !== undefined ? cursorCloud : undefined,
-      cursorCloudFetch: deps.cursorCloudFetch,
-      scheduleWakeup: deps.scheduleWakeup,
-      nudgeQueue,
-      now,
-    });
     const createdNames = await loadProjectAgentNameMap(
       deps.service,
       maybeClaimed.fields.project,
