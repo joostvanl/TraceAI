@@ -619,6 +619,12 @@ h2 {
   max-width: 100%;
 }
 
+.ticket-card .ticket-activity-wrap {
+  position: relative;
+  min-width: 0;
+  outline: none;
+}
+
 .ticket-card .ticket-activity {
   margin: 0.35rem 0 0;
   color: var(--muted);
@@ -628,6 +634,41 @@ h2 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ticket-card .ticket-activity-tooltip {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  bottom: calc(100% + 0.4rem);
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  color: var(--text);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(0.2rem);
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease,
+    visibility 0s linear 0.15s;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 0.5rem 1.25rem rgba(0, 0, 0, 0.3);
+}
+
+.ticket-card .ticket-activity-wrap:hover .ticket-activity-tooltip,
+.ticket-card:focus-visible .ticket-activity-tooltip {
+  visibility: visible;
+  opacity: 1;
+  transform: translateY(0);
+  transition-delay: 0s;
 }
 
 .ticket-card:hover:not(.ticket-active) {
@@ -657,6 +698,10 @@ h2 {
   .ticket-card.ticket-active {
     animation: none;
     border-color: var(--accent);
+  }
+
+  .ticket-card .ticket-activity-tooltip {
+    transition: none;
   }
 }
 
