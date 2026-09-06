@@ -6,6 +6,7 @@ import { useState, type FormEvent } from "react";
 export type EditorWorkflowOption = {
   slug: string;
   name: string;
+  storage_model?: "legacy_json" | "graph";
 };
 
 export type CloneSourceOption = {
@@ -152,6 +153,7 @@ export function WorkflowEditorToolbar({
             >
               {workflow.name}
               {defaultSlug === workflow.slug ? " (default)" : ""}
+              {workflow.storage_model === "graph" ? " · graph" : " · oude JSON"}
             </a>
           );
         })}

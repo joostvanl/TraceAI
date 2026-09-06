@@ -158,7 +158,9 @@ import {
   documentToGraphParts,
   edgeRecordSlug,
   parseWorkflowStorageModel,
+  resolveGraphEdgeEndpointKey,
   stageRecordSlug,
+  stageSlugForEdgeEndpoint,
 } from "./workflow-graph.js";
 
 export { WorkflowValidationError } from "./workflow-editor.js";
@@ -607,8 +609,8 @@ export class TraceService {
         agent_json: entry.fields.agent_json,
       })),
       edges: edges.map((entry) => ({
-        from_key: entry.fields.from_key,
-        to_key: entry.fields.to_key,
+        from_key: resolveGraphEdgeEndpointKey(entry.fields.from_key, stages),
+        to_key: resolveGraphEdgeEndpointKey(entry.fields.to_key, stages),
         require_tokens_estimate: entry.fields.require_tokens_estimate,
         require_playbook_description: entry.fields.require_playbook_description,
       })),
@@ -655,11 +657,12 @@ export class TraceService {
     );
     const edgeByPair = new Map(
       existingEdges.map((entry) => [
-        `${entry.fields.from_key}\0${entry.fields.to_key}`,
+        `${resolveGraphEdgeEndpointKey(entry.fields.from_key, existingStages)}\0${resolveGraphEdgeEndpointKey(entry.fields.to_key, existingStages)}`,
         entry,
       ]),
     );
     const keepStages = new Set<string>();
+    const stagesNow = new Map<string, WorkflowStageRecord>();
     for (const stage of parts.stages) {
       keepStages.add(stage.key);
       const fields = {
@@ -678,6 +681,7 @@ export class TraceService {
           { fields },
         );
         await this.ensurePublished("workflow_stage", updated);
+        stagesNow.set(stage.key, updated);
       } else {
         const created = await this.client.createEntry<WorkflowStageRecord>(
           "workflow_stage",
@@ -692,6 +696,7 @@ export class TraceService {
           },
         );
         await this.ensurePublished("workflow_stage", created);
+        stagesNow.set(stage.key, created);
       }
     }
     for (const existing of existingStages) {
@@ -700,14 +705,15 @@ export class TraceService {
       }
     }
 
+    const persistedStages = [...stagesNow.values()];
     const keepEdges = new Set<string>();
     for (const edge of parts.edges) {
       const pair = `${edge.from_key}\0${edge.to_key}`;
       keepEdges.add(pair);
       const fields = {
         workflow: workflow.slug,
-        from_key: edge.from_key,
-        to_key: edge.to_key,
+        from_key: stageSlugForEdgeEndpoint(edge.from_key, persistedStages),
+        to_key: stageSlugForEdgeEndpoint(edge.to_key, persistedStages),
         require_tokens_estimate: edge.require_tokens_estimate,
         require_playbook_description: edge.require_playbook_description,
       };
@@ -736,7 +742,7 @@ export class TraceService {
       }
     }
     for (const existing of existingEdges) {
-      const pair = `${existing.fields.from_key}\0${existing.fields.to_key}`;
+      const pair = `${resolveGraphEdgeEndpointKey(existing.fields.from_key, existingStages)}\0${resolveGraphEdgeEndpointKey(existing.fields.to_key, existingStages)}`;
       if (!keepEdges.has(pair)) {
         await this.client.deleteEntry("workflow_edge", existing.id);
       }

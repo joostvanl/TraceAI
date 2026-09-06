@@ -13,7 +13,9 @@ import {
   documentToGraphParts,
   graphPartsSemanticallyEqual,
   parseWorkflowStorageModel,
+  resolveGraphEdgeEndpointKey,
   slimWorkflowStages,
+  stageSlugForEdgeEndpoint,
   wantsFullWorkflowInclude,
 } from "./workflow-graph.js";
 
@@ -124,6 +126,34 @@ describe("workflow-graph", () => {
     ]);
     assert.equal("agent" in slim[0], false);
     assert.equal(slim[0].key, "backlog");
+  });
+
+  it("resolves edge from/to relations to stage keys", () => {
+    const stages = [
+      { slug: "story-stage-backlog", fields: { key: "backlog" } },
+      { slug: "story-stage-todo", fields: { key: "todo" } },
+    ];
+    assert.equal(
+      resolveGraphEdgeEndpointKey("story-stage-backlog", stages),
+      "backlog",
+    );
+    assert.equal(
+      resolveGraphEdgeEndpointKey({ slug: "story-stage-todo" }, stages),
+      "todo",
+    );
+    assert.equal(resolveGraphEdgeEndpointKey("todo", stages), "todo");
+    assert.equal(
+      stageSlugForEdgeEndpoint("backlog", stages),
+      "story-stage-backlog",
+    );
+    assert.throws(
+      () => resolveGraphEdgeEndpointKey("", stages),
+      ValidationError,
+    );
+    assert.throws(
+      () => stageSlugForEdgeEndpoint("missing", stages),
+      ValidationError,
+    );
   });
 
   it("recognizes include=full", () => {

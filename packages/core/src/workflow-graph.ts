@@ -1,3 +1,4 @@
+import { relationSlug } from "./relations.js";
 import { ValidationError } from "./trace-errors.js";
 import {
   parseWorkflowDocument,
@@ -50,6 +51,41 @@ export function parseWorkflowStorageModel(
   value: unknown,
 ): WorkflowStorageModel {
   return value === "graph" ? "graph" : "legacy_json";
+}
+
+export type GraphStageEndpoint = {
+  slug: string;
+  fields: { key: string };
+};
+
+/** Resolve an edge from/to relation (stage slug) to the stage key used in documents. */
+export function resolveGraphEdgeEndpointKey(
+  relation: unknown,
+  stages: GraphStageEndpoint[],
+): string {
+  const slug = relationSlug(relation);
+  if (!slug) {
+    throw new ValidationError("Edge from/to must point to a workflow stage");
+  }
+  const bySlug = stages.find((stage) => stage.slug === slug);
+  if (bySlug) return bySlug.fields.key;
+  const byKey = stages.find((stage) => stage.fields.key === slug);
+  if (byKey) return byKey.fields.key;
+  return slug;
+}
+
+/** Persist an internal stage key as the workflow_stage entry slug. */
+export function stageSlugForEdgeEndpoint(
+  stageKey: string,
+  stages: GraphStageEndpoint[],
+): string {
+  const found = stages.find((stage) => stage.fields.key === stageKey);
+  if (!found) {
+    throw new ValidationError(
+      `Edge endpoint "${stageKey}" does not match a stage in this workflow`,
+    );
+  }
+  return found.slug;
 }
 
 export function wantsFullWorkflowInclude(include: unknown): boolean {

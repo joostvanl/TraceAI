@@ -87,7 +87,9 @@ describe("slim workflow reads (TRA-153)", () => {
       const slimBody = (await slim.json()) as {
         stages: Array<Record<string, unknown>>;
         workflow_document?: unknown;
+        storage_model?: string;
       };
+      assert.equal(slimBody.storage_model, "legacy_json");
       assert.equal(slimBody.workflow_document, undefined);
       assert.equal("agent" in slimBody.stages[0], false);
       assert.equal(slimBody.stages[0].key, "backlog");
