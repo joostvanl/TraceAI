@@ -162,6 +162,10 @@ import {
   stageRecordSlug,
   stageSlugForEdgeEndpoint,
 } from "./workflow-graph.js";
+import {
+  agentToStageRecordFields,
+  stageRecordToAgent,
+} from "./workflow-stage-fields.js";
 
 export { WorkflowValidationError } from "./workflow-editor.js";
 
@@ -606,7 +610,7 @@ export class TraceService {
         key: entry.fields.key,
         name: entry.fields.name,
         sort_order: entry.fields.sort_order,
-        agent_json: entry.fields.agent_json,
+        agent: stageRecordToAgent(entry.fields, stages),
       })),
       edges: edges.map((entry) => ({
         from_key: resolveGraphEdgeEndpointKey(entry.fields.from_key, stages),
@@ -671,7 +675,6 @@ export class TraceService {
         name: stage.name,
         sort_order: stage.sort_order,
         catalog_key: stage.catalog_key ?? stage.key,
-        agent_json: stage.agent ? JSON.stringify(stage.agent) : "",
       };
       const existing = stageByKey.get(stage.key);
       if (existing) {
@@ -706,6 +709,17 @@ export class TraceService {
     }
 
     const persistedStages = [...stagesNow.values()];
+    for (const stage of parts.stages) {
+      const record = stagesNow.get(stage.key);
+      if (!record) continue;
+      const updated = await this.client.updateEntry<WorkflowStageRecord>(
+        "workflow_stage",
+        record.id,
+        { fields: agentToStageRecordFields(stage.agent, persistedStages) },
+      );
+      await this.ensurePublished("workflow_stage", updated);
+      stagesNow.set(stage.key, updated);
+    }
     const keepEdges = new Set<string>();
     for (const edge of parts.edges) {
       const pair = `${edge.from_key}\0${edge.to_key}`;

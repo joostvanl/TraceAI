@@ -218,7 +218,24 @@ export type WorkflowStageRecordFields = {
   name: string;
   sort_order?: number | null;
   catalog_key?: string | null;
-  agent_json?: string | null;
+  purpose?: string | null;
+  on_enter?: string | null;
+  on_exit?: string | null;
+  require_comment_on_enter?: boolean | string | null;
+  require_comment_on_exit?: boolean | string | null;
+  require_comment_sections_on_enter?: string | null;
+  require_comment_sections_on_exit?: string | null;
+  require_comment_sections_on_reject?: string | null;
+  require_comment_sections_on_dismiss?: string | null;
+  comment_template?: string | null;
+  require_resolution_on_enter?: boolean | string | null;
+  require_human_approval_on_exit?: boolean | string | null;
+  /** Relation (single) → `workflow_stage` slug. */
+  human_approve_to?: unknown;
+  /** Relation (single) → `workflow_stage` slug. */
+  human_dismiss_to?: unknown;
+  /** Relations → `workflow_stage` slugs. */
+  human_reject_to?: unknown;
 };
 
 export type WorkflowEdgeRecordFields = {
