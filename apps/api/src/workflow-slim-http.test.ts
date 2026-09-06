@@ -107,9 +107,17 @@ describe("slim workflow reads (TRA-153)", () => {
 
       const project = await app.request("/v1/projects/traceai", { headers });
       const projectBody = (await project.json()) as {
-        agent_playbook: { stages: Array<Record<string, unknown>> };
+        agent_playbook: {
+          summary?: string;
+          agent_policy?: { summary?: string };
+          stages: Array<Record<string, unknown>>;
+        };
+        default_workflow: { agent_policy?: unknown };
       };
       assert.equal("agent" in projectBody.agent_playbook.stages[0], false);
+      assert.equal(projectBody.agent_playbook.summary, undefined);
+      assert.ok(projectBody.agent_playbook.agent_policy);
+      assert.equal(projectBody.default_workflow.agent_policy, undefined);
 
       const one = await app.request("/v1/workflows/story/stages/backlog", {
         headers,

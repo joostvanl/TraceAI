@@ -25,6 +25,16 @@ describe("workflow-stage-fields", () => {
     assert.equal(formatLineList(["Deze stap", "Doel (kort)"]), "Deze stap\nDoel (kort)");
   });
 
+  it("unpacks a JSON string array stored as one textarea line", () => {
+    assert.deepEqual(parseLineList('["## Pull Request","## Testverslag"]'), [
+      "## Pull Request",
+      "## Testverslag",
+    ]);
+    assert.deepEqual(parseLineList("## Reden"), ["## Reden"]);
+    assert.deepEqual(parseLineList('["## Reden"]'), ["## Reden"]);
+    assert.deepEqual(parseLineList("[not-json"), ["[not-json"]);
+  });
+
   it("parses optional booleans", () => {
     assert.equal(parseOptionalBoolean(true), true);
     assert.equal(parseOptionalBoolean("true"), true);

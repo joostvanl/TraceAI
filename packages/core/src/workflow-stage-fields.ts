@@ -6,16 +6,34 @@ import {
   type GraphStageEndpoint,
 } from "./workflow-graph.js";
 
+function parseJsonStringArray(value: string): string[] | undefined {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("[")) return undefined;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string")) {
+      return undefined;
+    }
+    const items = parsed.map((item) => item.trim()).filter(Boolean);
+    return items.length ? items : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function parseLineList(value: unknown): string[] | undefined {
   if (Array.isArray(value)) {
     const items = value.map((item) => String(item).trim()).filter(Boolean);
     return items.length ? items : undefined;
   }
   if (typeof value !== "string" || !value.trim()) return undefined;
+  const fromJson = parseJsonStringArray(value);
+  if (fromJson) return fromJson;
   const items = value
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .flatMap((line) => parseJsonStringArray(line) ?? [line]);
   return items.length ? items : undefined;
 }
 
