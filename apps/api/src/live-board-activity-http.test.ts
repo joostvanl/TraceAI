@@ -239,10 +239,19 @@ describe("live-board-activity toggle (TRA-142)", () => {
       assert.equal(workflow.status, 200);
       const workflowBody = (await workflow.json()) as {
         agent_policy: { summary: string };
-        workflow_document: { agent_policy: { summary: string } };
+        workflow_document?: { agent_policy: { summary: string } };
       };
       assert.equal(workflowBody.agent_policy.summary, SUMMARY);
-      assert.equal(workflowBody.workflow_document.agent_policy.summary, SUMMARY);
+      assert.equal(workflowBody.workflow_document, undefined);
+
+      const full = await app.request(
+        "/v1/workflows/traceai-traceai-story?include=full",
+        { headers },
+      );
+      const fullBody = (await full.json()) as {
+        workflow_document: { agent_policy: { summary: string } };
+      };
+      assert.equal(fullBody.workflow_document.agent_policy.summary, SUMMARY);
     });
   });
 
@@ -266,13 +275,19 @@ describe("live-board-activity toggle (TRA-142)", () => {
         );
         const workflowBody = (await workflow.json()) as {
           agent_policy: { summary: string };
-          workflow_document: { agent_policy: { summary: string } };
+          workflow_document?: { agent_policy: { summary: string } };
         };
         assert.equal(workflowBody.agent_policy.summary, expected);
-        assert.equal(
-          workflowBody.workflow_document.agent_policy.summary,
-          SUMMARY,
+        assert.equal(workflowBody.workflow_document, undefined);
+
+        const full = await app.request(
+          "/v1/workflows/traceai-traceai-story?include=full",
+          { headers },
         );
+        const fullBody = (await full.json()) as {
+          workflow_document: { agent_policy: { summary: string } };
+        };
+        assert.equal(fullBody.workflow_document.agent_policy.summary, SUMMARY);
       },
       { enabled: true },
     );

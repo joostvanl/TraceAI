@@ -114,9 +114,10 @@ export class TraceApiClient {
     );
   }
 
-  getProject(slug: string) {
+  getProject(slug: string, include?: "full") {
+    const params = include === "full" ? "?include=full" : "";
     return this.request<unknown>(
-      `/v1/projects/${encodeURIComponent(slug)}`,
+      `/v1/projects/${encodeURIComponent(slug)}${params}`,
       {},
       { asHuman: Boolean(this.humanIdentityHeader) },
     );
@@ -375,8 +376,17 @@ export class TraceApiClient {
     return this.request<unknown[]>(`/v1/workflows${q ? `?${q}` : ""}`);
   }
 
-  getWorkflow(slug: string) {
-    return this.request<unknown>(`/v1/workflows/${encodeURIComponent(slug)}`);
+  getWorkflow(slug: string, include?: "full") {
+    const params = include === "full" ? "?include=full" : "";
+    return this.request<unknown>(
+      `/v1/workflows/${encodeURIComponent(slug)}${params}`,
+    );
+  }
+
+  getWorkflowStage(workflow: string, stage: string) {
+    return this.request<unknown>(
+      `/v1/workflows/${encodeURIComponent(workflow)}/stages/${encodeURIComponent(stage)}`,
+    );
   }
 
   createWorkflow(body: Record<string, unknown>) {

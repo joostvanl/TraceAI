@@ -129,11 +129,17 @@ export function registerTraceAiTools(
 
   server.tool(
     "get_project",
-    "Get a project with workflow stages AND the agent_playbook (required working agreements: rich ticket descriptions, transition comments, review test reports).",
-    { slug: z.string().describe("Project slug") },
-    async ({ slug }) => {
+    "Get a project with workflow stages AND the agent_playbook (required working agreements: rich ticket descriptions, transition comments, review test reports). Default stages are a table of contents (key, name, transitions). Pass include=full only when you need every stage's agent rules.",
+    {
+      slug: z.string().describe("Project slug"),
+      include: z
+        .enum(["full"])
+        .optional()
+        .describe("Omit for the slim table of contents; full returns every stage agent block"),
+    },
+    async ({ slug, include }) => {
       try {
-        return ok(await client.getProject(slug), apiBase);
+        return ok(await client.getProject(slug, include), apiBase);
       } catch (error) {
         return fail(error);
       }
@@ -556,11 +562,33 @@ export function registerTraceAiTools(
 
   server.tool(
     "get_workflow",
-    "Get a workflow including stages and agent_policy (always read this before creating tickets or transitioning).",
-    { slug: z.string() },
-    async ({ slug }) => {
+    "Get a workflow including agent_policy and a slim stage list (key, name, transitions). Always read this before creating tickets or transitioning. Use get_workflow_stage for one column's full agent rules. Pass include=full only when you need the whole book.",
+    {
+      slug: z.string(),
+      include: z
+        .enum(["full"])
+        .optional()
+        .describe("Omit for the slim table of contents; full returns agent blocks and workflow_document"),
+    },
+    async ({ slug, include }) => {
       try {
-        return ok(await client.getWorkflow(slug), apiBase);
+        return ok(await client.getWorkflow(slug, include), apiBase);
+      } catch (error) {
+        return fail(error);
+      }
+    },
+  );
+
+  server.tool(
+    "get_workflow_stage",
+    "Get one workflow stage including its agent rules (purpose, on_enter/on_exit, human gate). Use after get_workflow when the ticket is on that stage.",
+    {
+      workflow: z.string().describe("Workflow slug"),
+      stage: z.string().describe("Stage key, e.g. in_progress"),
+    },
+    async ({ workflow, stage }) => {
+      try {
+        return ok(await client.getWorkflowStage(workflow, stage), apiBase);
       } catch (error) {
         return fail(error);
       }

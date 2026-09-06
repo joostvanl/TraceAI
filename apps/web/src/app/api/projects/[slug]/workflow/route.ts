@@ -47,7 +47,7 @@ export async function GET(request: Request, context: RouteContext) {
       asHumanCapable: true,
       identity,
     });
-    const workflow = await client.getWorkflow(workflowSlug);
+    const workflow = await client.getWorkflow(workflowSlug, "full");
     return NextResponse.json(workflow);
   } catch (error) {
     if (error instanceof TraceApiError) {
