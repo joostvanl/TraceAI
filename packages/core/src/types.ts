@@ -223,7 +223,9 @@ export type WorkflowStageRecordFields = {
 
 export type WorkflowEdgeRecordFields = {
   workflow: string;
+  /** Relation (single) → `workflow_stage` slug. */
   from_key: string;
+  /** Relation (single) → `workflow_stage` slug. */
   to_key: string;
   require_tokens_estimate?: boolean | string | null;
   require_playbook_description?: boolean | string | null;

@@ -13,6 +13,7 @@ import {
   isProjectRole,
   membershipSlug,
   parseWorkflowDocument,
+  parseWorkflowStorageModel,
   relationSlug,
   slimWorkflowStages,
   wantsFullWorkflowInclude,
@@ -336,7 +337,7 @@ function mapWorkflow(w: Awaited<ReturnType<TraceService["listWorkflows"]>>[numbe
     slug: w.slug,
     name: w.fields.name,
     project: w.fields.project,
-    storage_model: w.fields.storage_model === "graph" ? "graph" : "legacy_json",
+    storage_model: parseWorkflowStorageModel(w.fields.storage_model),
   };
 }
 

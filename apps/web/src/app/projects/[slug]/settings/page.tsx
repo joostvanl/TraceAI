@@ -80,7 +80,11 @@ export default async function ProjectSettingsPage({
     project: string;
     workflow_document: WorkflowDocument;
   } | null = null;
-  let editorWorkflows: Array<{ slug: string; name: string }> = [];
+  let editorWorkflows: Array<{
+    slug: string;
+    name: string;
+    storage_model?: "legacy_json" | "graph";
+  }> = [];
   let selectedWorkflow: string | null = relationSlug(
     project.fields.default_workflow,
   );
@@ -107,11 +111,13 @@ export default async function ProjectSettingsPage({
       slug: string;
       name: string;
       project?: string;
+      storage_model?: "legacy_json" | "graph";
     }>;
     const defaultWorkflow = relationSlug(project.fields.default_workflow);
     editorWorkflows = listed.map((workflow) => ({
       slug: workflow.slug,
       name: workflow.name || workflow.slug,
+      storage_model: workflow.storage_model === "graph" ? "graph" : "legacy_json",
     }));
     if (
       defaultWorkflow &&
@@ -120,6 +126,7 @@ export default async function ProjectSettingsPage({
       editorWorkflows.unshift({
         slug: defaultWorkflow,
         name: defaultWorkflow,
+        storage_model: "legacy_json",
       });
     }
     selectedWorkflow = editorWorkflowSlugForRequest({
@@ -224,7 +231,9 @@ export default async function ProjectSettingsPage({
           <p className="muted">
             Visuele workflow-editor: stages als blokken, transitions als pijlen.
             Dubbelklik een stage of pijl om de tekstuele eigenschappen onder het
-            canvas te bewerken.
+            canvas te bewerken. Bij elke workflow staat of die nog als één JSON
+            wordt bewaard (oude JSON) of als losse kolommen en pijlen (graph).
+            Alleen oude JSON is hier te tekenen.
           </p>
           {selectedWorkflow ? (
             <WorkflowEditorToolbar
