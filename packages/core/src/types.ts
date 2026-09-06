@@ -198,10 +198,37 @@ export type ProjectFields = {
   require_live_board_activity?: string | null;
 };
 
+/** Per-workflow storage switch (TRA-153). Missing/empty means legacy JSON. */
+export type WorkflowStorageModel = "legacy_json" | "graph";
+
 export type WorkflowFields = {
   name: string;
   project: string;
   stages_json: string;
+  /** `graph` reads stages/edges as records; anything else is `legacy_json`. */
+  storage_model?: string | null;
+  /** Authoritative policy when `storage_model` is `graph`. */
+  agent_policy_json?: string | null;
+  ticket_templates_json?: string | null;
+};
+
+export type WorkflowStageRecordFields = {
+  workflow: string;
+  key: string;
+  name: string;
+  sort_order?: number | null;
+  catalog_key?: string | null;
+  agent_json?: string | null;
+};
+
+export type WorkflowEdgeRecordFields = {
+  workflow: string;
+  /** Relation (single) → `workflow_stage` slug. */
+  from_key: string;
+  /** Relation (single) → `workflow_stage` slug. */
+  to_key: string;
+  require_tokens_estimate?: boolean | string | null;
+  require_playbook_description?: boolean | string | null;
 };
 
 export type TicketFields = {
@@ -381,6 +408,8 @@ export type ProjectAgentFields = {
 
 export type Project = AuroraEntry<ProjectFields>;
 export type Workflow = AuroraEntry<WorkflowFields>;
+export type WorkflowStageRecord = AuroraEntry<WorkflowStageRecordFields>;
+export type WorkflowEdgeRecord = AuroraEntry<WorkflowEdgeRecordFields>;
 export type Ticket = AuroraEntry<TicketFields>;
 export type Comment = AuroraEntry<CommentFields>;
 export type WikiPage = AuroraEntry<WikiPageFields>;

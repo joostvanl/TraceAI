@@ -13,7 +13,10 @@ import {
   isProjectRole,
   membershipSlug,
   parseWorkflowDocument,
+  parseWorkflowStorageModel,
   relationSlug,
+  slimWorkflowStages,
+  wantsFullWorkflowInclude,
   requiredRoleForAction,
   claimedAgentKind,
   parseClaimedAgentId,
@@ -334,6 +337,7 @@ function mapWorkflow(w: Awaited<ReturnType<TraceService["listWorkflows"]>>[numbe
     slug: w.slug,
     name: w.fields.name,
     project: w.fields.project,
+    storage_model: parseWorkflowStorageModel(w.fields.storage_model),
   };
 }
 
@@ -1094,20 +1098,29 @@ export function createApp(deps: {
           enabled,
         )
       : null;
+    const full = wantsFullWorkflowInclude(c.req.query("include"));
+    const playbookStages = result.workflow_document
+      ? full
+        ? result.workflow_document.stages
+        : slimWorkflowStages(result.workflow_document.stages)
+      : [];
+    const defaultStages = full
+      ? result.stages
+      : slimWorkflowStages(result.stages);
     return c.json({
       ...mapProject(result.project),
       agent_playbook: result.workflow_document && agent_policy
         ? {
             summary: agent_policy.summary,
             agent_policy,
-            stages: result.workflow_document.stages,
+            stages: playbookStages,
           }
         : null,
       default_workflow: result.workflow
         ? {
             slug: result.workflow.slug,
             name: result.workflow.fields.name,
-            stages: result.stages,
+            stages: defaultStages,
             agent_policy,
           }
         : null,
@@ -2382,16 +2395,52 @@ export function createApp(deps: {
     const enabled = projectSlug
       ? await deps.service.getProjectLiveBoardActivity(projectSlug)
       : false;
+    const full = wantsFullWorkflowInclude(c.req.query("include"));
+    const agent_policy = withLiveBoardActivityPolicy(
+      result.workflow_document.agent_policy,
+      enabled,
+    );
+    if (full) {
+      return c.json({
+        ...mapWorkflow(result.workflow),
+        stages: result.stages,
+        agent_policy,
+        workflow_document: result.workflow_document,
+      });
+    }
     return c.json({
       ...mapWorkflow(result.workflow),
-      stages: result.stages,
-      agent_policy: withLiveBoardActivityPolicy(
-        result.workflow_document.agent_policy,
-        enabled,
-      ),
-      workflow_document: result.workflow_document,
+      stages: slimWorkflowStages(result.stages),
+      agent_policy,
     });
   });
+
+  app.get(
+    "/v1/workflows/:slug/stages/:key",
+    requireScope("workflows:read"),
+    async (c) => {
+      const slug = param(c, "slug");
+      const result = await deps.service.getWorkflow(slug);
+      if (!result) {
+        return c.json({ message: "Workflow not found", code: "NOT_FOUND" }, 404);
+      }
+      const hidden = await denyUnlessProjectVisible(
+        c,
+        relationSlug(result.workflow.fields.project),
+        "Workflow not found",
+      );
+      if (hidden) return hidden;
+      try {
+        const stage = await deps.service.getWorkflowStage(slug, param(c, "key"));
+        return c.json(stage);
+      } catch (error) {
+        if (error instanceof TraceError && error.status === 404) {
+          return c.json({ message: error.message, code: "NOT_FOUND" }, 404);
+        }
+        throw error;
+      }
+    },
+  );
 
   app.post("/v1/workflows", requireScope("workflows:write"), async (c) => {
     const body = await c.req.json<{

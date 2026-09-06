@@ -127,6 +127,7 @@ describe("hosted MCP /mcp", () => {
       assert.ok(names.includes("set_default_agent"));
       assert.ok(names.includes("set_ticket_activity"));
       assert.ok(names.includes("create_wiki_page"));
+      assert.ok(names.includes("get_workflow_stage"));
     } finally {
       store.close();
       rmSync(dir, { recursive: true, force: true });
