@@ -1111,7 +1111,6 @@ export function createApp(deps: {
       ...mapProject(result.project),
       agent_playbook: result.workflow_document && agent_policy
         ? {
-            summary: agent_policy.summary,
             agent_policy,
             stages: playbookStages,
           }
@@ -1121,7 +1120,6 @@ export function createApp(deps: {
             slug: result.workflow.slug,
             name: result.workflow.fields.name,
             stages: defaultStages,
-            agent_policy,
           }
         : null,
     });

@@ -562,7 +562,7 @@ export function registerTraceAiTools(
 
   server.tool(
     "get_workflow",
-    "Get a workflow including agent_policy and a slim stage list (key, name, transitions). Always read this before creating tickets or transitioning. Use get_workflow_stage for one column's full agent rules. Pass include=full only when you need the whole book.",
+    "Get a workflow including agent_policy and a slim stage list (key, name, transitions). Always read this before creating tickets or transitioning. Use get_workflow_stage for one column's full agent rules. Pass include=full only when you need the whole book. If get_workflow_stage is missing from your tool list, reload the TraceAI MCP server in Cursor and retry — do not fall back to include=full or Aurora.",
     {
       slug: z.string(),
       include: z

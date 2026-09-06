@@ -221,12 +221,12 @@ describe("live-board-activity toggle (TRA-142)", () => {
       const project = await app.request("/v1/projects/traceai", { headers });
       assert.equal(project.status, 200);
       const projectBody = (await project.json()) as {
-        agent_playbook: { summary: string; agent_policy: { summary: string } };
-        default_workflow: { agent_policy: { summary: string } };
+        agent_playbook: { summary?: string; agent_policy: { summary: string } };
+        default_workflow: { agent_policy?: { summary: string } };
       };
-      assert.equal(projectBody.agent_playbook.summary, SUMMARY);
+      assert.equal(projectBody.agent_playbook.summary, undefined);
       assert.equal(projectBody.agent_playbook.agent_policy.summary, SUMMARY);
-      assert.equal(projectBody.default_workflow.agent_policy.summary, SUMMARY);
+      assert.equal(projectBody.default_workflow.agent_policy, undefined);
       assert.ok(
         !JSON.stringify(projectBody).includes("LIVE BOARD ACTIVITY"),
         "off must not inject the instruction",
@@ -262,12 +262,12 @@ describe("live-board-activity toggle (TRA-142)", () => {
         const expected = `${SUMMARY}${LIVE_BOARD_ACTIVITY_INSTRUCTION}`;
         const project = await app.request("/v1/projects/traceai", { headers });
         const projectBody = (await project.json()) as {
-          agent_playbook: { summary: string; agent_policy: { summary: string } };
-          default_workflow: { agent_policy: { summary: string } };
+          agent_playbook: { summary?: string; agent_policy: { summary: string } };
+          default_workflow: { agent_policy?: { summary: string } };
         };
-        assert.equal(projectBody.agent_playbook.summary, expected);
+        assert.equal(projectBody.agent_playbook.summary, undefined);
         assert.equal(projectBody.agent_playbook.agent_policy.summary, expected);
-        assert.equal(projectBody.default_workflow.agent_policy.summary, expected);
+        assert.equal(projectBody.default_workflow.agent_policy, undefined);
 
         const workflow = await app.request(
           "/v1/workflows/traceai-traceai-story",
