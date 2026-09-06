@@ -77,7 +77,9 @@ import {
   type Workflow,
   type WorkflowAgentPolicy,
   type WorkflowDocument,
+  type WorkflowEdgeRecord,
   type WorkflowStage,
+  type WorkflowStageRecord,
   lastStageKey,
 } from "./types.js";
 import { enforceExpectedTransition } from "./stage-conflict.js";
@@ -150,6 +152,14 @@ import {
   type WorkflowCanvasModel,
   type WorkflowMigrationImpact,
 } from "./workflow-editor.js";
+import {
+  GRAPH_EDITOR_UNSUPPORTED,
+  assembleGraphToDocument,
+  documentToGraphParts,
+  edgeRecordSlug,
+  parseWorkflowStorageModel,
+  stageRecordSlug,
+} from "./workflow-graph.js";
 
 export { WorkflowValidationError } from "./workflow-editor.js";
 
@@ -363,7 +373,7 @@ export class TraceService {
       ? await this.client.getEntryBySlug<Workflow>("workflow", workflowSlug)
       : (await this.listWorkflows(slug))[0] ?? null;
     const workflow_document = workflow
-      ? parseWorkflowDocument(workflow.fields.stages_json)
+      ? await this.loadWorkflowDocument(workflow)
       : null;
     return {
       project,
@@ -535,12 +545,219 @@ export class TraceService {
     await this.ensureReady();
     const workflow = await this.client.getEntryBySlug<Workflow>("workflow", slug);
     if (!workflow) return null;
-    const workflow_document = parseWorkflowDocument(workflow.fields.stages_json);
+    const workflow_document = await this.loadWorkflowDocument(workflow);
     return {
       workflow,
       stages: workflow_document.stages,
       workflow_document,
     };
+  }
+
+  async getWorkflowStage(
+    workflowSlug: string,
+    stageKey: string,
+  ): Promise<{
+    key: string;
+    name: string;
+    transitions: string[];
+    agent: WorkflowStage["agent"];
+  }> {
+    const result = await this.getWorkflow(workflowSlug);
+    if (!result) throw new NotFoundError(`Workflow not found: ${workflowSlug}`);
+    const stage = result.stages.find((item) => item.key === stageKey);
+    if (!stage) throw new NotFoundError(`Stage not found: ${stageKey}`);
+    return {
+      key: stage.key,
+      name: stage.name,
+      transitions: stage.transitions,
+      agent: stage.agent,
+    };
+  }
+
+  async convertLegacyWorkflowToGraph(slug: string): Promise<Workflow> {
+    await this.ensureReady();
+    const workflow = await this.client.getEntryBySlug<Workflow>("workflow", slug);
+    if (!workflow) throw new NotFoundError(`Workflow not found: ${slug}`);
+    if (parseWorkflowStorageModel(workflow.fields.storage_model) === "graph") {
+      return workflow;
+    }
+    return this.persistGraphWorkflow(
+      workflow,
+      parseWorkflowDocument(workflow.fields.stages_json),
+    );
+  }
+
+  private async loadWorkflowDocument(
+    workflow: Workflow,
+  ): Promise<WorkflowDocument> {
+    if (parseWorkflowStorageModel(workflow.fields.storage_model) !== "graph") {
+      return parseWorkflowDocument(workflow.fields.stages_json);
+    }
+    const [stages, edges] = await Promise.all([
+      this.listGraphStages(workflow.slug),
+      this.listGraphEdges(workflow.slug),
+    ]);
+    return assembleGraphToDocument({
+      agent_policy_json: workflow.fields.agent_policy_json,
+      ticket_templates_json: workflow.fields.ticket_templates_json,
+      stages: stages.map((entry) => ({
+        key: entry.fields.key,
+        name: entry.fields.name,
+        sort_order: entry.fields.sort_order,
+        agent_json: entry.fields.agent_json,
+      })),
+      edges: edges.map((entry) => ({
+        from_key: entry.fields.from_key,
+        to_key: entry.fields.to_key,
+        require_tokens_estimate: entry.fields.require_tokens_estimate,
+        require_playbook_description: entry.fields.require_playbook_description,
+      })),
+    });
+  }
+
+  private async listGraphStages(
+    workflowSlug: string,
+  ): Promise<WorkflowStageRecord[]> {
+    return this.listAllEntries<WorkflowStageRecord>("workflow_stage", {
+      status: "published",
+      field: "workflow",
+      in: [workflowSlug],
+    });
+  }
+
+  private async listGraphEdges(
+    workflowSlug: string,
+  ): Promise<WorkflowEdgeRecord[]> {
+    return this.listAllEntries<WorkflowEdgeRecord>("workflow_edge", {
+      status: "published",
+      field: "workflow",
+      in: [workflowSlug],
+    });
+  }
+
+  private assertLegacyEditor(workflow: Workflow): void {
+    if (parseWorkflowStorageModel(workflow.fields.storage_model) === "graph") {
+      throw new ValidationError(GRAPH_EDITOR_UNSUPPORTED);
+    }
+  }
+
+  private async persistGraphWorkflow(
+    workflow: Workflow,
+    doc: WorkflowDocument,
+  ): Promise<Workflow> {
+    const parts = documentToGraphParts(doc);
+    const [existingStages, existingEdges] = await Promise.all([
+      this.listGraphStages(workflow.slug),
+      this.listGraphEdges(workflow.slug),
+    ]);
+    const stageByKey = new Map(
+      existingStages.map((entry) => [entry.fields.key, entry]),
+    );
+    const edgeByPair = new Map(
+      existingEdges.map((entry) => [
+        `${entry.fields.from_key}\0${entry.fields.to_key}`,
+        entry,
+      ]),
+    );
+    const keepStages = new Set<string>();
+    for (const stage of parts.stages) {
+      keepStages.add(stage.key);
+      const fields = {
+        workflow: workflow.slug,
+        key: stage.key,
+        name: stage.name,
+        sort_order: stage.sort_order,
+        catalog_key: stage.catalog_key ?? stage.key,
+        agent_json: stage.agent ? JSON.stringify(stage.agent) : "",
+      };
+      const existing = stageByKey.get(stage.key);
+      if (existing) {
+        const updated = await this.client.updateEntry<WorkflowStageRecord>(
+          "workflow_stage",
+          existing.id,
+          { fields },
+        );
+        await this.ensurePublished("workflow_stage", updated);
+      } else {
+        const created = await this.client.createEntry<WorkflowStageRecord>(
+          "workflow_stage",
+          {
+            slug: await allocateUniqueEntrySlug(
+              this.client,
+              "workflow_stage",
+              stageRecordSlug(workflow.slug, stage.key),
+            ),
+            status: "published",
+            fields,
+          },
+        );
+        await this.ensurePublished("workflow_stage", created);
+      }
+    }
+    for (const existing of existingStages) {
+      if (!keepStages.has(existing.fields.key)) {
+        await this.client.deleteEntry("workflow_stage", existing.id);
+      }
+    }
+
+    const keepEdges = new Set<string>();
+    for (const edge of parts.edges) {
+      const pair = `${edge.from_key}\0${edge.to_key}`;
+      keepEdges.add(pair);
+      const fields = {
+        workflow: workflow.slug,
+        from_key: edge.from_key,
+        to_key: edge.to_key,
+        require_tokens_estimate: edge.require_tokens_estimate,
+        require_playbook_description: edge.require_playbook_description,
+      };
+      const existing = edgeByPair.get(pair);
+      if (existing) {
+        const updated = await this.client.updateEntry<WorkflowEdgeRecord>(
+          "workflow_edge",
+          existing.id,
+          { fields },
+        );
+        await this.ensurePublished("workflow_edge", updated);
+      } else {
+        const created = await this.client.createEntry<WorkflowEdgeRecord>(
+          "workflow_edge",
+          {
+            slug: await allocateUniqueEntrySlug(
+              this.client,
+              "workflow_edge",
+              edgeRecordSlug(workflow.slug, edge.from_key, edge.to_key),
+            ),
+            status: "published",
+            fields,
+          },
+        );
+        await this.ensurePublished("workflow_edge", created);
+      }
+    }
+    for (const existing of existingEdges) {
+      const pair = `${existing.fields.from_key}\0${existing.fields.to_key}`;
+      if (!keepEdges.has(pair)) {
+        await this.client.deleteEntry("workflow_edge", existing.id);
+      }
+    }
+
+    const updated = await this.client.updateEntry<Workflow>(
+      "workflow",
+      workflow.id,
+      {
+        fields: {
+          storage_model: "graph",
+          agent_policy_json: JSON.stringify(parts.agent_policy),
+          ticket_templates_json: parts.ticket_templates
+            ? JSON.stringify(parts.ticket_templates)
+            : "",
+          stages_json: serializeWorkflowDocument(doc),
+        },
+      },
+    );
+    await this.ensurePublished("workflow", updated);
+    return updated;
   }
 
   async createWorkflow(input: {
@@ -569,6 +786,7 @@ export class TraceService {
         name: input.name,
         project: input.project,
         stages_json: serializeWorkflowDocument(document),
+        storage_model: "legacy_json",
       },
     });
     await this.ensurePublished("workflow", workflow);
@@ -637,7 +855,7 @@ export class TraceService {
     await this.ensureReady();
     const workflow = await this.client.getEntryBySlug<Workflow>("workflow", slug);
     if (!workflow) throw new NotFoundError(`Workflow not found: ${slug}`);
-    const current = parseWorkflowDocument(workflow.fields.stages_json);
+    const current = await this.loadWorkflowDocument(workflow);
     let nextDoc: WorkflowDocument | null = null;
     if (input.document) {
       nextDoc = {
@@ -679,6 +897,17 @@ export class TraceService {
         throw new WorkflowValidationError(issues);
       }
     }
+    if (nextDoc && parseWorkflowStorageModel(workflow.fields.storage_model) === "graph") {
+      const graph = await this.persistGraphWorkflow(workflow, nextDoc);
+      if (input.name != null && input.name !== graph.fields.name) {
+        const renamed = await this.client.updateEntry<Workflow>("workflow", graph.id, {
+          fields: { name: input.name },
+        });
+        await this.ensurePublished("workflow", renamed);
+        return renamed;
+      }
+      return graph;
+    }
     const updated = await this.client.updateEntry<Workflow>("workflow", workflow.id, {
       fields: {
         ...(input.name != null ? { name: input.name } : {}),
@@ -716,7 +945,8 @@ export class TraceService {
     await this.ensureReady();
     const workflow = await this.client.getEntryBySlug<Workflow>("workflow", slug);
     if (!workflow) throw new NotFoundError(`Workflow not found: ${slug}`);
-    const current = parseWorkflowDocument(workflow.fields.stages_json);
+    this.assertLegacyEditor(workflow);
+    const current = await this.loadWorkflowDocument(workflow);
     const pending = input.pending
       ? {
           ...input.pending,
@@ -813,7 +1043,8 @@ export class TraceService {
     await this.ensureReady();
     const workflow = await this.client.getEntryBySlug<Workflow>("workflow", slug);
     if (!workflow) throw new NotFoundError(`Workflow not found: ${slug}`);
-    const current = parseWorkflowDocument(workflow.fields.stages_json);
+    this.assertLegacyEditor(workflow);
+    const current = await this.loadWorkflowDocument(workflow);
     const editable = effectiveEditableDocument(current);
     const issues = validateWorkflowDocument(editable);
     if (issues.length) throw new WorkflowValidationError(issues);
@@ -921,7 +1152,7 @@ export class TraceService {
     await this.ensurePublished("workflow", entry);
     return {
       workflow: entry,
-      workflow_document: parseWorkflowDocument(entry.fields.stages_json),
+      workflow_document: await this.loadWorkflowDocument(entry),
       restored_from: restored.restoredFrom,
     };
   }
@@ -1399,7 +1630,7 @@ export class TraceService {
       );
     }
 
-    const doc = parseWorkflowDocument(workflow.fields.stages_json);
+    const doc = await this.loadWorkflowDocument(workflow);
     const stages = doc.stages;
     if (input.stage && !stages.some((s) => s.key === input.stage)) {
       throw new ValidationError(
@@ -1528,8 +1759,7 @@ export class TraceService {
         ticket.fields.workflow,
       );
       if (workflow) {
-        const policy = parseWorkflowDocument(workflow.fields.stages_json)
-          .agent_policy;
+        const policy = (await this.loadWorkflowDocument(workflow)).agent_policy;
         assertNoErrors(validateTicketDescription(input.description, policy));
       }
     }
@@ -1791,7 +2021,7 @@ export class TraceService {
       ticket.fields.workflow,
     );
     if (!workflow) throw new NotFoundError(`Workflow not found: ${ticket.fields.workflow}`);
-    const doc = parseWorkflowDocument(workflow.fields.stages_json);
+    const doc = await this.loadWorkflowDocument(workflow);
     const stages = doc.stages;
     const fromStage = stages.find((s) => s.key === ticket.fields.stage);
     await enforceExpectedTransition({
@@ -1951,7 +2181,7 @@ export class TraceService {
           child.fields.workflow,
         );
         if (!workflow) continue;
-        const stages = parseWorkflowDocument(workflow.fields.stages_json).stages;
+        const stages = (await this.loadWorkflowDocument(workflow)).stages;
         const stage = stages.find((s) => s.key === child.fields.stage);
         if (stage?.agent?.require_human_approval_on_exit !== true) continue;
         const childUpdated = await this.writeReviewVerdict(child, {
@@ -1981,7 +2211,7 @@ export class TraceService {
       ticket.fields.workflow,
     );
     if (!workflow) throw new NotFoundError(`Workflow not found: ${ticket.fields.workflow}`);
-    const stages = parseWorkflowDocument(workflow.fields.stages_json).stages;
+    const stages = (await this.loadWorkflowDocument(workflow)).stages;
     const stage = stages.find((s) => s.key === ticket.fields.stage);
     if (!stage) throw new ValidationError("Invalid workflow stage for review verdict");
     assertNoErrors(

@@ -129,7 +129,7 @@ export default async function ProjectSettingsPage({
     });
     if (requestedWorkflow && !selectedWorkflow) notFound();
     if (selectedWorkflow) {
-      const workflow = (await client.getWorkflow(selectedWorkflow)) as {
+      const workflow = (await client.getWorkflow(selectedWorkflow, "full")) as {
         slug: string;
         name: string;
         project: string;

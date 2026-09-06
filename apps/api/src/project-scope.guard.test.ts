@@ -37,6 +37,7 @@ const PROJECT_SCOPED = [
   "PATCH /v1/wiki-pages/:slug",
   "GET /v1/workflows",
   "GET /v1/workflows/:slug",
+  "GET /v1/workflows/:slug/stages/:key",
   "POST /v1/workflows",
   "PATCH /v1/workflows/:slug",
   "POST /v1/workflows/:slug/draft",
